@@ -55,4 +55,8 @@ pub struct Args {
     /// Stream output as files are processed (useful for large codebases)
     #[arg(short = 's', long)]
     pub stream: bool,
+
+    /// Print stats (file count, total size, time taken)
+    #[arg(long)]
+    pub stats: bool,
 }

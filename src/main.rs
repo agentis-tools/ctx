@@ -7,6 +7,7 @@ mod walker;
 
 use std::env;
 use std::process;
+use std::time::Instant;
 
 use clap::Parser;
 
@@ -24,6 +25,8 @@ fn main() {
 }
 
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let start = Instant::now();
+
     // Determine root directory
     let root = env::current_dir()?;
 
@@ -65,12 +68,16 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         result
     };
 
-    // Print stats to stderr
-    eprintln!(
-        "Generated context: {} files, {} total",
-        result.file_count,
-        walker::format_size(result.total_size)
-    );
+    // Print stats to stderr (only if --stats flag is passed)
+    if args.stats {
+        let elapsed = start.elapsed();
+        eprintln!(
+            "Generated context: {} files, {} in {:.2?}",
+            result.file_count,
+            walker::format_size(result.total_size),
+            elapsed
+        );
+    }
 
     Ok(())
 }
