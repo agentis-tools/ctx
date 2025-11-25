@@ -46,16 +46,8 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Generate context (streaming or buffered)
-    let result = if args.stream {
-        stream_context(
-            &root,
-            &entries,
-            &args.format,
-            !args.no_tree,
-            args.show_sizes,
-        )?
-    } else {
+    // Generate context (streaming by default, buffered with --no-stream)
+    let result = if args.no_stream {
         let result = generate_context(
             &root,
             &entries,
@@ -63,9 +55,17 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             !args.no_tree,
             args.show_sizes,
         )?;
-        // Output to stdout (only in non-streaming mode)
+        // Output to stdout (only in buffered mode)
         println!("{}", result.content);
         result
+    } else {
+        stream_context(
+            &root,
+            &entries,
+            &args.format,
+            !args.no_tree,
+            args.show_sizes,
+        )?
     };
 
     // Print stats to stderr (only if --stats flag is passed)

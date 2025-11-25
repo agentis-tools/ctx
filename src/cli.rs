@@ -52,9 +52,9 @@ pub struct Args {
     #[arg(long)]
     pub no_tree: bool,
 
-    /// Stream output as files are processed (useful for large codebases)
-    #[arg(short = 's', long)]
-    pub stream: bool,
+    /// Buffer all output before printing (instead of streaming)
+    #[arg(long)]
+    pub no_stream: bool,
 
     /// Print stats (file count, total size, time taken)
     #[arg(long)]
