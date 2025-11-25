@@ -51,4 +51,8 @@ pub struct Args {
     /// Disable project tree in output
     #[arg(long)]
     pub no_tree: bool,
+
+    /// Stream output as files are processed (useful for large codebases)
+    #[arg(short = 's', long)]
+    pub stream: bool,
 }

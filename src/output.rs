@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
 use crate::cli::OutputFormat;
@@ -70,6 +70,77 @@ pub fn generate_context(
 
     Ok(ContextResult {
         content,
+        file_count: processed_count,
+        total_size,
+    })
+}
+
+/// Stream context output, printing each file as it's processed.
+pub fn stream_context(
+    root: &Path,
+    entries: &[FileEntry],
+    format: &OutputFormat,
+    include_tree: bool,
+    show_sizes: bool,
+) -> io::Result<ContextResult> {
+    let formatter = get_formatter(format);
+    let mut stdout = io::stdout().lock();
+
+    // Determine root name for tree
+    let root_name = root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "project".to_string());
+
+    // Generate tree if requested
+    let tree_block = if include_tree {
+        let tree = generate_tree(&root_name, entries, show_sizes);
+        Some(formatter.format_tree(&tree))
+    } else {
+        None
+    };
+
+    // Print opening
+    let start = formatter.stream_start(tree_block.as_deref());
+    writeln!(stdout, "{}", start)?;
+
+    // Stream file blocks
+    let mut total_size = 0u64;
+    let mut processed_count = 0usize;
+    let separator = formatter.separator();
+
+    for (i, entry) in entries.iter().enumerate() {
+        match read_file_content(&entry.absolute_path) {
+            Ok(content) => {
+                let block = formatter.format_file(entry, &content);
+                if i > 0 {
+                    write!(stdout, "{}", separator)?;
+                }
+                write!(stdout, "{}", block)?;
+                stdout.flush()?;
+                total_size += entry.size;
+                processed_count += 1;
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: could not read {}: {}",
+                    entry.relative_path.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Print closing
+    let end = formatter.stream_end();
+    if !end.is_empty() {
+        writeln!(stdout, "\n{}", end)?;
+    } else {
+        writeln!(stdout)?;
+    }
+
+    Ok(ContextResult {
+        content: String::new(), // Not used in streaming mode
         file_count: processed_count,
         total_size,
     })

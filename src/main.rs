@@ -11,7 +11,7 @@ use std::process;
 use clap::Parser;
 
 use cli::Args;
-use output::generate_context;
+use output::{generate_context, stream_context};
 use walker::{discover_files, WalkerConfig};
 
 fn main() {
@@ -43,17 +43,27 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Generate context
-    let result = generate_context(
-        &root,
-        &entries,
-        &args.format,
-        !args.no_tree,
-        args.show_sizes,
-    )?;
-
-    // Output to stdout
-    println!("{}", result.content);
+    // Generate context (streaming or buffered)
+    let result = if args.stream {
+        stream_context(
+            &root,
+            &entries,
+            &args.format,
+            !args.no_tree,
+            args.show_sizes,
+        )?
+    } else {
+        let result = generate_context(
+            &root,
+            &entries,
+            &args.format,
+            !args.no_tree,
+            args.show_sizes,
+        )?;
+        // Output to stdout (only in non-streaming mode)
+        println!("{}", result.content);
+        result
+    };
 
     // Print stats to stderr
     eprintln!(

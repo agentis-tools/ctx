@@ -12,6 +12,15 @@ pub trait Formatter {
 
     /// Wrap the tree block and files block into final output.
     fn wrap(&self, tree_block: Option<&str>, files_block: &str) -> String;
+
+    /// Get the opening wrapper for streaming output.
+    fn stream_start(&self, tree_block: Option<&str>) -> String;
+
+    /// Get the closing wrapper for streaming output.
+    fn stream_end(&self) -> String;
+
+    /// Get the separator between file blocks.
+    fn separator(&self) -> &'static str;
 }
 
 /// XML formatter.
@@ -51,6 +60,21 @@ impl Formatter for XmlFormatter {
             ),
         }
     }
+
+    fn stream_start(&self, tree_block: Option<&str>) -> String {
+        match tree_block {
+            Some(tree) => format!("<context>\n{}\n<project_files>", tree),
+            None => "<context>\n<project_files>".to_string(),
+        }
+    }
+
+    fn stream_end(&self) -> String {
+        "</project_files>\n</context>".to_string()
+    }
+
+    fn separator(&self) -> &'static str {
+        "\n"
+    }
 }
 
 /// Markdown formatter.
@@ -78,6 +102,21 @@ impl Formatter for MarkdownFormatter {
             None => format!("# Project Context\n\n{}", files_block),
         }
     }
+
+    fn stream_start(&self, tree_block: Option<&str>) -> String {
+        match tree_block {
+            Some(tree) => format!("# Project Context\n\n{}\n", tree),
+            None => "# Project Context\n".to_string(),
+        }
+    }
+
+    fn stream_end(&self) -> String {
+        String::new()
+    }
+
+    fn separator(&self) -> &'static str {
+        "\n\n"
+    }
 }
 
 /// Plain text formatter.
@@ -98,6 +137,21 @@ impl Formatter for PlainFormatter {
             Some(tree) => format!("{}\n{}", tree, files_block),
             None => files_block.to_string(),
         }
+    }
+
+    fn stream_start(&self, tree_block: Option<&str>) -> String {
+        match tree_block {
+            Some(tree) => format!("{}\n", tree),
+            None => String::new(),
+        }
+    }
+
+    fn stream_end(&self) -> String {
+        String::new()
+    }
+
+    fn separator(&self) -> &'static str {
+        "\n"
     }
 }
 
