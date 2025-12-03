@@ -1,5 +1,5 @@
 [package]
-name = "context"
+name = "ctx"
 version = "0.1.0"
 edition = "2021"
 description = "Fast CLI tool to generate AI-ready context from your codebase"
@@ -9,8 +9,12 @@ homepage = "https://github.com/yourusername/context"
 readme = "README.md"
 keywords = ["cli", "llm", "ai", "context", "prompt"]
 categories = ["command-line-utilities", "development-tools"]
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Johan Öhman Saldes <johan@itkonsult.net>"]
 exclude = [".github/"]
+
+[[bin]]
+name = "ctx"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

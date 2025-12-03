@@ -11,16 +11,16 @@ pub enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "context")]
+#[command(name = "ctx")]
 #[command(about = "Generate formatted context for AI assistants")]
 #[command(version)]
 #[command(after_help = r#"EXAMPLES:
-    context                           # All files in current directory
-    context "src/**/*.rs"             # Rust files matching glob
-    context src/ Cargo.toml           # Specific paths
-    context --format md               # Markdown output
-    context -i "tests/" src/          # Ignore tests directory
-    context --no-gitignore            # Include gitignored files
+    ctx                           # All files in current directory
+    ctx "src/**/*.rs"             # Rust files matching glob
+    ctx src/ Cargo.toml           # Specific paths
+    ctx --format md               # Markdown output
+    ctx -i "tests/" src/          # Ignore tests directory
+    ctx --no-gitignore            # Include gitignored files
 "#)]
 pub struct Args {
     /// File patterns or paths to include (glob syntax supported)
