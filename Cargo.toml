@@ -44,6 +44,10 @@ thiserror = "1.0"
 # Phase 2: DuckDB for analytical queries
 duckdb = { version = "1.0", features = ["bundled"] }
 
+# Phase 4: File watching for incremental updates
+notify = "6.1"
+notify-debouncer-mini = "0.4"
+
 [dev-dependencies]
 tempfile = "3"
 

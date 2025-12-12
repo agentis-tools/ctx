@@ -38,7 +38,8 @@ pub struct IndexResult {
 
 /// Indexer for building the code intelligence database.
 pub struct Indexer {
-    db: Database,
+    /// The database connection (pub for watch mode access).
+    pub db: Database,
     parser: CodeParser,
     root: PathBuf,
     verbose: bool,
@@ -410,6 +411,131 @@ pub fn open_database(root: &Path) -> io::Result<Database> {
     }
 
     Database::open(&db_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+}
+
+/// Watch mode for automatic reindexing.
+pub mod watch {
+    use std::path::Path;
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    use notify::RecursiveMode;
+    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+
+    use super::Indexer;
+    use crate::parser::Language;
+
+    /// Start watching the codebase for changes and reindex automatically.
+    pub fn watch_and_index(root: &Path, verbose: bool) -> std::io::Result<()> {
+        let root = root.canonicalize()?;
+
+        // Do initial index
+        eprintln!("Performing initial index...");
+        let mut indexer = Indexer::new(&root, verbose)?;
+        let result = indexer.index()?;
+        eprintln!(
+            "Initial index complete: {} files, {} symbols",
+            result.files_indexed + result.files_skipped,
+            result.symbols_extracted
+        );
+
+        // Set up file watcher with debouncing
+        let (tx, rx) = channel();
+
+        let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        debouncer
+            .watcher()
+            .watch(&root, RecursiveMode::Recursive)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        eprintln!("\nWatching for changes... (press Ctrl+C to stop)");
+
+        // Process file change events
+        loop {
+            match rx.recv() {
+                Ok(Ok(events)) => {
+                    let mut reindex_needed = false;
+
+                    for event in events {
+                        if event.kind == DebouncedEventKind::Any {
+                            let path = &event.path;
+
+                            // Skip non-source files and .ctx directory
+                            if path.starts_with(root.join(super::CTX_DIR)) {
+                                continue;
+                            }
+
+                            // Check if it's a supported source file
+                            let lang = Language::from_path(path);
+                            if lang == Language::Unknown {
+                                continue;
+                            }
+
+                            // Check if file exists (handle deletions)
+                            if !path.exists() {
+                                let rel_path = path
+                                    .strip_prefix(&root)
+                                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                                    .unwrap_or_default();
+
+                                if verbose {
+                                    eprintln!("Removed: {}", rel_path);
+                                }
+
+                                // Delete from database
+                                if let Err(e) = indexer.db.delete_file(&rel_path) {
+                                    eprintln!("Warning: failed to remove {}: {}", rel_path, e);
+                                }
+                                continue;
+                            }
+
+                            // Index the changed file
+                            match indexer.index_file(path) {
+                                Ok(true) => {
+                                    let rel_path = path
+                                        .strip_prefix(&root)
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|_| path.display().to_string());
+
+                                    if verbose {
+                                        eprintln!("Reindexed: {}", rel_path);
+                                    } else {
+                                        eprint!(".");
+                                    }
+                                    reindex_needed = true;
+                                }
+                                Ok(false) => {
+                                    // File unchanged
+                                }
+                                Err(e) => {
+                                    let rel_path = path
+                                        .strip_prefix(&root)
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|_| path.display().to_string());
+                                    eprintln!("\nWarning: failed to index {}: {}", rel_path, e);
+                                }
+                            }
+                        }
+                    }
+
+                    if reindex_needed && !verbose {
+                        eprintln!(); // Newline after dots
+                    }
+                }
+                Ok(Err(error)) => {
+                    eprintln!("Watch error: {:?}", error);
+                }
+                Err(e) => {
+                    eprintln!("Channel error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

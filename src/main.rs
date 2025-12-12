@@ -104,7 +104,8 @@ fn run_index(watch: bool, verbose: bool) -> Result<(), Box<dyn std::error::Error
     let root = env::current_dir()?;
 
     if watch {
-        eprintln!("Watch mode not yet implemented");
+        // Run in watch mode
+        index::watch::watch_and_index(&root, verbose)?;
         return Ok(());
     }
 
