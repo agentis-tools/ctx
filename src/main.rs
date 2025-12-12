@@ -39,7 +39,13 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Search { query, limit, output }) => run_search(&query, limit, &output),
         Some(Command::Source { symbol }) => run_source(&symbol),
         Some(Command::Explain { symbol }) => run_explain(&symbol),
-        Some(Command::Embed { force, verbose, batch_size, openai }) => run_embed(force, verbose, batch_size, openai),
+        Some(Command::Embed { force, verbose, batch_size, openai, watch }) => {
+            if watch {
+                run_embed_watch(verbose, batch_size, openai)
+            } else {
+                run_embed(force, verbose, batch_size, openai)
+            }
+        }
         Some(Command::Semantic { query, limit, output, openai }) => run_semantic(&query, limit, &output, openai),
         Some(Command::Complexity { threshold, warnings_only, output }) => run_complexity(threshold, warnings_only, &output),
         Some(Command::Duplicates { similarity, min_lines, output }) => run_duplicates(similarity, min_lines, &output),
@@ -177,6 +183,127 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
         elapsed.as_secs_f64(),
         embedded as f64 / elapsed.as_secs_f64()
     );
+
+    Ok(())
+}
+
+/// Watch for index changes and auto-embed new symbols.
+fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use embeddings::{EmbeddingProvider, embed_missing_symbols};
+    use std::time::Duration;
+    use std::sync::mpsc::channel;
+    use notify::RecursiveMode;
+    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+
+    let root = env::current_dir()?;
+    let ctx_dir = root.join(".ctx");
+    let db_path = ctx_dir.join("codebase.sqlite");
+
+    // Create provider based on flag
+    let provider: Box<dyn EmbeddingProvider> = if use_openai {
+        use embeddings::openai::OpenAIProvider;
+        let p = OpenAIProvider::from_env().map_err(|_| {
+            "OPENAI_API_KEY environment variable not set.\n\
+             Set it with: export OPENAI_API_KEY=sk-..."
+        })?;
+        Box::new(p)
+    } else {
+        use embeddings::local::LocalProvider;
+        eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
+        let p = LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
+        Box::new(p)
+    };
+
+    println!("Using embedding provider: {} (dim={})", provider.name(), provider.dimension());
+
+    // Do initial embedding
+    {
+        let db = index::open_database(&root)?;
+        let total_symbols = db.get_stats()?.symbols;
+        let existing = db.count_embeddings()?;
+        
+        if existing < total_symbols {
+            println!("Initial embedding: {} symbols missing embeddings...", total_symbols - existing);
+            let embedded = embed_missing_symbols(&db, provider.as_ref(), batch_size, None)?;
+            println!("Embedded {} symbols", embedded);
+        } else {
+            println!("All {} symbols already have embeddings", total_symbols);
+        }
+    }
+
+    // Set up file watcher on the database file
+    let (tx, rx) = channel();
+
+    let mut debouncer = new_debouncer(Duration::from_secs(2), tx)
+        .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    // Watch the .ctx directory for database changes
+    if ctx_dir.exists() {
+        debouncer
+            .watcher()
+            .watch(&ctx_dir, RecursiveMode::NonRecursive)
+            .map_err(|e| format!("Failed to watch .ctx directory: {}", e))?;
+    }
+
+    println!("\nWatching for index changes... (press Ctrl+C to stop)");
+    println!("Tip: Run 'ctx index --watch' in another terminal to auto-index file changes");
+
+    // Process database change events
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                // Check if the database file changed
+                let db_changed = events.iter().any(|e| {
+                    e.kind == DebouncedEventKind::Any && 
+                    e.path.file_name().map(|n| n == "codebase.sqlite").unwrap_or(false)
+                });
+
+                if db_changed {
+                    // Re-open database and check for new symbols
+                    match index::open_database(&root) {
+                        Ok(db) => {
+                            let total = db.get_stats().map(|s| s.symbols).unwrap_or(0);
+                            let existing = db.count_embeddings().unwrap_or(0);
+                            
+                            if existing < total {
+                                let missing = total - existing;
+                                if verbose {
+                                    eprintln!("\nIndex updated: {} new symbols to embed", missing);
+                                }
+                                
+                                match embed_missing_symbols(&db, provider.as_ref(), batch_size, None) {
+                                    Ok(embedded) => {
+                                        if embedded > 0 {
+                                            if verbose {
+                                                eprintln!("Embedded {} symbols", embedded);
+                                            } else {
+                                                eprint!("+{} ", embedded);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("\nWarning: failed to embed: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if verbose {
+                                eprintln!("\nWarning: failed to open database: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("\nWatch error: {:?}", e);
+            }
+            Err(e) => {
+                eprintln!("\nChannel error: {}", e);
+                break;
+            }
+        }
+    }
 
     Ok(())
 }

@@ -138,7 +138,22 @@ ctx embed --verbose         # Show progress
 ctx embed --force           # Re-embed all symbols (even if already embedded)
 ctx embed --batch-size 100  # Process symbols in batches of 100
 ctx embed --openai          # Use OpenAI instead of local model
+ctx embed --watch           # Watch for index changes and auto-embed new symbols
 ```
+
+### Watch Mode
+
+Keep embeddings in sync with the index automatically:
+
+```bash
+# Terminal 1: Watch for file changes and reindex
+ctx index --watch
+
+# Terminal 2: Watch for index changes and auto-embed
+ctx embed --watch
+```
+
+When the index is updated (new symbols added), the embed watcher will automatically generate embeddings for the new symbols.
 
 ### What Gets Embedded
 

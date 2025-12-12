@@ -135,6 +135,10 @@ pub enum Command {
         /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
         #[arg(long)]
         openai: bool,
+
+        /// Watch for index changes and auto-embed new symbols
+        #[arg(long, short)]
+        watch: bool,
     },
 
     /// Semantic search using embeddings (requires embeddings to be generated)
