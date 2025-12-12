@@ -5,6 +5,7 @@
 
 mod rust;
 mod solidity;
+mod typescript;
 
 use std::path::Path;
 
@@ -15,7 +16,9 @@ use crate::db::ParseResult;
 pub enum Language {
     Rust,
     TypeScript,
+    Tsx,
     JavaScript,
+    Jsx,
     Python,
     Go,
     Solidity,
@@ -27,8 +30,10 @@ impl Language {
     pub fn from_path(path: &Path) -> Self {
         match path.extension().and_then(|e| e.to_str()) {
             Some("rs") => Language::Rust,
-            Some("ts") | Some("tsx") => Language::TypeScript,
-            Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => Language::JavaScript,
+            Some("ts") => Language::TypeScript,
+            Some("tsx") => Language::Tsx,
+            Some("js") | Some("mjs") | Some("cjs") => Language::JavaScript,
+            Some("jsx") => Language::Jsx,
             Some("py") | Some("pyi") => Language::Python,
             Some("go") => Language::Go,
             Some("sol") => Language::Solidity,
@@ -41,7 +46,9 @@ impl Language {
         match self {
             Language::Rust => "rust",
             Language::TypeScript => "typescript",
+            Language::Tsx => "tsx",
             Language::JavaScript => "javascript",
+            Language::Jsx => "jsx",
             Language::Python => "python",
             Language::Go => "go",
             Language::Solidity => "solidity",
@@ -54,6 +61,7 @@ impl Language {
 pub struct CodeParser {
     rust_parser: rust::RustParser,
     solidity_parser: solidity::SolidityParser,
+    typescript_parser: typescript::TypeScriptParser,
 }
 
 impl CodeParser {
@@ -62,6 +70,7 @@ impl CodeParser {
         Self {
             rust_parser: rust::RustParser::new(),
             solidity_parser: solidity::SolidityParser::new(),
+            typescript_parser: typescript::TypeScriptParser::new(),
         }
     }
 
@@ -73,7 +82,19 @@ impl CodeParser {
         match language {
             Language::Rust => self.rust_parser.parse(&file_path, source),
             Language::Solidity => self.solidity_parser.parse(&file_path, source),
-            // TODO: Add other language parsers
+            Language::TypeScript => {
+                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::TypeScript)
+            }
+            Language::Tsx => {
+                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::Tsx)
+            }
+            Language::JavaScript => {
+                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::JavaScript)
+            }
+            Language::Jsx => {
+                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::Jsx)
+            }
+            // TODO: Add other language parsers (Python, Go)
             _ => {
                 // Return a minimal result for unsupported languages
                 Some(ParseResult {
@@ -89,7 +110,15 @@ impl CodeParser {
 
     /// Check if a language is supported for full parsing.
     pub fn is_supported(&self, path: &Path) -> bool {
-        matches!(Language::from_path(path), Language::Rust | Language::Solidity)
+        matches!(
+            Language::from_path(path),
+            Language::Rust
+                | Language::Solidity
+                | Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Jsx
+        )
     }
 }
 
@@ -148,7 +177,9 @@ mod tests {
     fn test_language_detection() {
         assert_eq!(Language::from_path(Path::new("main.rs")), Language::Rust);
         assert_eq!(Language::from_path(Path::new("app.ts")), Language::TypeScript);
+        assert_eq!(Language::from_path(Path::new("App.tsx")), Language::Tsx);
         assert_eq!(Language::from_path(Path::new("script.js")), Language::JavaScript);
+        assert_eq!(Language::from_path(Path::new("Button.jsx")), Language::Jsx);
         assert_eq!(Language::from_path(Path::new("main.py")), Language::Python);
         assert_eq!(Language::from_path(Path::new("main.go")), Language::Go);
         assert_eq!(Language::from_path(Path::new("Token.sol")), Language::Solidity);
