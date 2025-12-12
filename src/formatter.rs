@@ -173,6 +173,7 @@ pub fn get_formatter(format: &crate::cli::OutputFormat) -> Box<dyn Formatter> {
         OutputFormat::Xml => Box::new(XmlFormatter),
         OutputFormat::Markdown | OutputFormat::Md => Box::new(MarkdownFormatter),
         OutputFormat::Plain => Box::new(PlainFormatter),
+        OutputFormat::Json => Box::new(PlainFormatter), // TODO: Implement JSON formatter
     }
 }
 

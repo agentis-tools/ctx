@@ -166,6 +166,7 @@ fn get_separator(format: &OutputFormat) -> String {
         OutputFormat::Xml => "\n".to_string(),
         OutputFormat::Markdown | OutputFormat::Md => "\n\n".to_string(),
         OutputFormat::Plain => "\n".to_string(),
+        OutputFormat::Json => ",\n".to_string(),
     }
 }
 
