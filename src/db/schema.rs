@@ -96,6 +96,36 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_name);
             CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
             CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
+
+            -- Full-text search index for semantic search
+            CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
+                id,
+                name,
+                kind,
+                signature,
+                brief,
+                docstring,
+                content='symbols',
+                content_rowid='rowid'
+            );
+
+            -- Triggers to keep FTS index in sync
+            CREATE TRIGGER IF NOT EXISTS symbols_ai AFTER INSERT ON symbols BEGIN
+                INSERT INTO symbol_fts(rowid, id, name, kind, signature, brief, docstring)
+                VALUES (NEW.rowid, NEW.id, NEW.name, NEW.kind, NEW.signature, NEW.brief, NEW.docstring);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS symbols_ad AFTER DELETE ON symbols BEGIN
+                INSERT INTO symbol_fts(symbol_fts, rowid, id, name, kind, signature, brief, docstring)
+                VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.kind, OLD.signature, OLD.brief, OLD.docstring);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
+                INSERT INTO symbol_fts(symbol_fts, rowid, id, name, kind, signature, brief, docstring)
+                VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.kind, OLD.signature, OLD.brief, OLD.docstring);
+                INSERT INTO symbol_fts(rowid, id, name, kind, signature, brief, docstring)
+                VALUES (NEW.rowid, NEW.id, NEW.name, NEW.kind, NEW.signature, NEW.brief, NEW.docstring);
+            END;
             "#,
         )
     }
@@ -384,6 +414,122 @@ impl Database {
         let rows = stmt.query_map([], |row| row.get(0))?;
         rows.collect()
     }
+
+    /// Semantic search using FTS5 full-text search.
+    /// Searches across name, signature, brief, and docstring fields.
+    pub fn semantic_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64)>> {
+        // Preprocess query: split into keywords, handle natural language
+        let keywords = preprocess_search_query(query);
+        
+        if keywords.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build FTS5 query with OR logic for broader matches
+        let fts_query = keywords.join(" OR ");
+
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT 
+                s.id, s.file_path, s.name, s.qualified_name, s.kind, s.visibility,
+                s.signature, s.brief, s.docstring, s.line_start, s.line_end,
+                s.col_start, s.col_end, s.parent_id, s.source,
+                bm25(symbol_fts) as rank
+            FROM symbol_fts
+            JOIN symbols s ON symbol_fts.id = s.id
+            WHERE symbol_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![fts_query, limit], |row| {
+            let symbol = symbol_from_row(row);
+            let rank: f64 = row.get(15)?;
+            // Convert BM25 score (negative, lower is better) to a 0-1 relevance score
+            let relevance = 1.0 / (1.0 - rank);
+            Ok((symbol, relevance))
+        })?;
+
+        rows.collect()
+    }
+
+    /// Hybrid search combining exact match with semantic search.
+    pub fn hybrid_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64, String)>> {
+        let mut results: std::collections::HashMap<String, (Symbol, f64, String)> = 
+            std::collections::HashMap::new();
+
+        // 1. Exact name matches (highest priority)
+        let exact_matches = self.find_symbols(query, limit / 2)?;
+        for symbol in exact_matches {
+            let score = if symbol.name.eq_ignore_ascii_case(query) {
+                1.0  // Exact match
+            } else if symbol.name.to_lowercase().starts_with(&query.to_lowercase()) {
+                0.9  // Prefix match
+            } else {
+                0.7  // Contains match
+            };
+            results.insert(symbol.id.clone(), (symbol, score, "exact".to_string()));
+        }
+
+        // 2. Semantic matches (FTS5)
+        if let Ok(semantic_matches) = self.semantic_search(query, limit / 2) {
+            for (symbol, relevance) in semantic_matches {
+                results.entry(symbol.id.clone())
+                    .and_modify(|(_, existing_score, _)| {
+                        *existing_score = existing_score.max(relevance);
+                    })
+                    .or_insert((symbol, relevance, "semantic".to_string()));
+            }
+        }
+
+        // Sort by score and return
+        let mut results: Vec<_> = results.into_values().collect();
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit as usize);
+
+        Ok(results)
+    }
+
+    /// Rebuild the FTS index (useful after schema changes).
+    pub fn rebuild_fts_index(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            INSERT INTO symbol_fts(symbol_fts) VALUES('rebuild');
+            "#,
+        )?;
+        Ok(())
+    }
+}
+
+/// Preprocess a search query into keywords.
+fn preprocess_search_query(query: &str) -> Vec<String> {
+    // Common words to filter out
+    let stop_words: std::collections::HashSet<&str> = [
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "must", "shall", "can", "need", "dare",
+        "and", "or", "but", "if", "then", "else", "when", "where", "why",
+        "how", "what", "which", "who", "whom", "this", "that", "these",
+        "those", "i", "you", "he", "she", "it", "we", "they", "me", "him",
+        "her", "us", "them", "my", "your", "his", "its", "our", "their",
+        "for", "to", "from", "with", "at", "by", "on", "in", "of", "about",
+        "into", "through", "during", "before", "after", "above", "below",
+        "find", "get", "search", "look", "all", "any", "each", "every",
+    ].iter().copied().collect();
+
+    query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| {
+            let word = word.trim();
+            !word.is_empty() && word.len() > 1 && !stop_words.contains(word)
+        })
+        .map(|s| {
+            // Add wildcard suffix for prefix matching
+            format!("{}*", s)
+        })
+        .collect()
 }
 
 /// Helper to convert a row to a Symbol.

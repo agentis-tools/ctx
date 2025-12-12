@@ -409,18 +409,46 @@ fn run_search(query: &str, limit: i32, output: &str) -> Result<(), Box<dyn std::
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
-    // For now, just do a simple text search
-    let symbols = db.find_symbols(query, limit)?;
+    // Use hybrid search combining exact matches with FTS5 semantic search
+    let results = db.hybrid_search(query, limit)?;
 
-    if symbols.is_empty() {
-        eprintln!("No results found for '{}'", query);
+    if results.is_empty() {
+        // Fallback to simple name search
+        let symbols = db.find_symbols(query, limit)?;
+        if symbols.is_empty() {
+            eprintln!("No results found for '{}'", query);
+            return Ok(());
+        }
+        
+        // Convert to format with scores
+        let results: Vec<_> = symbols.iter()
+            .map(|s| (s, 0.5, "name"))
+            .collect();
+        
+        print_search_results(&results, query, output)?;
         return Ok(());
     }
 
+    // Convert references for printing
+    let results_ref: Vec<_> = results.iter()
+        .map(|(s, score, match_type)| (s, *score, match_type.as_str()))
+        .collect();
+    
+    print_search_results(&results_ref, query, output)?;
+
+    Ok(())
+}
+
+/// Print search results in the specified format.
+fn print_search_results(
+    results: &[(&db::Symbol, f64, &str)],
+    query: &str,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     if output == "json" {
-        let results: Vec<_> = symbols
+        let json_results: Vec<_> = results
             .iter()
-            .map(|s| {
+            .map(|(s, score, match_type)| {
                 serde_json::json!({
                     "name": s.name,
                     "kind": s.kind.as_str(),
@@ -428,27 +456,66 @@ fn run_search(query: &str, limit: i32, output: &str) -> Result<(), Box<dyn std::
                     "line": s.line_start,
                     "signature": s.signature,
                     "brief": s.brief,
+                    "relevance": format!("{:.2}", score),
+                    "match_type": match_type,
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&results)?);
+        println!("{}", serde_json::to_string_pretty(&json_results)?);
     } else {
-        println!("Search results for '{}':", query);
-        println!("{}", "-".repeat(70));
+        println!("Search results for '{}' ({} matches):", query, results.len());
+        println!("{}", "-".repeat(75));
+        println!("{:<40} {:<8} {:<6} {}", "SYMBOL", "KIND", "SCORE", "FILE");
+        println!("{}", "-".repeat(75));
 
-        for symbol in symbols {
+        for (symbol, score, match_type) in results {
+            let name = if symbol.name.len() > 38 {
+                format!("{}...", &symbol.name[..35])
+            } else {
+                symbol.name.clone()
+            };
+
+            let file = if symbol.file_path.len() > 25 {
+                format!("...{}", &symbol.file_path[symbol.file_path.len() - 22..])
+            } else {
+                symbol.file_path.clone()
+            };
+
+            let score_display = format!("{:.0}%", score * 100.0);
+            let kind_display = format!("{}", symbol.kind.as_str());
+
             println!(
-                "{} ({}) - {}:{}",
-                symbol.name,
-                symbol.kind.as_str(),
-                symbol.file_path,
+                "{:<40} {:<8} {:<6} {}:{}",
+                name,
+                kind_display,
+                score_display,
+                file,
                 symbol.line_start
             );
+
+            // Show match type indicator
+            let indicator = match *match_type {
+                "exact" => "[exact]",
+                "semantic" => "[semantic]",
+                _ => "[name]",
+            };
+
             if let Some(sig) = &symbol.signature {
-                println!("  {}", sig);
+                let sig_short = if sig.len() > 70 {
+                    format!("{}...", &sig[..67])
+                } else {
+                    sig.clone()
+                };
+                println!("  {} {}", indicator, sig_short);
             }
+
             if let Some(brief) = &symbol.brief {
-                println!("  # {}", brief);
+                let brief_short = if brief.len() > 70 {
+                    format!("{}...", &brief[..67])
+                } else {
+                    brief.clone()
+                };
+                println!("  # {}", brief_short);
             }
             println!();
         }
