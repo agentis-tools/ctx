@@ -489,49 +489,26 @@ impl TypeScriptParser {
                 }
             }
 
-            // Handle class extends
+            // Handle class extends and implements
             if let (Some(name), Some(node)) = (class_name, def_node) {
                 let line = node.start_position().row as u32 + 1;
                 let col = node.start_position().column as u32;
 
-                let source_id = symbols
-                    .iter()
+                if let Some(source_id) = symbols.iter()
                     .find(|s| s.name == name && s.kind == SymbolKind::Class)
-                    .map(|s| s.id.clone());
-
-                if let Some(source_id) = source_id {
+                    .map(|s| &s.id)
+                {
                     for extends_name in extends_names {
-                        let target_id = symbols
-                            .iter()
-                            .find(|s| s.name == extends_name && s.kind == SymbolKind::Class)
-                            .map(|s| s.id.clone());
-
-                        edges.push(Edge {
-                            source_id: source_id.clone(),
-                            target_id,
-                            target_name: extends_name.to_string(),
-                            kind: EdgeKind::Extends,
-                            line: Some(line),
-                            col: Some(col),
-                            context: Some(format!("class {} extends {}", name, extends_name)),
-                        });
+                        edges.push(create_inheritance_edge(
+                            source_id, extends_name, SymbolKind::Class, EdgeKind::Extends,
+                            format!("class {} extends {}", name, extends_name), line, col, symbols,
+                        ));
                     }
-
                     for implements_name in implements_names {
-                        let target_id = symbols
-                            .iter()
-                            .find(|s| s.name == implements_name && s.kind == SymbolKind::Interface)
-                            .map(|s| s.id.clone());
-
-                        edges.push(Edge {
-                            source_id: source_id.clone(),
-                            target_id,
-                            target_name: implements_name.to_string(),
-                            kind: EdgeKind::Implements,
-                            line: Some(line),
-                            col: Some(col),
-                            context: Some(format!("class {} implements {}", name, implements_name)),
-                        });
+                        edges.push(create_inheritance_edge(
+                            source_id, implements_name, SymbolKind::Interface, EdgeKind::Implements,
+                            format!("class {} implements {}", name, implements_name), line, col, symbols,
+                        ));
                     }
                 }
             }
@@ -541,31 +518,46 @@ impl TypeScriptParser {
                 let line = node.start_position().row as u32 + 1;
                 let col = node.start_position().column as u32;
 
-                let source_id = symbols
-                    .iter()
+                if let Some(source_id) = symbols.iter()
                     .find(|s| s.name == name && s.kind == SymbolKind::Interface)
-                    .map(|s| s.id.clone());
-
-                if let Some(source_id) = source_id {
+                    .map(|s| &s.id)
+                {
                     for extends_name in interface_extends_names {
-                        let target_id = symbols
-                            .iter()
-                            .find(|s| s.name == extends_name && s.kind == SymbolKind::Interface)
-                            .map(|s| s.id.clone());
-
-                        edges.push(Edge {
-                            source_id: source_id.clone(),
-                            target_id,
-                            target_name: extends_name.to_string(),
-                            kind: EdgeKind::Extends,
-                            line: Some(line),
-                            col: Some(col),
-                            context: Some(format!("interface {} extends {}", name, extends_name)),
-                        });
+                        edges.push(create_inheritance_edge(
+                            source_id, extends_name, SymbolKind::Interface, EdgeKind::Extends,
+                            format!("interface {} extends {}", name, extends_name), line, col, symbols,
+                        ));
                     }
                 }
             }
         }
+    }
+}
+
+/// Create an inheritance edge (extends or implements).
+fn create_inheritance_edge(
+    source_id: &str,
+    target_name: &str,
+    target_kind: SymbolKind,
+    edge_kind: EdgeKind,
+    context: String,
+    line: u32,
+    col: u32,
+    symbols: &[Symbol],
+) -> Edge {
+    let target_id = symbols
+        .iter()
+        .find(|s| s.name == target_name && s.kind == target_kind)
+        .map(|s| s.id.clone());
+
+    Edge {
+        source_id: source_id.to_string(),
+        target_id,
+        target_name: target_name.to_string(),
+        kind: edge_kind,
+        line: Some(line),
+        col: Some(col),
+        context: Some(context),
     }
 }
 

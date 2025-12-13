@@ -599,6 +599,34 @@ fn extract_import_from_module(node: &Node, source: &str) -> Option<String> {
     None
 }
 
+/// Extract the original name from an aliased import node (e.g., "y as z" -> "y").
+fn extract_aliased_name(node: &Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "dotted_name" || child.kind() == "identifier" {
+            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+        }
+    }
+    None
+}
+
+/// Parse import names from text as a fallback.
+fn parse_import_names_from_text(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    if text.contains(" import *") {
+        names.push("*".to_string());
+    } else if let Some(import_idx) = text.find(" import ") {
+        for name in text[import_idx + 8..].split(',') {
+            let name = name.trim();
+            let actual_name = name.split(" as ").next().unwrap_or("").trim();
+            if !actual_name.is_empty() {
+                names.push(actual_name.to_string());
+            }
+        }
+    }
+    names
+}
+
 /// Extract import names from an import_from_statement.
 fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -629,14 +657,8 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
         
         // Handle aliased imports: from x import y as z
         if kind == "aliased_import" {
-            let mut alias_cursor = child.walk();
-            for alias_child in child.children(&mut alias_cursor) {
-                if alias_child.kind() == "dotted_name" || alias_child.kind() == "identifier" {
-                    if let Ok(text) = alias_child.utf8_text(source.as_bytes()) {
-                        names.push(text.to_string());
-                        break; // Only get the original name, not the alias
-                    }
-                }
+            if let Some(name) = extract_aliased_name(&child, source) {
+                names.push(name);
             }
             continue;
         }
@@ -655,14 +677,8 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
                     names.push(text.to_string());
                 }
             } else if inner.kind() == "aliased_import" {
-                let mut alias_cursor = inner.walk();
-                for alias_child in inner.children(&mut alias_cursor) {
-                    if alias_child.kind() == "dotted_name" || alias_child.kind() == "identifier" {
-                        if let Ok(text) = alias_child.utf8_text(source.as_bytes()) {
-                            names.push(text.to_string());
-                            break;
-                        }
-                    }
+                if let Some(name) = extract_aliased_name(&inner, source) {
+                    names.push(name);
                 }
             }
         }
@@ -670,31 +686,13 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
 
     // Fallback: parse from text if we got nothing
     if names.is_empty() {
-        let text = node.utf8_text(source.as_bytes()).unwrap_or("");
-        if text.contains(" import *") {
-            names.push("*".to_string());
-        } else if let Some(import_idx) = text.find(" import ") {
-            let names_part = &text[import_idx + 8..];
-            for name in names_part.split(',') {
-                let name = name.trim();
-                // Handle 'as' aliases
-                let actual_name = if let Some(idx) = name.find(" as ") {
-                    name[..idx].trim()
-                } else {
-                    name
-                };
-                if !actual_name.is_empty() {
-                    names.push(actual_name.to_string());
-                }
-            }
-        }
+        names = parse_import_names_from_text(node.utf8_text(source.as_bytes()).unwrap_or(""));
     }
 
     // Deduplicate and filter
     names.sort();
     names.dedup();
     names.retain(|n| !n.is_empty());
-
     names
 }
 

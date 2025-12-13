@@ -444,105 +444,94 @@ fn run_index(watch: bool, verbose: bool, force: bool) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+// --- Query subcommand helpers ---
+
+/// Handle 'query find' subcommand.
+fn query_find(db: &db::Database, pattern: &str, limit: i32, kind: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let symbols = db.find_symbols(pattern, limit)?;
+    if symbols.is_empty() {
+        eprintln!("No symbols found matching '{}'", pattern);
+        return Ok(());
+    }
+
+    let symbols: Vec<_> = if let Some(ref k) = kind {
+        symbols.into_iter().filter(|s| s.kind.as_str() == k).collect()
+    } else {
+        symbols
+    };
+
+    println!("{:<40} {:<12} {:<10} {}", "SYMBOL", "KIND", "VISIBILITY", "FILE");
+    println!("{}", "-".repeat(90));
+
+    for symbol in symbols {
+        let name = truncate_str(&symbol.name, 38);
+        let file = truncate_path(&symbol.file_path, 30);
+        println!("{:<40} {:<12} {:<10} {}:{}", name, symbol.kind.as_str(), symbol.visibility.as_str(), file, symbol.line_start);
+    }
+    Ok(())
+}
+
+/// Handle 'query callers' subcommand.
+fn query_callers(db: &db::Database, function: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let edges = db.get_incoming_edges(function)?;
+    if edges.is_empty() {
+        eprintln!("No callers found for '{}'", function);
+        return Ok(());
+    }
+
+    println!("Functions that call '{}':", function);
+    println!("{}", "-".repeat(60));
+
+    for edge in edges {
+        if let Some(s) = db.get_symbol(&edge.source_id)? {
+            println!("  {} ({}:{})", s.name, s.file_path, edge.line.unwrap_or(s.line_start));
+            if let Some(ctx) = edge.context {
+                println!("    > {}", ctx);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Handle 'query deps' subcommand.
+fn query_deps(db: &db::Database, symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let symbols = db.find_symbols(symbol, 1)?;
+    let sym = symbols.first().ok_or("Symbol not found")?;
+    let edges = db.get_outgoing_edges(&sym.id)?;
+
+    if edges.is_empty() {
+        eprintln!("No dependencies found for '{}'", symbol);
+        return Ok(());
+    }
+
+    println!("Dependencies of '{}':", symbol);
+    println!("{}", "-".repeat(60));
+
+    for edge in edges {
+        println!("  {} {} (line {})", edge.kind.as_str(), edge.target_name, edge.line.unwrap_or(0));
+    }
+    Ok(())
+}
+
+/// Truncate a string with ellipsis.
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() > max { format!("{}...", &s[..max - 3]) } else { s.to_string() }
+}
+
+/// Truncate a path from the beginning.
+fn truncate_path(s: &str, max: usize) -> String {
+    if s.len() > max { format!("...{}", &s[s.len() - max + 3..]) } else { s.to_string() }
+}
+
 /// Run query subcommands.
 fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
     match query {
-        QueryCommand::Find { pattern, limit, kind } => {
-            let symbols = db.find_symbols(&pattern, limit)?;
-
-            if symbols.is_empty() {
-                eprintln!("No symbols found matching '{}'", pattern);
-                return Ok(());
-            }
-
-            // Filter by kind if specified
-            let symbols: Vec<_> = if let Some(ref k) = kind {
-                symbols
-                    .into_iter()
-                    .filter(|s| s.kind.as_str() == k)
-                    .collect()
-            } else {
-                symbols
-            };
-
-            println!("{:<40} {:<12} {:<10} {}", "SYMBOL", "KIND", "VISIBILITY", "FILE");
-            println!("{}", "-".repeat(90));
-
-            for symbol in symbols {
-                let name = if symbol.name.len() > 38 {
-                    format!("{}...", &symbol.name[..35])
-                } else {
-                    symbol.name.clone()
-                };
-
-                let file = if symbol.file_path.len() > 30 {
-                    format!("...{}", &symbol.file_path[symbol.file_path.len() - 27..])
-                } else {
-                    symbol.file_path.clone()
-                };
-
-                println!(
-                    "{:<40} {:<12} {:<10} {}:{}",
-                    name,
-                    symbol.kind.as_str(),
-                    symbol.visibility.as_str(),
-                    file,
-                    symbol.line_start
-                );
-            }
-        }
-
-        QueryCommand::Callers { function, depth: _ } => {
-            let edges = db.get_incoming_edges(&function)?;
-
-            if edges.is_empty() {
-                eprintln!("No callers found for '{}'", function);
-                return Ok(());
-            }
-
-            println!("Functions that call '{}':", function);
-            println!("{}", "-".repeat(60));
-
-            for edge in edges {
-                let source = db.get_symbol(&edge.source_id)?;
-                if let Some(s) = source {
-                    println!(
-                        "  {} ({}:{})",
-                        s.name,
-                        s.file_path,
-                        edge.line.unwrap_or(s.line_start)
-                    );
-                    if let Some(ctx) = edge.context {
-                        println!("    > {}", ctx);
-                    }
-                }
-            }
-        }
-
-        QueryCommand::Deps { symbol, depth: _ } => {
-            // Find the symbol first
-            let symbols = db.find_symbols(&symbol, 1)?;
-            let sym = symbols.first().ok_or("Symbol not found")?;
-
-            let edges = db.get_outgoing_edges(&sym.id)?;
-
-            if edges.is_empty() {
-                eprintln!("No dependencies found for '{}'", symbol);
-                return Ok(());
-            }
-
-            println!("Dependencies of '{}':", symbol);
-            println!("{}", "-".repeat(60));
-
-            for edge in edges {
-                let kind = edge.kind.as_str();
-                println!("  {} {} (line {})", kind, edge.target_name, edge.line.unwrap_or(0));
-            }
-        }
-
+        QueryCommand::Find { pattern, limit, kind } => query_find(&db, &pattern, limit, kind),
+        QueryCommand::Callers { function, depth: _ } => query_callers(&db, &function),
+        QueryCommand::Deps { symbol, depth: _ } => query_deps(&db, &symbol),
         QueryCommand::Graph { start, depth, output } => {
             // Use DuckDB analytics for recursive graph traversal
             let analytics = analytics::Analytics::open(&root)
@@ -608,6 +597,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
                     println!("  (no outgoing calls found)");
                 }
             }
+            Ok(())
         }
 
         QueryCommand::Impact { symbol, depth } => {
@@ -637,6 +627,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
             }
             
             println!("\nTotal: {} symbols affected", impacts.len());
+            Ok(())
         }
 
         QueryCommand::Stats => {
@@ -695,21 +686,19 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            Ok(())
         }
 
         QueryCommand::Files => {
             let files = db.get_indexed_files()?;
-
             println!("Indexed files ({}):", files.len());
             println!("{}", "-".repeat(60));
-
             for file in files {
                 println!("  {}", file);
             }
+            Ok(())
         }
     }
-
-    Ok(())
 }
 
 /// Run semantic/text search.
