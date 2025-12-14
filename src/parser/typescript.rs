@@ -1,9 +1,14 @@
 //! TypeScript/JavaScript/JSX/TSX code parsing using tree-sitter.
 
-use tree_sitter::{Node, Parser, Query, QueryCursor, Language};
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
-use crate::db::{Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
-use crate::parser::{extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns, SymbolKindMapping};
+use crate::db::{
+    Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
+};
+use crate::parser::{
+    extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns,
+    SymbolKindMapping,
+};
 
 /// Symbol kind mappings for TypeScript/JavaScript capture names.
 const TS_SYMBOL_MAPPINGS: &[SymbolKindMapping] = &[
@@ -258,7 +263,12 @@ impl TypeScriptParser {
     }
 
     /// Parse a TypeScript/JavaScript source file.
-    pub fn parse(&mut self, file_path: &str, source: &str, variant: JsVariant) -> Option<ParseResult> {
+    pub fn parse(
+        &mut self,
+        file_path: &str,
+        source: &str,
+        variant: JsVariant,
+    ) -> Option<ParseResult> {
         let (parser, language) = self.get_parser_and_language(variant);
         let tree = parser.parse(source, None)?;
         let root = tree.root_node();
@@ -285,10 +295,24 @@ impl TypeScriptParser {
         );
 
         // Extract edges (calls)
-        extract_call_edges(&calls_query, &root, source, &symbols, &mut edges, &CallCapturePatterns::TYPESCRIPT);
+        extract_call_edges(
+            &calls_query,
+            &root,
+            source,
+            &symbols,
+            &mut edges,
+            &CallCapturePatterns::TYPESCRIPT,
+        );
 
         // Extract inheritance edges (extends/implements)
-        Self::extract_inheritance_edges(&inheritance_query, &root, file_path, source, &symbols, &mut edges);
+        Self::extract_inheritance_edges(
+            &inheritance_query,
+            &root,
+            file_path,
+            source,
+            &symbols,
+            &mut edges,
+        );
 
         let module = ModuleInfo {
             file_path: file_path.to_string(),
@@ -355,9 +379,9 @@ impl TypeScriptParser {
                             import_source = Some(text.trim_matches('"').trim_matches('\''));
                         }
                         "import.def" => {
-                            let src = import_source.map(String::from).or_else(|| {
-                                extract_import_source(&node, source)
-                            });
+                            let src = import_source
+                                .map(String::from)
+                                .or_else(|| extract_import_source(&node, source));
                             if let Some(src) = src {
                                 imports.push(ImportInfo {
                                     from: src,
@@ -482,20 +506,33 @@ impl TypeScriptParser {
                 let line = node.start_position().row as u32 + 1;
                 let col = node.start_position().column as u32;
 
-                if let Some(source_id) = symbols.iter()
+                if let Some(source_id) = symbols
+                    .iter()
                     .find(|s| s.name == name && s.kind == SymbolKind::Class)
                     .map(|s| &s.id)
                 {
                     for extends_name in extends_names {
                         edges.push(create_inheritance_edge(
-                            source_id, extends_name, SymbolKind::Class, EdgeKind::Extends,
-                            format!("class {} extends {}", name, extends_name), line, col, symbols,
+                            source_id,
+                            extends_name,
+                            SymbolKind::Class,
+                            EdgeKind::Extends,
+                            format!("class {} extends {}", name, extends_name),
+                            line,
+                            col,
+                            symbols,
                         ));
                     }
                     for implements_name in implements_names {
                         edges.push(create_inheritance_edge(
-                            source_id, implements_name, SymbolKind::Interface, EdgeKind::Implements,
-                            format!("class {} implements {}", name, implements_name), line, col, symbols,
+                            source_id,
+                            implements_name,
+                            SymbolKind::Interface,
+                            EdgeKind::Implements,
+                            format!("class {} implements {}", name, implements_name),
+                            line,
+                            col,
+                            symbols,
                         ));
                     }
                 }
@@ -506,14 +543,21 @@ impl TypeScriptParser {
                 let line = node.start_position().row as u32 + 1;
                 let col = node.start_position().column as u32;
 
-                if let Some(source_id) = symbols.iter()
+                if let Some(source_id) = symbols
+                    .iter()
                     .find(|s| s.name == name && s.kind == SymbolKind::Interface)
                     .map(|s| &s.id)
                 {
                     for extends_name in interface_extends_names {
                         edges.push(create_inheritance_edge(
-                            source_id, extends_name, SymbolKind::Interface, EdgeKind::Extends,
-                            format!("interface {} extends {}", name, extends_name), line, col, symbols,
+                            source_id,
+                            extends_name,
+                            SymbolKind::Interface,
+                            EdgeKind::Extends,
+                            format!("interface {} extends {}", name, extends_name),
+                            line,
+                            col,
+                            symbols,
                         ));
                     }
                 }
@@ -558,7 +602,7 @@ fn is_exported(node: &Node, source: &str) -> bool {
             return true;
         }
     }
-    
+
     // Check for 'export' keyword in the node text itself
     let text = node.utf8_text(source.as_bytes()).unwrap_or("");
     text.starts_with("export ")
@@ -633,7 +677,7 @@ fn extract_jsdoc(node: &Node, source: &str) -> Option<String> {
 
     while let Some(sibling) = prev {
         let kind = sibling.kind();
-        
+
         if kind == "comment" {
             let text = sibling.utf8_text(source.as_bytes()).unwrap_or("");
             if text.starts_with("/**") {
@@ -663,11 +707,7 @@ fn build_signature(kind: SymbolKind, name: &str, source: &str, node: &Node) -> O
             if let Some(idx) = text.find('{') {
                 let sig = text[..idx].trim();
                 // Clean up multi-line signatures
-                let sig = sig
-                    .lines()
-                    .map(|l| l.trim())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let sig = sig.lines().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
                 Some(sig)
             } else if let Some(idx) = text.find("=>") {
                 // Arrow function
@@ -712,7 +752,9 @@ export function greet(name: string): string {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
         assert!(!result.symbols.is_empty());
 
         let func = result.symbols.iter().find(|s| s.name == "greet");
@@ -739,7 +781,9 @@ export class Counter {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let class = result.symbols.iter().find(|s| s.name == "Counter");
         assert!(class.is_some());
@@ -764,7 +808,9 @@ interface User {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let interface = result.symbols.iter().find(|s| s.name == "User");
         assert!(interface.is_some());
@@ -782,7 +828,9 @@ const multiply = (a: number, b: number): number => {
 };
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let funcs: Vec<_> = result
             .symbols
@@ -848,7 +896,9 @@ class Calculator {
 }
 "#;
 
-        let result = parser.parse("test.js", source, JsVariant::JavaScript).unwrap();
+        let result = parser
+            .parse("test.js", source, JsVariant::JavaScript)
+            .unwrap();
 
         let func = result.symbols.iter().find(|s| s.name == "sum");
         assert!(func.is_some());
@@ -878,7 +928,9 @@ class Cat extends Animal {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let extends_edges: Vec<_> = result
             .edges
@@ -889,13 +941,13 @@ class Cat extends Animal {
         // Dog extends Animal, Cat extends Animal
         assert_eq!(extends_edges.len(), 2);
 
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Dog") && e.target_name == "Animal"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Dog") && e.target_name == "Animal" }));
 
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Cat") && e.target_name == "Animal"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Cat") && e.target_name == "Animal" }));
     }
 
     #[test]
@@ -920,7 +972,9 @@ class Document implements Printable, Serializable {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let implements_edges: Vec<_> = result
             .edges
@@ -929,11 +983,14 @@ class Document implements Printable, Serializable {
             .collect();
 
         // Document implements Printable and Serializable
-        assert!(implements_edges.len() >= 1, "Expected at least 1 implements edge");
+        assert!(
+            implements_edges.len() >= 1,
+            "Expected at least 1 implements edge"
+        );
 
         assert!(implements_edges.iter().any(|e| {
-            e.source_id.contains("Document") && 
-            (e.target_name == "Printable" || e.target_name == "Serializable")
+            e.source_id.contains("Document")
+                && (e.target_name == "Printable" || e.target_name == "Serializable")
         }));
     }
 
@@ -950,7 +1007,9 @@ interface Extended extends Base {
 }
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         let extends_edges: Vec<_> = result
             .edges
@@ -959,9 +1018,9 @@ interface Extended extends Base {
             .collect();
 
         // Extended extends Base
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Extended") && e.target_name == "Base"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Extended") && e.target_name == "Base" }));
     }
 
     #[test]
@@ -974,14 +1033,21 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 "#;
 
-        let result = parser.parse("test.ts", source, JsVariant::TypeScript).unwrap();
+        let result = parser
+            .parse("test.ts", source, JsVariant::TypeScript)
+            .unwrap();
 
         // Imports should be in module info, not as edges
         let module = result.module.unwrap();
-        assert!(!module.imports.is_empty(), "Expected imports in module info");
+        assert!(
+            !module.imports.is_empty(),
+            "Expected imports in module info"
+        );
 
         // Check we captured the imports
         let all_imports: Vec<_> = module.imports.iter().flat_map(|i| i.names.iter()).collect();
-        assert!(all_imports.iter().any(|n| n.contains("useState") || n.contains("useEffect") || n.contains("axios")));
+        assert!(all_imports
+            .iter()
+            .any(|n| n.contains("useState") || n.contains("useEffect") || n.contains("axios")));
     }
 }

@@ -24,8 +24,7 @@ impl OpenAIProvider {
 
     /// Create a provider from the OPENAI_API_KEY environment variable.
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| EmbeddingError::InvalidApiKey)?;
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| EmbeddingError::InvalidApiKey)?;
         Ok(Self::new(api_key))
     }
 
@@ -51,11 +50,7 @@ impl OpenAIProvider {
         );
 
         // Make HTTPS request using native TLS
-        let response = self.https_post(
-            "api.openai.com",
-            "/v1/embeddings",
-            &body,
-        )?;
+        let response = self.https_post("api.openai.com", "/v1/embeddings", &body)?;
 
         // Parse the response
         self.parse_response(&response)
@@ -65,15 +60,16 @@ impl OpenAIProvider {
     fn https_post(&self, host: &str, path: &str, body: &str) -> Result<String> {
         // For simplicity, we'll use a basic HTTP request format
         // In production, you'd want to use a proper HTTP client like reqwest
-        
+
         // Use native-tls for HTTPS
         let connector = native_tls::TlsConnector::new()
             .map_err(|e| EmbeddingError::NetworkError(e.to_string()))?;
-        
+
         let stream = TcpStream::connect(format!("{}:443", host))
             .map_err(|e| EmbeddingError::NetworkError(e.to_string()))?;
-        
-        let mut stream = connector.connect(host, stream)
+
+        let mut stream = connector
+            .connect(host, stream)
             .map_err(|e| EmbeddingError::NetworkError(e.to_string()))?;
 
         // Build HTTP request
@@ -86,14 +82,20 @@ impl OpenAIProvider {
              Connection: close\r\n\
              \r\n\
              {}",
-            path, host, self.api_key, body.len(), body
+            path,
+            host,
+            self.api_key,
+            body.len(),
+            body
         );
 
-        stream.write_all(request.as_bytes())
+        stream
+            .write_all(request.as_bytes())
             .map_err(|e| EmbeddingError::NetworkError(e.to_string()))?;
 
         let mut response = String::new();
-        stream.read_to_string(&mut response)
+        stream
+            .read_to_string(&mut response)
             .map_err(|e| EmbeddingError::NetworkError(e.to_string()))?;
 
         // Extract body from HTTP response
@@ -107,9 +109,9 @@ impl OpenAIProvider {
     /// Parse the OpenAI API response.
     fn parse_response(&self, response: &str) -> Result<Vec<Embedding>> {
         // Handle chunked transfer encoding by finding the JSON start
-        let json_start = response.find('{').ok_or_else(|| {
-            EmbeddingError::ApiError("No JSON in response".into())
-        })?;
+        let json_start = response
+            .find('{')
+            .ok_or_else(|| EmbeddingError::ApiError("No JSON in response".into()))?;
         let response = &response[json_start..];
 
         // Parse as JSON
@@ -118,10 +120,11 @@ impl OpenAIProvider {
 
         // Check for errors
         if let Some(error) = value.get("error") {
-            let message = error.get("message")
+            let message = error
+                .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
-            
+
             if message.contains("rate limit") {
                 return Err(EmbeddingError::RateLimited(60));
             }
@@ -132,14 +135,16 @@ impl OpenAIProvider {
         }
 
         // Extract embeddings
-        let data = value.get("data")
+        let data = value
+            .get("data")
             .and_then(|d| d.as_array())
             .ok_or_else(|| EmbeddingError::ApiError("No data in response".into()))?;
 
         let mut embeddings = Vec::with_capacity(data.len());
-        
+
         for item in data {
-            let vector = item.get("embedding")
+            let vector = item
+                .get("embedding")
                 .and_then(|e| e.as_array())
                 .ok_or_else(|| EmbeddingError::ApiError("No embedding in response".into()))?
                 .iter()
@@ -171,7 +176,9 @@ impl EmbeddingProvider for OpenAIProvider {
 
     fn embed(&self, text: &str) -> Result<Embedding> {
         let mut results = self.request(&[text])?;
-        results.pop().ok_or_else(|| EmbeddingError::ApiError("Empty response".into()))
+        results
+            .pop()
+            .ok_or_else(|| EmbeddingError::ApiError("Empty response".into()))
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>> {

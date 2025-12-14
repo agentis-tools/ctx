@@ -2,7 +2,9 @@
 
 use tree_sitter::{Node, Parser, Query, QueryCursor};
 
-use crate::db::{Edge, EdgeKind, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility, ImportInfo};
+use crate::db::{
+    Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use crate::parser::{extract_brief, find_symbol_kind, is_def_capture, SymbolKindMapping};
 
 /// Symbol kind mappings for Solidity capture names.
@@ -221,7 +223,10 @@ impl SolidityParser {
                 let signature = build_solidity_signature(kind, name, type_info, source, &node);
 
                 // Determine parent based on context
-                let parent_name = if matches!(kind, SymbolKind::Class | SymbolKind::Interface | SymbolKind::Module) {
+                let parent_name = if matches!(
+                    kind,
+                    SymbolKind::Class | SymbolKind::Interface | SymbolKind::Module
+                ) {
                     None
                 } else {
                     current_parent.as_deref()
@@ -329,7 +334,8 @@ impl SolidityParser {
             for keyword in &["contract ", "interface ", "library "] {
                 if trimmed.starts_with(keyword) {
                     let rest = &trimmed[keyword.len()..];
-                    let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                    let name = rest
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
                         .next()
                         .filter(|s| !s.is_empty());
                     if let Some(name) = name {
@@ -345,7 +351,7 @@ impl SolidityParser {
 /// Extract visibility from a Solidity node.
 fn extract_solidity_visibility(node: &Node, source: &str) -> Visibility {
     let text = node.utf8_text(source.as_bytes()).unwrap_or("");
-    
+
     // Check for visibility keywords in the node text
     if text.contains("public") {
         Visibility::Public
@@ -369,7 +375,7 @@ fn extract_natspec(node: &Node, source: &str) -> Option<String> {
 
     while let Some(sibling) = prev {
         let text = sibling.utf8_text(source.as_bytes()).unwrap_or("");
-        
+
         if sibling.kind() == "comment" {
             if text.starts_with("///") {
                 // Single-line NatSpec
@@ -385,7 +391,7 @@ fn extract_natspec(node: &Node, source: &str) -> Option<String> {
         } else if sibling.kind() != "comment" {
             break;
         }
-        
+
         prev = sibling.prev_sibling();
     }
 
@@ -413,10 +419,7 @@ fn build_solidity_signature(
             if let Some(idx) = text.find('{') {
                 let sig = text[..idx].trim();
                 // Clean up multi-line signatures
-                let sig = sig.lines()
-                    .map(|l| l.trim())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let sig = sig.lines().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
                 Some(sig)
             } else {
                 // Interface function (no body)
@@ -474,7 +477,7 @@ contract SimpleToken {
 "#;
 
         let result = parser.parse("Token.sol", source).unwrap();
-        
+
         // Should have contract + state vars + function
         assert!(result.symbols.len() >= 3);
 
@@ -509,7 +512,9 @@ interface IERC20 {
         assert_eq!(interface.unwrap().kind, SymbolKind::Interface);
 
         // Should have interface + 3 functions
-        let functions: Vec<_> = result.symbols.iter()
+        let functions: Vec<_> = result
+            .symbols
+            .iter()
             .filter(|s| s.kind == SymbolKind::Function)
             .collect();
         assert_eq!(functions.len(), 3);

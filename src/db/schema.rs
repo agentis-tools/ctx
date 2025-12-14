@@ -436,7 +436,7 @@ impl Database {
     pub fn semantic_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64)>> {
         // Preprocess query: split into keywords, handle natural language
         let keywords = preprocess_search_query(query);
-        
+
         if keywords.is_empty() {
             return Ok(Vec::new());
         }
@@ -472,18 +472,22 @@ impl Database {
 
     /// Hybrid search combining exact match with semantic search.
     pub fn hybrid_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64, String)>> {
-        let mut results: std::collections::HashMap<String, (Symbol, f64, String)> = 
+        let mut results: std::collections::HashMap<String, (Symbol, f64, String)> =
             std::collections::HashMap::new();
 
         // 1. Exact name matches (highest priority)
         let exact_matches = self.find_symbols(query, limit / 2)?;
         for symbol in exact_matches {
             let score = if symbol.name.eq_ignore_ascii_case(query) {
-                1.0  // Exact match
-            } else if symbol.name.to_lowercase().starts_with(&query.to_lowercase()) {
-                0.9  // Prefix match
+                1.0 // Exact match
+            } else if symbol
+                .name
+                .to_lowercase()
+                .starts_with(&query.to_lowercase())
+            {
+                0.9 // Prefix match
             } else {
-                0.7  // Contains match
+                0.7 // Contains match
             };
             results.insert(symbol.id.clone(), (symbol, score, "exact".to_string()));
         }
@@ -491,7 +495,8 @@ impl Database {
         // 2. Semantic matches (FTS5)
         if let Ok(semantic_matches) = self.semantic_search(query, limit / 2) {
             for (symbol, relevance) in semantic_matches {
-                results.entry(symbol.id.clone())
+                results
+                    .entry(symbol.id.clone())
                     .and_modify(|(_, existing_score, _)| {
                         *existing_score = existing_score.max(relevance);
                     })
@@ -555,12 +560,13 @@ impl Database {
 
         match result {
             Ok(json) => {
-                let vector: Vec<f32> = serde_json::from_str(&json)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                let vector: Vec<f32> = serde_json::from_str(&json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
                         0,
                         rusqlite::types::Type::Text,
                         Box::new(e),
-                    ))?;
+                    )
+                })?;
                 Ok(Some(vector))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -569,7 +575,9 @@ impl Database {
     }
 
     /// Get all embeddings with their symbol metadata.
-    pub fn get_all_embeddings(&self) -> Result<Vec<(String, String, String, String, u32, Vec<f32>)>> {
+    pub fn get_all_embeddings(
+        &self,
+    ) -> Result<Vec<(String, String, String, String, u32, Vec<f32>)>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT e.symbol_id, s.name, s.kind, s.file_path, s.line_start, e.vector
@@ -591,12 +599,13 @@ impl Database {
         let mut results = Vec::new();
         for row in rows {
             let (symbol_id, name, kind, file_path, line, json) = row?;
-            let vector: Vec<f32> = serde_json::from_str(&json)
-                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+            let vector: Vec<f32> = serde_json::from_str(&json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
                     0,
                     rusqlite::types::Type::Text,
                     Box::new(e),
-                ))?;
+                )
+            })?;
             results.push((symbol_id, name, kind, file_path, line, vector));
         }
 
@@ -605,11 +614,8 @@ impl Database {
 
     /// Count symbols that have embeddings.
     pub fn count_embeddings(&self) -> Result<i64> {
-        self.conn.query_row(
-            "SELECT COUNT(*) FROM embeddings",
-            [],
-            |row| row.get(0),
-        )
+        self.conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))
     }
 
     /// Get symbols that don't have embeddings yet.
@@ -632,7 +638,8 @@ impl Database {
                 file_path: row.get(1)?,
                 name: row.get(2)?,
                 qualified_name: row.get(3)?,
-                kind: SymbolKind::from_str(&row.get::<_, String>(4)?).unwrap_or(SymbolKind::Function),
+                kind: SymbolKind::from_str(&row.get::<_, String>(4)?)
+                    .unwrap_or(SymbolKind::Function),
                 visibility: Visibility::from_str(&row.get::<_, String>(5)?),
                 signature: row.get(6)?,
                 brief: row.get(7)?,
@@ -657,15 +664,17 @@ impl Database {
                 params![provider, model],
             )
         } else {
-            self.conn.execute(
-                "DELETE FROM embeddings WHERE provider = ?",
-                [provider],
-            )
+            self.conn
+                .execute("DELETE FROM embeddings WHERE provider = ?", [provider])
         }
     }
 
     /// Find duplicate code blocks using content hashing and similarity.
-    pub fn find_duplicates(&self, similarity_threshold: u32, min_lines: u32) -> Result<Vec<DuplicateResult>> {
+    pub fn find_duplicates(
+        &self,
+        similarity_threshold: u32,
+        min_lines: u32,
+    ) -> Result<Vec<DuplicateResult>> {
         // Get all function/method symbols with their source code
         let mut stmt = self.conn.prepare(
             r#"
@@ -732,7 +741,11 @@ impl Database {
         }
 
         // Sort by similarity (highest first)
-        duplicates.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        duplicates.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(duplicates)
     }
@@ -762,12 +775,28 @@ fn normalize_code(code: &str) -> String {
 /// Calculate similarity between two strings using Jaccard similarity on tokens.
 fn calculate_similarity(s1: &str, s2: &str) -> f64 {
     let tokens1: std::collections::HashSet<&str> = s1
-        .split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == '{' || c == '}' || c == ';' || c == ',')
+        .split(|c: char| {
+            c.is_whitespace()
+                || c == '('
+                || c == ')'
+                || c == '{'
+                || c == '}'
+                || c == ';'
+                || c == ','
+        })
         .filter(|t| !t.is_empty())
         .collect();
-    
+
     let tokens2: std::collections::HashSet<&str> = s2
-        .split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == '{' || c == '}' || c == ';' || c == ',')
+        .split(|c: char| {
+            c.is_whitespace()
+                || c == '('
+                || c == ')'
+                || c == '{'
+                || c == '}'
+                || c == ';'
+                || c == ','
+        })
         .filter(|t| !t.is_empty())
         .collect();
 
@@ -786,9 +815,9 @@ fn calculate_similarity(s1: &str, s2: &str) -> f64 {
 
 /// Simple MD5-like hash for grouping duplicates (not cryptographically secure).
 fn md5_hash(s: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
-    
+    use std::hash::{Hash, Hasher};
+
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
@@ -798,17 +827,18 @@ fn md5_hash(s: &str) -> u64 {
 fn preprocess_search_query(query: &str) -> Vec<String> {
     // Common words to filter out
     let stop_words: std::collections::HashSet<&str> = [
-        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "must", "shall", "can", "need", "dare",
-        "and", "or", "but", "if", "then", "else", "when", "where", "why",
-        "how", "what", "which", "who", "whom", "this", "that", "these",
-        "those", "i", "you", "he", "she", "it", "we", "they", "me", "him",
-        "her", "us", "them", "my", "your", "his", "its", "our", "their",
-        "for", "to", "from", "with", "at", "by", "on", "in", "of", "about",
-        "into", "through", "during", "before", "after", "above", "below",
-        "find", "get", "search", "look", "all", "any", "each", "every",
-    ].iter().copied().collect();
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "shall",
+        "can", "need", "dare", "and", "or", "but", "if", "then", "else", "when", "where", "why",
+        "how", "what", "which", "who", "whom", "this", "that", "these", "those", "i", "you", "he",
+        "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its",
+        "our", "their", "for", "to", "from", "with", "at", "by", "on", "in", "of", "about", "into",
+        "through", "during", "before", "after", "above", "below", "find", "get", "search", "look",
+        "all", "any", "each", "every",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     query
         .to_lowercase()

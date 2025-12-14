@@ -317,7 +317,8 @@ impl Analytics {
             "#,
         )?;
 
-        let result: bool = stmt.query_row(params![from_name, max_depth, to_name], |row| row.get(0))?;
+        let result: bool =
+            stmt.query_row(params![from_name, max_depth, to_name], |row| row.get(0))?;
         Ok(result)
     }
 
@@ -453,7 +454,10 @@ impl Analytics {
     }
 
     /// Get the full call graph (all edges with resolved symbols).
-    pub fn full_call_graph(&self, _max_depth: i32) -> Result<Vec<(String, String, String, String)>> {
+    pub fn full_call_graph(
+        &self,
+        _max_depth: i32,
+    ) -> Result<Vec<(String, String, String, String)>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT DISTINCT

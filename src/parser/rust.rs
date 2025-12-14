@@ -3,7 +3,10 @@
 use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 use crate::db::{Edge, EdgeKind, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
-use crate::parser::{extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns, SymbolKindMapping};
+use crate::parser::{
+    extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns,
+    SymbolKindMapping,
+};
 
 /// Symbol kind mappings for Rust capture names.
 const RUST_SYMBOL_MAPPINGS: &[SymbolKindMapping] = &[
@@ -297,7 +300,14 @@ impl RustParser {
         symbols: &[Symbol],
         edges: &mut Vec<Edge>,
     ) {
-        extract_call_edges(&self.calls_query, root, source, symbols, edges, &CallCapturePatterns::RUST);
+        extract_call_edges(
+            &self.calls_query,
+            root,
+            source,
+            symbols,
+            edges,
+            &CallCapturePatterns::RUST,
+        );
     }
 
     /// Extract trait implementation edges from the AST.
@@ -336,14 +346,19 @@ impl RustParser {
                 }
             }
 
-            if let (Some(trait_name), Some(type_name), Some(node)) = (trait_name, type_name, def_node) {
+            if let (Some(trait_name), Some(type_name), Some(node)) =
+                (trait_name, type_name, def_node)
+            {
                 let line = node.start_position().row as u32 + 1;
                 let col = node.start_position().column as u32;
 
                 // Find the type symbol - skip if not found (FK constraint requires valid source_id)
                 let source_id = match symbols
                     .iter()
-                    .find(|s| s.name == type_name && matches!(s.kind, SymbolKind::Struct | SymbolKind::Enum))
+                    .find(|s| {
+                        s.name == type_name
+                            && matches!(s.kind, SymbolKind::Struct | SymbolKind::Enum)
+                    })
                     .map(|s| s.id.clone())
                 {
                     Some(id) => id,
@@ -607,7 +622,11 @@ impl Foo {
 
         let new_method = methods.iter().find(|m| m.name == "new").unwrap();
         assert_eq!(new_method.visibility, Visibility::Public);
-        assert!(new_method.qualified_name.as_ref().unwrap().contains("Foo::new"));
+        assert!(new_method
+            .qualified_name
+            .as_ref()
+            .unwrap()
+            .contains("Foo::new"));
     }
 
     #[test]
@@ -691,13 +710,13 @@ impl Animal for Cat {
         // Dog implements Animal, Cat implements Animal
         assert_eq!(impl_edges.len(), 2);
 
-        assert!(impl_edges.iter().any(|e| {
-            e.source_id.contains("Dog") && e.target_name == "Animal"
-        }));
+        assert!(impl_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Dog") && e.target_name == "Animal" }));
 
-        assert!(impl_edges.iter().any(|e| {
-            e.source_id.contains("Cat") && e.target_name == "Animal"
-        }));
+        assert!(impl_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Cat") && e.target_name == "Animal" }));
     }
 
     #[test]
@@ -714,10 +733,15 @@ use std::io::{Read, Write};
 
         // Imports should be in module info, not as edges
         let module = result.module.unwrap();
-        assert!(!module.imports.is_empty(), "Expected imports in module info");
+        assert!(
+            !module.imports.is_empty(),
+            "Expected imports in module info"
+        );
 
         // Check we captured the imports
         let all_imports: Vec<_> = module.imports.iter().flat_map(|i| i.names.iter()).collect();
-        assert!(all_imports.iter().any(|n| n.contains("HashMap") || n.contains("*")));
+        assert!(all_imports
+            .iter()
+            .any(|n| n.contains("HashMap") || n.contains("*")));
     }
 }

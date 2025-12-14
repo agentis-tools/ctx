@@ -91,16 +91,20 @@ impl CodeParser {
             Language::Rust => self.rust_parser.parse(&file_path, source),
             Language::Solidity => self.solidity_parser.parse(&file_path, source),
             Language::TypeScript => {
-                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::TypeScript)
+                self.typescript_parser
+                    .parse(&file_path, source, typescript::JsVariant::TypeScript)
             }
             Language::Tsx => {
-                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::Tsx)
+                self.typescript_parser
+                    .parse(&file_path, source, typescript::JsVariant::Tsx)
             }
             Language::JavaScript => {
-                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::JavaScript)
+                self.typescript_parser
+                    .parse(&file_path, source, typescript::JsVariant::JavaScript)
             }
             Language::Jsx => {
-                self.typescript_parser.parse(&file_path, source, typescript::JsVariant::Jsx)
+                self.typescript_parser
+                    .parse(&file_path, source, typescript::JsVariant::Jsx)
             }
             Language::Python => self.python_parser.parse(&file_path, source),
             // TODO: Add Go parser
@@ -370,7 +374,7 @@ pub fn parse_block_doc_comment(text: &str) -> String {
         .trim_start_matches("/**")
         .trim_start_matches("/*!")
         .trim_end_matches("*/");
-    
+
     // Process each line: strip leading whitespace and asterisks
     content
         .lines()
@@ -387,16 +391,31 @@ mod tests {
     #[test]
     fn test_language_detection() {
         assert_eq!(Language::from_path(Path::new("main.rs")), Language::Rust);
-        assert_eq!(Language::from_path(Path::new("app.ts")), Language::TypeScript);
+        assert_eq!(
+            Language::from_path(Path::new("app.ts")),
+            Language::TypeScript
+        );
         assert_eq!(Language::from_path(Path::new("App.tsx")), Language::Tsx);
-        assert_eq!(Language::from_path(Path::new("script.js")), Language::JavaScript);
+        assert_eq!(
+            Language::from_path(Path::new("script.js")),
+            Language::JavaScript
+        );
         assert_eq!(Language::from_path(Path::new("Button.jsx")), Language::Jsx);
         assert_eq!(Language::from_path(Path::new("main.py")), Language::Python);
         assert_eq!(Language::from_path(Path::new("main.go")), Language::Go);
-        assert_eq!(Language::from_path(Path::new("Token.sol")), Language::Solidity);
-        assert_eq!(Language::from_path(Path::new("config.yaml")), Language::Yaml);
+        assert_eq!(
+            Language::from_path(Path::new("Token.sol")),
+            Language::Solidity
+        );
+        assert_eq!(
+            Language::from_path(Path::new("config.yaml")),
+            Language::Yaml
+        );
         assert_eq!(Language::from_path(Path::new("ci.yml")), Language::Yaml);
-        assert_eq!(Language::from_path(Path::new("data.json")), Language::Unknown);
+        assert_eq!(
+            Language::from_path(Path::new("data.json")),
+            Language::Unknown
+        );
     }
 
     #[test]
@@ -417,13 +436,13 @@ mod tests {
     fn test_truncate_context_ascii() {
         // Short string - no truncation
         assert_eq!(truncate_context("hello", 10), "hello");
-        
+
         // Exact length - no truncation
         assert_eq!(truncate_context("hello", 5), "hello");
-        
+
         // Needs truncation
         assert_eq!(truncate_context("hello world", 8), "hello...");
-        
+
         // With leading/trailing whitespace
         assert_eq!(truncate_context("  hello world  ", 8), "hello...");
     }
@@ -432,22 +451,22 @@ mod tests {
     fn test_truncate_context_unicode() {
         // Box drawing characters (3 bytes each: ─ is \xe2\x94\x80)
         let box_line = "┌────────────────────────────────────────────────────────┐";
-        
+
         // Should not panic on Unicode
         let result = truncate_context(box_line, 20);
         assert!(result.ends_with("..."));
         assert!(result.len() <= 20);
-        
+
         // Emoji (4 bytes each)
         let emoji_str = "Hello 🎉🎊🎁 World";
         let result = truncate_context(emoji_str, 12);
         assert!(result.ends_with("..."));
-        
+
         // Mixed content
         let mixed = "console.log(\"├──────┤\")";
         let result = truncate_context(mixed, 15);
         assert!(result.ends_with("..."));
-        
+
         // Chinese characters (3 bytes each)
         let chinese = "你好世界这是一个测试";
         let result = truncate_context(chinese, 10);
@@ -459,10 +478,10 @@ mod tests {
         // Very short max_len
         assert_eq!(truncate_context("hello", 3), "...");
         assert_eq!(truncate_context("hi", 3), "hi");
-        
+
         // Empty string
         assert_eq!(truncate_context("", 10), "");
-        
+
         // Only whitespace
         assert_eq!(truncate_context("   ", 10), "");
     }
@@ -471,7 +490,7 @@ mod tests {
     fn test_get_context_snippet_unicode() {
         // Source with Unicode box drawing
         let source = "line1\nconsole.log(\"┌────────────────────┐\")\nline3";
-        
+
         // Should not panic when getting snippet from line with Unicode
         let result = get_context_snippet(source, 2, 15);
         assert!(result.is_some());

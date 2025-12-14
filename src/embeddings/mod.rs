@@ -17,7 +17,7 @@
 //! ```ignore
 //! let provider = OpenAIProvider::new("sk-...")?;
 //! let embedding = provider.embed("fn authenticate(user: &str)")?;
-//! 
+//!
 //! let results = search_similar(&db, "authentication functions", 10)?;
 //! ```
 
@@ -28,7 +28,7 @@ use thiserror::Error;
 
 /// Embedding dimension for different models
 pub const OPENAI_EMBEDDING_DIM: usize = 1536; // text-embedding-3-small
-pub const LOCAL_EMBEDDING_DIM: usize = 384;   // all-MiniLM-L6-v2
+pub const LOCAL_EMBEDDING_DIM: usize = 384; // all-MiniLM-L6-v2
 
 /// Errors that can occur during embedding operations.
 #[derive(Error, Debug)]
@@ -187,7 +187,8 @@ pub fn semantic_search(
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
     // Get all embeddings from database
-    let all_embeddings = db.get_all_embeddings()
+    let all_embeddings = db
+        .get_all_embeddings()
         .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
 
     // Compute similarity for each
@@ -207,7 +208,11 @@ pub fn semantic_search(
         .collect();
 
     // Sort by score descending
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(limit);
 
     Ok(scored)
@@ -224,7 +229,8 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
 
     loop {
         // Get symbols without embeddings
-        let symbols = db.get_symbols_without_embeddings(batch_size as i64)
+        let symbols = db
+            .get_symbols_without_embeddings(batch_size as i64)
             .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
 
         if symbols.is_empty() {
@@ -232,10 +238,7 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
         }
 
         // Generate embedding text for each symbol
-        let texts: Vec<String> = symbols
-            .iter()
-            .map(|s| s.to_embedding_text())
-            .collect();
+        let texts: Vec<String> = symbols.iter().map(|s| s.to_embedding_text()).collect();
 
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
 
@@ -244,12 +247,8 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
 
         // Store embeddings
         for (symbol, embedding) in symbols.iter().zip(embeddings.iter()) {
-            db.store_embedding(
-                &symbol.id,
-                provider.name(),
-                "default",
-                &embedding.vector,
-            ).map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
+            db.store_embedding(&symbol.id, provider.name(), "default", &embedding.vector)
+                .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
         }
 
         total_embedded += symbols.len();

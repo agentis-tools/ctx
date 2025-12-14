@@ -139,10 +139,7 @@ impl Indexer {
         let mut seen_files: Vec<String> = Vec::new();
 
         for entry in &entries {
-            let rel_path = entry
-                .relative_path
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel_path = entry.relative_path.to_string_lossy().replace('\\', "/");
 
             // Only process supported languages
             if !self.parser.is_supported(&entry.relative_path) {
@@ -282,9 +279,11 @@ impl Indexer {
         };
 
         // Store file FIRST (before symbols, due to foreign key constraint)
-        self.db.upsert_file(&file_record, Some(&compressed))
+        self.db
+            .upsert_file(&file_record, Some(&compressed))
             .map_err(db_error)?;
-        self.db.delete_symbols_for_file(rel_path)
+        self.db
+            .delete_symbols_for_file(rel_path)
             .map_err(db_error)?;
 
         // Build ID mapping and store symbols
@@ -314,7 +313,10 @@ impl Indexer {
         for symbol in symbols {
             let parent_name = extract_parent_name(symbol.parent_id.as_deref());
             let new_id = crate::db::Symbol::make_id_with_line(
-                rel_path, &symbol.name, parent_name, symbol.line_start,
+                rel_path,
+                &symbol.name,
+                parent_name,
+                symbol.line_start,
             );
             id_map.insert(symbol.id.clone(), new_id.clone());
 

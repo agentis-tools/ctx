@@ -161,7 +161,12 @@ impl Symbol {
     }
 
     /// Create a unique ID for this symbol with line number for disambiguation.
-    pub fn make_id_with_line(file_path: &str, name: &str, parent: Option<&str>, line: u32) -> String {
+    pub fn make_id_with_line(
+        file_path: &str,
+        name: &str,
+        parent: Option<&str>,
+        line: u32,
+    ) -> String {
         match parent {
             Some(p) => format!("{}::{}::{}@{}", file_path, p, name, line),
             None => format!("{}::{}@{}", file_path, name, line),

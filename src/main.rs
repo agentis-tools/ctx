@@ -17,9 +17,9 @@ use std::time::Instant;
 use clap::Parser;
 
 use cli::{Args, Command, QueryCommand};
+use output::{generate_context, stream_context};
 #[allow(unused_imports)]
 use std::collections::HashMap;
-use output::{generate_context, stream_context};
 use walker::{discover_files, WalkerConfig};
 
 fn main() {
@@ -34,22 +34,54 @@ fn main() {
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Handle subcommands
     match args.command {
-        Some(Command::Index { watch, verbose, force }) => run_index(watch, verbose, force),
+        Some(Command::Index {
+            watch,
+            verbose,
+            force,
+        }) => run_index(watch, verbose, force),
         Some(Command::Query { query }) => run_query(query),
-        Some(Command::Search { query, limit, output }) => run_search(&query, limit, &output),
+        Some(Command::Search {
+            query,
+            limit,
+            output,
+        }) => run_search(&query, limit, &output),
         Some(Command::Source { symbol }) => run_source(&symbol),
         Some(Command::Explain { symbol }) => run_explain(&symbol),
-        Some(Command::Embed { force, verbose, batch_size, openai, watch }) => {
+        Some(Command::Embed {
+            force,
+            verbose,
+            batch_size,
+            openai,
+            watch,
+        }) => {
             if watch {
                 run_embed_watch(verbose, batch_size, openai)
             } else {
                 run_embed(force, verbose, batch_size, openai)
             }
         }
-        Some(Command::Semantic { query, limit, output, openai }) => run_semantic(&query, limit, &output, openai),
-        Some(Command::Complexity { threshold, warnings_only, output }) => run_complexity(threshold, warnings_only, &output),
-        Some(Command::Duplicates { similarity, min_lines, output }) => run_duplicates(similarity, min_lines, &output),
-        Some(Command::Graph { output, by_file, filter, depth }) => run_graph(&output, by_file, filter, depth),
+        Some(Command::Semantic {
+            query,
+            limit,
+            output,
+            openai,
+        }) => run_semantic(&query, limit, &output, openai),
+        Some(Command::Complexity {
+            threshold,
+            warnings_only,
+            output,
+        }) => run_complexity(threshold, warnings_only, &output),
+        Some(Command::Duplicates {
+            similarity,
+            min_lines,
+            output,
+        }) => run_duplicates(similarity, min_lines, &output),
+        Some(Command::Graph {
+            output,
+            by_file,
+            filter,
+            depth,
+        }) => run_graph(&output, by_file, filter, depth),
         None => run_context(args),
     }
 }
@@ -114,8 +146,13 @@ fn run_context(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Generate embeddings for all symbols.
-fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) -> Result<(), Box<dyn std::error::Error>> {
-    use embeddings::{EmbeddingProvider, embed_missing_symbols};
+fn run_embed(
+    force: bool,
+    verbose: bool,
+    batch_size: usize,
+    use_openai: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use embeddings::{embed_missing_symbols, EmbeddingProvider};
 
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
@@ -131,12 +168,17 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
     } else {
         use embeddings::local::LocalProvider;
         eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
-        let p = LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
+        let p =
+            LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
         Box::new(p)
     };
 
     if verbose {
-        println!("Using embedding provider: {} (dim={})", provider.name(), provider.dimension());
+        println!(
+            "Using embedding provider: {} (dim={})",
+            provider.name(),
+            provider.dimension()
+        );
     }
 
     // Optionally clear existing embeddings
@@ -150,7 +192,7 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
     // Check current state
     let total_symbols = db.get_stats()?.symbols;
     let existing_embeddings = db.count_embeddings()?;
-    
+
     if verbose {
         println!("Total symbols: {}", total_symbols);
         println!("Existing embeddings: {}", existing_embeddings);
@@ -161,7 +203,10 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
         return Ok(());
     }
 
-    println!("Generating embeddings for {} symbols...", total_symbols - existing_embeddings);
+    println!(
+        "Generating embeddings for {} symbols...",
+        total_symbols - existing_embeddings
+    );
 
     let start = Instant::now();
     let progress_callback = |done: usize, _total: usize| {
@@ -170,7 +215,8 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
         }
     };
 
-    let embedded = embed_missing_symbols(&db, provider.as_ref(), batch_size, Some(&progress_callback))?;
+    let embedded =
+        embed_missing_symbols(&db, provider.as_ref(), batch_size, Some(&progress_callback))?;
 
     if verbose {
         eprintln!();
@@ -188,12 +234,16 @@ fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) ->
 }
 
 /// Watch for index changes and auto-embed new symbols.
-fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result<(), Box<dyn std::error::Error>> {
-    use embeddings::{EmbeddingProvider, embed_missing_symbols};
-    use std::time::Duration;
-    use std::sync::mpsc::channel;
+fn run_embed_watch(
+    verbose: bool,
+    batch_size: usize,
+    use_openai: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use embeddings::{embed_missing_symbols, EmbeddingProvider};
     use notify::RecursiveMode;
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
 
     let root = env::current_dir()?;
     let ctx_dir = root.join(".ctx");
@@ -210,20 +260,28 @@ fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result
     } else {
         use embeddings::local::LocalProvider;
         eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
-        let p = LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
+        let p =
+            LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
         Box::new(p)
     };
 
-    println!("Using embedding provider: {} (dim={})", provider.name(), provider.dimension());
+    println!(
+        "Using embedding provider: {} (dim={})",
+        provider.name(),
+        provider.dimension()
+    );
 
     // Do initial embedding
     {
         let db = index::open_database(&root)?;
         let total_symbols = db.get_stats()?.symbols;
         let existing = db.count_embeddings()?;
-        
+
         if existing < total_symbols {
-            println!("Initial embedding: {} symbols missing embeddings...", total_symbols - existing);
+            println!(
+                "Initial embedding: {} symbols missing embeddings...",
+                total_symbols - existing
+            );
             let embedded = embed_missing_symbols(&db, provider.as_ref(), batch_size, None)?;
             println!("Embedded {} symbols", embedded);
         } else {
@@ -254,8 +312,11 @@ fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result
             Ok(Ok(events)) => {
                 // Check if the database file changed
                 let db_changed = events.iter().any(|e| {
-                    e.kind == DebouncedEventKind::Any && 
-                    e.path.file_name().map(|n| n == "codebase.sqlite").unwrap_or(false)
+                    e.kind == DebouncedEventKind::Any
+                        && e.path
+                            .file_name()
+                            .map(|n| n == "codebase.sqlite")
+                            .unwrap_or(false)
                 });
 
                 if db_changed {
@@ -264,14 +325,19 @@ fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result
                         Ok(db) => {
                             let total = db.get_stats().map(|s| s.symbols).unwrap_or(0);
                             let existing = db.count_embeddings().unwrap_or(0);
-                            
+
                             if existing < total {
                                 let missing = total - existing;
                                 if verbose {
                                     eprintln!("\nIndex updated: {} new symbols to embed", missing);
                                 }
-                                
-                                match embed_missing_symbols(&db, provider.as_ref(), batch_size, None) {
+
+                                match embed_missing_symbols(
+                                    &db,
+                                    provider.as_ref(),
+                                    batch_size,
+                                    None,
+                                ) {
                                     Ok(embedded) => {
                                         if embedded > 0 {
                                             if verbose {
@@ -309,8 +375,13 @@ fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result
 }
 
 /// Run semantic search using embeddings.
-fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Result<(), Box<dyn std::error::Error>> {
-    use embeddings::{EmbeddingProvider, semantic_search};
+fn run_semantic(
+    query: &str,
+    limit: usize,
+    output: &str,
+    use_openai: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use embeddings::{semantic_search, EmbeddingProvider};
 
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
@@ -332,7 +403,8 @@ fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Re
         Box::new(p)
     } else {
         use embeddings::local::LocalProvider;
-        let p = LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
+        let p =
+            LocalProvider::new().map_err(|e| format!("Failed to initialize local model: {}", e))?;
         Box::new(p)
     };
 
@@ -363,7 +435,11 @@ fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Re
             .collect();
         println!("{}", serde_json::to_string_pretty(&json_results)?);
     } else {
-        println!("Semantic search for '{}' ({} results):", query, results.len());
+        println!(
+            "Semantic search for '{}' ({} results):",
+            query,
+            results.len()
+        );
         println!("{}", "-".repeat(80));
         println!("{:<35} {:<10} {:<8} {}", "SYMBOL", "KIND", "SCORE", "FILE");
         println!("{}", "-".repeat(80));
@@ -376,11 +452,7 @@ fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Re
 
             println!(
                 "{:<35} {:<10} {:<8} {}:{}",
-                name,
-                result.kind,
-                score_display,
-                file,
-                result.line
+                name, result.kind, score_display, file, result.line
             );
         }
     }
@@ -438,7 +510,12 @@ fn run_index(watch: bool, verbose: bool, force: bool) -> Result<(), Box<dyn std:
 // --- Query subcommand helpers ---
 
 /// Handle 'query find' subcommand.
-fn query_find(db: &db::Database, pattern: &str, limit: i32, kind: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+fn query_find(
+    db: &db::Database,
+    pattern: &str,
+    limit: i32,
+    kind: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let symbols = db.find_symbols(pattern, limit)?;
     if symbols.is_empty() {
         eprintln!("No symbols found matching '{}'", pattern);
@@ -446,18 +523,31 @@ fn query_find(db: &db::Database, pattern: &str, limit: i32, kind: Option<String>
     }
 
     let symbols: Vec<_> = if let Some(ref k) = kind {
-        symbols.into_iter().filter(|s| s.kind.as_str() == k).collect()
+        symbols
+            .into_iter()
+            .filter(|s| s.kind.as_str() == k)
+            .collect()
     } else {
         symbols
     };
 
-    println!("{:<40} {:<12} {:<10} {}", "SYMBOL", "KIND", "VISIBILITY", "FILE");
+    println!(
+        "{:<40} {:<12} {:<10} {}",
+        "SYMBOL", "KIND", "VISIBILITY", "FILE"
+    );
     println!("{}", "-".repeat(90));
 
     for symbol in symbols {
         let name = truncate_str(&symbol.name, 38);
         let file = truncate_path(&symbol.file_path, 30);
-        println!("{:<40} {:<12} {:<10} {}:{}", name, symbol.kind.as_str(), symbol.visibility.as_str(), file, symbol.line_start);
+        println!(
+            "{:<40} {:<12} {:<10} {}:{}",
+            name,
+            symbol.kind.as_str(),
+            symbol.visibility.as_str(),
+            file,
+            symbol.line_start
+        );
     }
     Ok(())
 }
@@ -475,7 +565,12 @@ fn query_callers(db: &db::Database, function: &str) -> Result<(), Box<dyn std::e
 
     for edge in edges {
         if let Some(s) = db.get_symbol(&edge.source_id)? {
-            println!("  {} ({}:{})", s.name, s.file_path, edge.line.unwrap_or(s.line_start));
+            println!(
+                "  {} ({}:{})",
+                s.name,
+                s.file_path,
+                edge.line.unwrap_or(s.line_start)
+            );
             if let Some(ctx) = edge.context {
                 println!("    > {}", ctx);
             }
@@ -499,7 +594,12 @@ fn query_deps(db: &db::Database, symbol: &str) -> Result<(), Box<dyn std::error:
     println!("{}", "-".repeat(60));
 
     for edge in edges {
-        println!("  {} {} (line {})", edge.kind.as_str(), edge.target_name, edge.line.unwrap_or(0));
+        println!(
+            "  {} {} (line {})",
+            edge.kind.as_str(),
+            edge.target_name,
+            edge.line.unwrap_or(0)
+        );
     }
     Ok(())
 }
@@ -538,15 +638,24 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
     let db = index::open_database(&root)?;
 
     match query {
-        QueryCommand::Find { pattern, limit, kind } => query_find(&db, &pattern, limit, kind),
+        QueryCommand::Find {
+            pattern,
+            limit,
+            kind,
+        } => query_find(&db, &pattern, limit, kind),
         QueryCommand::Callers { function, depth: _ } => query_callers(&db, &function),
         QueryCommand::Deps { symbol, depth: _ } => query_deps(&db, &symbol),
-        QueryCommand::Graph { start, depth, output } => {
+        QueryCommand::Graph {
+            start,
+            depth,
+            output,
+        } => {
             // Use DuckDB analytics for recursive graph traversal
             let analytics = analytics::Analytics::open(&root)
                 .map_err(|e| format!("Failed to open analytics: {}", e))?;
 
-            let nodes = analytics.call_graph(&start, depth)
+            let nodes = analytics
+                .call_graph(&start, depth)
                 .map_err(|e| format!("Call graph query failed: {}", e))?;
 
             if output == "json" {
@@ -592,7 +701,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 println!("Call graph from '{}' (depth={}):", start, depth);
                 println!("{}", "-".repeat(70));
-                
+
                 let mut current_depth = 0;
                 for node in &nodes {
                     if node.depth != current_depth {
@@ -601,7 +710,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     println!("  {} ({}) [{}]", node.name, node.file_path, node.kind);
                 }
-                
+
                 if nodes.is_empty() {
                     println!("  (no outgoing calls found)");
                 }
@@ -614,7 +723,8 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
             let analytics = analytics::Analytics::open(&root)
                 .map_err(|e| format!("Failed to open analytics: {}", e))?;
 
-            let impacts = analytics.impact_analysis(&symbol, depth)
+            let impacts = analytics
+                .impact_analysis(&symbol, depth)
                 .map_err(|e| format!("Impact analysis query failed: {}", e))?;
 
             if impacts.is_empty() {
@@ -634,7 +744,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("  {} ({}) [{}]", impact.name, impact.file_path, impact.kind);
             }
-            
+
             println!("\nTotal: {} symbols affected", impacts.len());
             Ok(())
         }
@@ -656,8 +766,11 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(analytics) = analytics::Analytics::open(&root) {
                 println!("\nPer-file breakdown:");
                 println!("{}", "-".repeat(60));
-                println!("{:<35} {:>6} {:>6} {:>6} {:>6}", "FILE", "TOTAL", "FUNCS", "PUB", "TYPES");
-                
+                println!(
+                    "{:<35} {:>6} {:>6} {:>6} {:>6}",
+                    "FILE", "TOTAL", "FUNCS", "PUB", "TYPES"
+                );
+
                 if let Ok(file_stats) = analytics.file_statistics() {
                     for fs in file_stats.iter().take(15) {
                         let file = truncate_path(&fs.file_path, 33);
@@ -679,7 +792,7 @@ fn run_query(query: QueryCommand) -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nMost connected functions:");
                 println!("{}", "-".repeat(60));
                 println!("{:<30} {:>10} {:>10}", "FUNCTION", "CALLS OUT", "CALLED BY");
-                
+
                 if let Ok(connected) = analytics.most_connected(10) {
                     for (name, _file, out_degree, in_degree) in connected {
                         let name_display = truncate_str(&name, 28);
@@ -717,21 +830,20 @@ fn run_search(query: &str, limit: i32, output: &str) -> Result<(), Box<dyn std::
             eprintln!("No results found for '{}'", query);
             return Ok(());
         }
-        
+
         // Convert to format with scores
-        let results: Vec<_> = symbols.iter()
-            .map(|s| (s, 0.5, "name"))
-            .collect();
-        
+        let results: Vec<_> = symbols.iter().map(|s| (s, 0.5, "name")).collect();
+
         print_search_results(&results, query, output)?;
         return Ok(());
     }
 
     // Convert references for printing
-    let results_ref: Vec<_> = results.iter()
+    let results_ref: Vec<_> = results
+        .iter()
         .map(|(s, score, match_type)| (s, *score, match_type.as_str()))
         .collect();
-    
+
     print_search_results(&results_ref, query, output)?;
 
     Ok(())
@@ -761,7 +873,11 @@ fn print_search_results(
             .collect();
         println!("{}", serde_json::to_string_pretty(&json_results)?);
     } else {
-        println!("Search results for '{}' ({} matches):", query, results.len());
+        println!(
+            "Search results for '{}' ({} matches):",
+            query,
+            results.len()
+        );
         println!("{}", "-".repeat(75));
         println!("{:<40} {:<8} {:<6} {}", "SYMBOL", "KIND", "SCORE", "FILE");
         println!("{}", "-".repeat(75));
@@ -775,11 +891,7 @@ fn print_search_results(
 
             println!(
                 "{:<40} {:<8} {:<6} {}:{}",
-                name,
-                kind_display,
-                score_display,
-                file,
-                symbol.line_start
+                name, kind_display, score_display, file, symbol.line_start
             );
 
             // Show match type indicator
@@ -816,7 +928,10 @@ fn run_source(symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let symbols = db.find_symbols(symbol, 1)?;
         symbols.first().and_then(|s| {
-            db.get_source(&s.id).ok().flatten().map(|src| (s.id.clone(), src))
+            db.get_source(&s.id)
+                .ok()
+                .flatten()
+                .map(|src| (s.id.clone(), src))
         })
     };
 
@@ -864,7 +979,12 @@ fn run_explain(symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("\nCalled by ({}):", callers.len());
         for edge in callers.iter().take(10) {
             if let Some(caller) = db.get_symbol(&edge.source_id)? {
-                println!("  {} ({}:{})", caller.name, caller.file_path, edge.line.unwrap_or(0));
+                println!(
+                    "  {} ({}:{})",
+                    caller.name,
+                    caller.file_path,
+                    edge.line.unwrap_or(0)
+                );
             }
         }
         if callers.len() > 10 {
@@ -888,7 +1008,11 @@ fn run_explain(symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Analyze code complexity and flag high fan-out functions.
-fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn run_complexity(
+    threshold: i64,
+    warnings_only: bool,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = env::current_dir()?;
     let analytics = analytics::Analytics::open(&root)
         .map_err(|e| format!("Failed to open analytics: {}", e))?;
@@ -902,7 +1026,10 @@ fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<(
 
     // Filter to only warnings if requested
     let results: Vec<_> = if warnings_only {
-        results.into_iter().filter(|r| r.fan_out >= threshold).collect()
+        results
+            .into_iter()
+            .filter(|r| r.fan_out >= threshold)
+            .collect()
     } else {
         results
     };
@@ -926,7 +1053,10 @@ fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<(
     } else {
         println!("Code Complexity Analysis (threshold: {})", threshold);
         println!("{}", "=".repeat(90));
-        println!("{:<35} {:>8} {:>8} {:>8} {:<10} {}", "FUNCTION", "FAN-OUT", "FAN-IN", "SCORE", "SEVERITY", "FILE");
+        println!(
+            "{:<35} {:>8} {:>8} {:>8} {:<10} {}",
+            "FUNCTION", "FAN-OUT", "FAN-IN", "SCORE", "SEVERITY", "FILE"
+        );
         println!("{}", "-".repeat(90));
 
         for result in &results {
@@ -955,11 +1085,14 @@ fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<(
         // Summary
         let critical = results.iter().filter(|r| r.severity == "critical").count();
         let high = results.iter().filter(|r| r.severity == "high").count();
-        
+
         println!("{}", "-".repeat(90));
         println!("Total: {} functions analyzed", results.len());
         if critical > 0 || high > 0 {
-            println!("⚠️  {} critical, {} high complexity functions need attention", critical, high);
+            println!(
+                "⚠️  {} critical, {} high complexity functions need attention",
+                critical, high
+            );
         }
     }
 
@@ -967,14 +1100,21 @@ fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<(
 }
 
 /// Detect duplicate or similar code blocks.
-fn run_duplicates(similarity_threshold: u32, min_lines: u32, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn run_duplicates(
+    similarity_threshold: u32,
+    min_lines: u32,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
     let duplicates = db.find_duplicates(similarity_threshold, min_lines)?;
 
     if duplicates.is_empty() {
-        println!("No duplicate code blocks found (threshold: {}%, min lines: {}).", similarity_threshold, min_lines);
+        println!(
+            "No duplicate code blocks found (threshold: {}%, min lines: {}).",
+            similarity_threshold, min_lines
+        );
         return Ok(());
     }
 
@@ -1001,11 +1141,19 @@ fn run_duplicates(similarity_threshold: u32, min_lines: u32, output: &str) -> Re
             .collect();
         println!("{}", serde_json::to_string_pretty(&json_results)?);
     } else {
-        println!("Duplicate Code Detection (similarity >= {}%, min {} lines)", similarity_threshold, min_lines);
+        println!(
+            "Duplicate Code Detection (similarity >= {}%, min {} lines)",
+            similarity_threshold, min_lines
+        );
         println!("{}", "=".repeat(100));
-        
+
         for (i, dup) in duplicates.iter().enumerate() {
-            println!("\n{}. Similarity: {:.1}% ({} lines)", i + 1, dup.similarity, dup.lines);
+            println!(
+                "\n{}. Similarity: {:.1}% ({} lines)",
+                i + 1,
+                dup.similarity,
+                dup.lines
+            );
             println!("   {} ({}:{})", dup.name1, dup.file1, dup.line1);
             println!("   {} ({}:{})", dup.name2, dup.file2, dup.line2);
         }
@@ -1025,7 +1173,7 @@ fn output_file_deps_dot(deps: &[(String, String, i64)]) {
     println!("  rankdir=LR;");
     println!("  node [shape=box, style=filled, fillcolor=lightblue];");
     println!("  edge [color=gray];");
-    
+
     let mut nodes: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (src, tgt, _) in deps {
         nodes.insert(src.clone());
@@ -1033,12 +1181,12 @@ fn output_file_deps_dot(deps: &[(String, String, i64)]) {
             nodes.insert(tgt.clone());
         }
     }
-    
+
     for node in &nodes {
         let short_name = node.split('/').last().unwrap_or(node);
         println!("  \"{}\" [label=\"{}\"];", node, short_name);
     }
-    
+
     for (src, tgt, count) in deps {
         if tgt != "external" {
             let weight = (*count as f64).sqrt().ceil() as i64;
@@ -1064,18 +1212,20 @@ fn output_file_deps_mermaid(deps: &[(String, String, i64)]) {
 
 /// Output file dependencies in JSON format.
 fn output_file_deps_json(deps: &[(String, String, i64)]) -> Result<(), Box<dyn std::error::Error>> {
-    let nodes: Vec<_> = deps.iter()
+    let nodes: Vec<_> = deps
+        .iter()
         .flat_map(|(src, tgt, _)| vec![src.clone(), tgt.clone()])
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .filter(|n| n != "external")
         .collect();
-        
-    let edges: Vec<_> = deps.iter()
+
+    let edges: Vec<_> = deps
+        .iter()
         .filter(|(_, tgt, _)| tgt != "external")
         .map(|(src, tgt, count)| serde_json::json!({"source": src, "target": tgt, "weight": count}))
         .collect();
-        
+
     let graph = serde_json::json!({"type": "file_dependencies", "nodes": nodes, "edges": edges});
     println!("{}", serde_json::to_string_pretty(&graph)?);
     Ok(())
@@ -1086,13 +1236,20 @@ fn output_call_graph_dot(graph: &[(String, String, String, String)]) {
     println!("digraph call_graph {{");
     println!("  rankdir=LR;");
     println!("  node [shape=ellipse];");
-    
-    let mut files: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+    let mut files: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for (src_file, src_name, tgt_file, tgt_name) in graph {
-        files.entry(src_file.clone()).or_default().push(src_name.clone());
-        files.entry(tgt_file.clone()).or_default().push(tgt_name.clone());
+        files
+            .entry(src_file.clone())
+            .or_default()
+            .push(src_name.clone());
+        files
+            .entry(tgt_file.clone())
+            .or_default()
+            .push(tgt_name.clone());
     }
-    
+
     for (i, (file, symbols)) in files.iter().enumerate() {
         let short_file = file.split('/').last().unwrap_or(file);
         println!("  subgraph cluster_{} {{", i);
@@ -1104,7 +1261,7 @@ fn output_call_graph_dot(graph: &[(String, String, String, String)]) {
         }
         println!("  }}");
     }
-    
+
     for (_, src_name, _, tgt_name) in graph {
         println!("  \"{}\" -> \"{}\";", src_name, tgt_name);
     }
@@ -1116,39 +1273,55 @@ fn output_call_graph_mermaid(graph: &[(String, String, String, String)]) {
     println!("```mermaid");
     println!("graph LR");
     for (_, src_name, _, tgt_name) in graph {
-        println!("  {}[{}] --> {}[{}]", 
-            src_name.replace("::", "_"), src_name,
-            tgt_name.replace("::", "_"), tgt_name
+        println!(
+            "  {}[{}] --> {}[{}]",
+            src_name.replace("::", "_"),
+            src_name,
+            tgt_name.replace("::", "_"),
+            tgt_name
         );
     }
     println!("```");
 }
 
 /// Output call graph in JSON format.
-fn output_call_graph_json(graph: &[(String, String, String, String)]) -> Result<(), Box<dyn std::error::Error>> {
-    let nodes: Vec<_> = graph.iter()
-        .flat_map(|(sf, sn, tf, tn)| vec![
-            serde_json::json!({"name": sn, "file": sf}),
-            serde_json::json!({"name": tn, "file": tf}),
-        ])
+fn output_call_graph_json(
+    graph: &[(String, String, String, String)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let nodes: Vec<_> = graph
+        .iter()
+        .flat_map(|(sf, sn, tf, tn)| {
+            vec![
+                serde_json::json!({"name": sn, "file": sf}),
+                serde_json::json!({"name": tn, "file": tf}),
+            ]
+        })
         .collect();
-        
-    let edges: Vec<_> = graph.iter()
+
+    let edges: Vec<_> = graph
+        .iter()
         .map(|(_, src, _, tgt)| serde_json::json!({"source": src, "target": tgt}))
         .collect();
-        
+
     let result = serde_json::json!({"type": "call_graph", "nodes": nodes, "edges": edges});
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
 /// Generate a dependency graph visualization.
-fn run_graph(output: &str, by_file: bool, filter: Option<String>, depth: i32) -> Result<(), Box<dyn std::error::Error>> {
+fn run_graph(
+    output: &str,
+    by_file: bool,
+    filter: Option<String>,
+    depth: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = env::current_dir()?;
     let analytics = analytics::Analytics::open(&root)
         .map_err(|e| format!("Failed to open analytics: {}", e))?;
 
-    let filter_files: Option<Vec<&str>> = filter.as_ref().map(|f| f.split(',').map(|s| s.trim()).collect());
+    let filter_files: Option<Vec<&str>> = filter
+        .as_ref()
+        .map(|f| f.split(',').map(|s| s.trim()).collect());
 
     if by_file {
         let deps = analytics.file_dependencies()?;
@@ -1175,8 +1348,13 @@ fn run_graph(output: &str, by_file: bool, filter: Option<String>, depth: i32) ->
     } else {
         let graph = analytics.full_call_graph(depth)?;
         let graph: Vec<_> = if let Some(ref filters) = filter_files {
-            graph.into_iter()
-                .filter(|(src_file, _, tgt_file, _)| filters.iter().any(|f| src_file.contains(f) || tgt_file.contains(f)))
+            graph
+                .into_iter()
+                .filter(|(src_file, _, tgt_file, _)| {
+                    filters
+                        .iter()
+                        .any(|f| src_file.contains(f) || tgt_file.contains(f))
+                })
                 .collect()
         } else {
             graph
@@ -1208,7 +1386,7 @@ mod tests {
         // No truncation needed
         assert_eq!(truncate_str("hello", 10), "hello");
         assert_eq!(truncate_str("hello", 5), "hello");
-        
+
         // Truncation needed
         assert_eq!(truncate_str("hello world", 8), "hello...");
         assert_eq!(truncate_str("abcdefghij", 7), "abcd...");
@@ -1221,12 +1399,12 @@ mod tests {
         let result = truncate_str(box_line, 10);
         assert!(result.ends_with("..."));
         // Should not panic
-        
+
         // Emoji (🎉 is 4 bytes)
         let emoji = "Hello 🎉🎊🎁 World";
         let result = truncate_str(emoji, 10);
         assert!(result.ends_with("..."));
-        
+
         // Chinese (each char is 3 bytes)
         let chinese = "你好世界测试";
         let result = truncate_str(chinese, 8);
@@ -1237,7 +1415,7 @@ mod tests {
     fn test_truncate_path_ascii() {
         // No truncation needed
         assert_eq!(truncate_path("src/main.rs", 20), "src/main.rs");
-        
+
         // Truncation needed - keeps end of path
         let result = truncate_path("/very/long/path/to/file.rs", 15);
         assert!(result.starts_with("..."));
@@ -1251,7 +1429,7 @@ mod tests {
         let result = truncate_path(path, 15);
         assert!(result.starts_with("..."));
         // Should not panic
-        
+
         // Path with emoji folder names
         let path = "/home/📁/🎉/file.rs";
         let result = truncate_path(path, 12);
@@ -1263,7 +1441,7 @@ mod tests {
         // Very short max
         assert_eq!(truncate_str("hello", 3), "...");
         assert_eq!(truncate_str("hi", 3), "hi");
-        
+
         // Empty string
         assert_eq!(truncate_str("", 10), "");
         assert_eq!(truncate_path("", 10), "");

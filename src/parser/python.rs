@@ -2,8 +2,13 @@
 
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
-use crate::db::{Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
-use crate::parser::{extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns, SymbolKindMapping};
+use crate::db::{
+    Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
+};
+use crate::parser::{
+    extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns,
+    SymbolKindMapping,
+};
 
 /// Symbol kind mappings for Python capture names.
 const PYTHON_SYMBOL_MAPPINGS: &[SymbolKindMapping] = &[
@@ -192,10 +197,24 @@ impl PythonParser {
         );
 
         // Extract edges (calls)
-        extract_call_edges(&calls_query, &root, source, &symbols, &mut edges, &CallCapturePatterns::STANDARD);
+        extract_call_edges(
+            &calls_query,
+            &root,
+            source,
+            &symbols,
+            &mut edges,
+            &CallCapturePatterns::STANDARD,
+        );
 
         // Extract inheritance edges (extends)
-        Self::extract_inheritance_edges(&inheritance_query, &root, file_path, source, &symbols, &mut edges);
+        Self::extract_inheritance_edges(
+            &inheritance_query,
+            &root,
+            file_path,
+            source,
+            &symbols,
+            &mut edges,
+        );
 
         let module = ModuleInfo {
             file_path: file_path.to_string(),
@@ -253,7 +272,13 @@ impl PythonParser {
                     parent_class = find_parent_class(capture_str, &node, &class_ranges);
                 } else {
                     // Handle imports and other special cases
-                    match handle_import_capture(capture_str, text, &node, source, &mut import_module) {
+                    match handle_import_capture(
+                        capture_str,
+                        text,
+                        &node,
+                        source,
+                        &mut import_module,
+                    ) {
                         ImportCaptureResult::SimpleImport(info) => imports.push(info),
                         ImportCaptureResult::FromImport(info) => imports.push(info),
                         ImportCaptureResult::ModuleName | ImportCaptureResult::NotImport => {
@@ -269,7 +294,8 @@ impl PythonParser {
 
             // Create symbol if we have enough information
             if let (Some(name), Some(kind), Some(node)) = (name, kind, def_node) {
-                let symbol = create_python_symbol(file_path, name, kind, &node, source, parent_class);
+                let symbol =
+                    create_python_symbol(file_path, name, kind, &node, source, parent_class);
                 if symbol.visibility == Visibility::Public {
                     exports.push(name.to_string());
                 }
@@ -536,9 +562,9 @@ fn handle_import_capture(
             ImportCaptureResult::ModuleName
         }
         "import_from.def" => {
-            let module_name = import_module.take().or_else(|| {
-                extract_import_from_module(node, source)
-            });
+            let module_name = import_module
+                .take()
+                .or_else(|| extract_import_from_module(node, source));
             if let Some(module) = module_name {
                 let names = extract_import_names(node, source);
                 ImportCaptureResult::FromImport(ImportInfo {
@@ -618,7 +644,10 @@ fn extract_aliased_name(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "dotted_name" || child.kind() == "identifier" {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
     }
     None
@@ -644,7 +673,10 @@ fn find_parent_class<'a>(
 
 /// Check if a name is a Python constant (UPPER_CASE).
 fn is_python_constant(text: &str) -> bool {
-    !text.is_empty() && text.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
 }
 
 /// Parse import names from text as a fallback.
@@ -672,18 +704,18 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
 
     for child in node.children(&mut cursor) {
         let kind = child.kind();
-        
+
         // Skip keywords
         if kind == "import" || kind == "from" || kind == "import_prefix" {
             continue;
         }
-        
+
         // The first dotted_name is the module, skip it
         if kind == "dotted_name" && !seen_module {
             seen_module = true;
             continue;
         }
-        
+
         // Handle imported names (subsequent dotted_name nodes)
         if kind == "dotted_name" {
             if let Ok(text) = child.utf8_text(source.as_bytes()) {
@@ -691,7 +723,7 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
             }
             continue;
         }
-        
+
         // Handle aliased imports: from x import y as z
         if kind == "aliased_import" {
             if let Some(name) = extract_aliased_name(&child, source) {
@@ -699,13 +731,13 @@ fn extract_import_names(node: &Node, source: &str) -> Vec<String> {
             }
             continue;
         }
-        
+
         // Handle wildcard imports: from x import *
         if kind == "wildcard_import" {
             names.push("*".to_string());
             continue;
         }
-        
+
         // Look for identifiers in other node types (like import lists)
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
@@ -819,13 +851,25 @@ def __very_private():
 
         let result = parser.parse("test.py", source).unwrap();
 
-        let public = result.symbols.iter().find(|s| s.name == "public_func").unwrap();
+        let public = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "public_func")
+            .unwrap();
         assert_eq!(public.visibility, Visibility::Public);
 
-        let private = result.symbols.iter().find(|s| s.name == "_private_func").unwrap();
+        let private = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "_private_func")
+            .unwrap();
         assert_eq!(private.visibility, Visibility::Private);
 
-        let very_private = result.symbols.iter().find(|s| s.name == "__very_private").unwrap();
+        let very_private = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "__very_private")
+            .unwrap();
         assert_eq!(very_private.visibility, Visibility::Private);
     }
 
@@ -921,7 +965,10 @@ def baz():
 
     #[test]
     fn test_clean_docstring() {
-        assert_eq!(clean_docstring("\"\"\"Simple docstring.\"\"\""), "Simple docstring.");
+        assert_eq!(
+            clean_docstring("\"\"\"Simple docstring.\"\"\""),
+            "Simple docstring."
+        );
         assert_eq!(
             clean_docstring("'''Multi-line\n    docstring.'''"),
             "Multi-line\ndocstring."
@@ -958,24 +1005,24 @@ class Hybrid(Dog, Cat):
         assert_eq!(extends_edges.len(), 4);
 
         // Check Dog -> Animal
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Dog") && e.target_name == "Animal"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Dog") && e.target_name == "Animal" }));
 
         // Check Cat -> Animal
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Cat") && e.target_name == "Animal"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Cat") && e.target_name == "Animal" }));
 
         // Check Hybrid -> Dog
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Hybrid") && e.target_name == "Dog"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Hybrid") && e.target_name == "Dog" }));
 
         // Check Hybrid -> Cat
-        assert!(extends_edges.iter().any(|e| {
-            e.source_id.contains("Hybrid") && e.target_name == "Cat"
-        }));
+        assert!(extends_edges
+            .iter()
+            .any(|e| { e.source_id.contains("Hybrid") && e.target_name == "Cat" }));
     }
 
     #[test]
@@ -993,10 +1040,15 @@ from collections import defaultdict
 
         // Imports should be in module info, not as edges
         let module = result.module.unwrap();
-        assert!(!module.imports.is_empty(), "Expected imports in module info");
+        assert!(
+            !module.imports.is_empty(),
+            "Expected imports in module info"
+        );
 
         // Check we captured the imports - look for typing imports
         let all_imports: Vec<_> = module.imports.iter().flat_map(|i| i.names.iter()).collect();
-        assert!(all_imports.iter().any(|n| n.contains("os") || n.contains("List") || n.contains("Dict")));
+        assert!(all_imports
+            .iter()
+            .any(|n| n.contains("os") || n.contains("List") || n.contains("Dict")));
     }
 }
