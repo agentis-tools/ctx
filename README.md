@@ -288,6 +288,3 @@ INDEX OPTIONS:
 - Compressed source storage (~70% size reduction)
 - In-memory DuckDB for fast analytical queries
 
-## License
-
-MIT
