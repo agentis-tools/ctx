@@ -1,9 +1,3 @@
----
-id: getting-started
-title: Getting Started
-sidebar_position: 2
----
-
 # Getting Started
 
 This guide walks you through installing ctx and using it to generate context for LLMs and build a searchable code intelligence index.
@@ -13,7 +7,7 @@ This guide walks you through installing ctx and using it to generate context for
 ### From Source (Recommended)
 
 ```bash
-git clone https://github.com/ctx-dev/ctx
+git clone https://github.com/yourusername/ctx
 cd ctx
 cargo build --release
 
@@ -356,6 +350,23 @@ ctx embed --watch
 
 Now any file changes are automatically indexed and embedded.
 
+### Filtered Watch Mode
+
+Watch only specific files or exclude patterns:
+
+```bash
+# Only watch TypeScript files in src/
+ctx index --watch -p "src/**/*.ts"
+
+# Watch everything except test files
+ctx index --watch -i "**/*.test.ts" -i "**/*.spec.ts"
+
+# Combine include and ignore patterns
+ctx index --watch -p "src/" -i "src/generated/"
+```
+
+Watch mode respects all the same filtering as initial indexing, including `.gitignore`, `.contextignore`, and built-in ignores.
+
 ## Part 5: Project Configuration
 
 ### Create .contextignore
@@ -445,8 +456,8 @@ ctx graph --by-file --output mermaid
 
 ## Next Steps
 
-- [Context Generation](./context-generation) - All output formats and filtering options
-- [Code Intelligence](./code-intelligence) - Deep dive into indexing and querying
-- [Configuration](./configuration) - .contextignore and environment variables
-- [Language Support](./language-support) - What's extracted from each language
-- [Architecture](./architecture) - How ctx works under the hood
+- [Context Generation](context-generation.md) - All output formats and filtering options
+- [Code Intelligence](code-intelligence.md) - Deep dive into indexing and querying
+- [Configuration](configuration.md) - .contextignore and environment variables
+- [Language Support](language-support.md) - What's extracted from each language
+- [Architecture](architecture.md) - How ctx works under the hood

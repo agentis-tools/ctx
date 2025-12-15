@@ -350,6 +350,23 @@ ctx embed --watch
 
 Now any file changes are automatically indexed and embedded.
 
+### Filtered Watch Mode
+
+Watch only specific files or exclude patterns:
+
+```bash
+# Only watch TypeScript files in src/
+ctx index --watch -p "src/**/*.ts"
+
+# Watch everything except test files
+ctx index --watch -i "**/*.test.ts" -i "**/*.spec.ts"
+
+# Combine include and ignore patterns
+ctx index --watch -p "src/" -i "src/generated/"
+```
+
+Watch mode respects all the same filtering as initial indexing, including `.gitignore`, `.contextignore`, and built-in ignores.
+
 ## Part 5: Project Configuration
 
 ### Create .contextignore

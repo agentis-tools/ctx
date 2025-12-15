@@ -77,11 +77,13 @@ pub struct Indexer {
     parser: CodeParser,
     root: PathBuf,
     verbose: bool,
+    /// Walker configuration for file discovery.
+    walker_config: WalkerConfig,
 }
 
 impl Indexer {
-    /// Create a new indexer for a project root.
-    pub fn new(root: &Path, verbose: bool) -> io::Result<Self> {
+    /// Create a new indexer with custom walker configuration.
+    pub fn with_config(root: &Path, verbose: bool, walker_config: WalkerConfig) -> io::Result<Self> {
         let root = root.canonicalize()?;
 
         // Create .ctx directory if needed
@@ -100,6 +102,7 @@ impl Indexer {
             parser: CodeParser::new(),
             root,
             verbose,
+            walker_config,
         })
     }
 
@@ -115,6 +118,7 @@ impl Indexer {
             parser: CodeParser::new(),
             root,
             verbose: false,
+            walker_config: WalkerConfig::default(),
         })
     }
 
@@ -122,9 +126,8 @@ impl Indexer {
     pub fn index(&mut self) -> io::Result<IndexResult> {
         let start = Instant::now();
 
-        // Discover files
-        let config = WalkerConfig::default();
-        let entries = discover_files(&self.root, &config)?;
+        // Discover files using the configured walker
+        let entries = discover_files(&self.root, &self.walker_config)?;
 
         let mut result = IndexResult {
             files_indexed: 0,
@@ -439,14 +442,19 @@ pub mod watch {
 
     use super::Indexer;
     use crate::parser::Language;
+    use crate::walker::{FileFilter, WalkerConfig};
 
     /// Start watching the codebase for changes and reindex automatically.
-    pub fn watch_and_index(root: &Path, verbose: bool) -> std::io::Result<()> {
+    pub fn watch_and_index(root: &Path, verbose: bool, walker_config: WalkerConfig) -> std::io::Result<()> {
         let root = root.canonicalize()?;
+
+        // Build file filter once for efficient watch-mode filtering
+        // This handles .gitignore, .contextignore, default ignores, custom ignores, and include patterns
+        let file_filter = FileFilter::new(&root, &walker_config)?;
 
         // Do initial index
         eprintln!("Performing initial index...");
-        let mut indexer = Indexer::new(&root, verbose)?;
+        let mut indexer = Indexer::with_config(&root, verbose, walker_config)?;
         let result = indexer.index()?;
         eprintln!(
             "Initial index complete: {} files, {} symbols",
@@ -474,10 +482,15 @@ pub mod watch {
                     let mut reindex_needed = false;
 
                     for event in events {
-                        if event.kind == DebouncedEventKind::Any {
+                        // Handle both Any and AnyContinuous events
+                        // AnyContinuous signals ongoing/rapid changes that should also trigger reindex
+                        if matches!(
+                            event.kind,
+                            DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous
+                        ) {
                             let path = &event.path;
 
-                            // Skip non-source files and .ctx directory
+                            // Skip .ctx directory
                             if path.starts_with(root.join(super::CTX_DIR)) {
                                 continue;
                             }
@@ -485,6 +498,12 @@ pub mod watch {
                             // Check if it's a supported source file
                             let lang = Language::from_path(path);
                             if lang == Language::Unknown {
+                                continue;
+                            }
+
+                            // Check if file should be included based on walker config
+                            // (respects .gitignore, .contextignore, --ignore, --pattern, etc.)
+                            if !file_filter.should_include(path) {
                                 continue;
                             }
 

@@ -1,9 +1,3 @@
----
-id: configuration
-title: Configuration
-sidebar_position: 5
----
-
 # Configuration
 
 ctx uses a minimal configuration approach based on ignore files. There are no complex config files to manage - just familiar gitignore-style patterns.
@@ -387,7 +381,7 @@ _site/
 
 ### Viewing the Full List
 
-See [src/default_ignores.rs](https://github.com/ctx-dev/ctx/blob/main/src/default_ignores.rs) for the complete list.
+See [src/default_ignores.rs](https://github.com/yourusername/ctx/blob/main/src/default_ignores.rs) for the complete list.
 
 ## Command-Line Configuration
 
@@ -396,22 +390,49 @@ See [src/default_ignores.rs](https://github.com/ctx-dev/ctx/blob/main/src/defaul
 Add patterns on the fly:
 
 ```bash
+# Context generation
 ctx -i "*.test.ts" -i "fixtures/" src/
+
+# Indexing
+ctx index -i "*.test.ts" -i "fixtures/"
 ```
 
 Multiple `-i` flags are combined with other ignore sources.
 
+### Include Patterns (Index Only)
+
+Limit indexing to specific patterns:
+
+```bash
+# Only index Rust files in src/
+ctx index -p "src/**/*.rs"
+
+# Index multiple patterns
+ctx index -p "src/**/*.ts" -p "lib/**/*.ts"
+
+# Mix globs and literal paths
+ctx index -p "src/**/*.rs" -p "Cargo.toml"
+```
+
+Include patterns support:
+- Glob patterns: `src/**/*.rs`, `*.ts`
+- Literal paths: `src/`, `lib/main.rs`
+- Absolute paths: `/home/user/project/src/**/*.rs`
+
 ### Disabling Ignores
 
 ```bash
-# Disable .gitignore only
+# Context generation
 ctx --no-gitignore src/
-
-# Disable built-in patterns only
 ctx --no-default-ignores src/
+
+# Indexing
+ctx index --no-gitignore
+ctx index --no-default-ignores
 
 # Include everything (except .contextignore)
 ctx --no-gitignore --no-default-ignores src/
+ctx index --no-gitignore --no-default-ignores
 ```
 
 Note: `.contextignore` is always respected if present.

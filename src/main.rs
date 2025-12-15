@@ -38,7 +38,19 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             watch,
             verbose,
             force,
-        }) => run_index(watch, verbose, force),
+            no_gitignore,
+            no_default_ignores,
+            ignore_patterns,
+            include_patterns,
+        }) => run_index(
+            watch,
+            verbose,
+            force,
+            no_gitignore,
+            no_default_ignores,
+            ignore_patterns,
+            include_patterns,
+        ),
         Some(Command::Query { query }) => run_query(query),
         Some(Command::Search {
             query,
@@ -461,7 +473,15 @@ fn run_semantic(
 }
 
 /// Run the index command.
-fn run_index(watch: bool, verbose: bool, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_index(
+    watch: bool,
+    verbose: bool,
+    force: bool,
+    no_gitignore: bool,
+    no_default_ignores: bool,
+    ignore_patterns: Vec<String>,
+    include_patterns: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = env::current_dir()?;
 
     // Handle force reindex by removing existing database
@@ -473,9 +493,17 @@ fn run_index(watch: bool, verbose: bool, force: bool) -> Result<(), Box<dyn std:
         }
     }
 
+    // Build walker configuration from CLI flags
+    let make_walker_config = || walker::WalkerConfig {
+        use_gitignore: !no_gitignore,
+        use_default_ignores: !no_default_ignores,
+        custom_ignores: ignore_patterns.clone(),
+        include_patterns: include_patterns.clone(),
+    };
+
     eprintln!("Indexing codebase...");
 
-    let mut indexer = index::Indexer::new(&root, verbose)?;
+    let mut indexer = index::Indexer::with_config(&root, verbose, make_walker_config())?;
     let result = indexer.index()?;
 
     eprintln!(
@@ -501,7 +529,7 @@ fn run_index(watch: bool, verbose: bool, force: bool) -> Result<(), Box<dyn std:
     // Watch mode
     if watch {
         eprintln!("\nWatching for changes... (Ctrl+C to stop)");
-        index::watch::watch_and_index(&root, verbose)?;
+        index::watch::watch_and_index(&root, verbose, make_walker_config())?;
     }
 
     Ok(())

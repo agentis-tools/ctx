@@ -98,15 +98,47 @@ Indexing: src/parser/mod.rs
 ...
 ```
 
+### Filtering What Gets Indexed
+
+By default, `ctx index` respects `.gitignore`, `.contextignore`, and built-in ignores. You can customize this:
+
+```bash
+# Ignore additional patterns
+ctx index -i "tests/" -i "*.generated.ts"
+
+# Only index specific patterns
+ctx index -p "src/**/*.rs" -p "lib/"
+
+# Disable gitignore (index gitignored files)
+ctx index --no-gitignore
+
+# Disable built-in ignores (node_modules, target, etc.)
+ctx index --no-default-ignores
+```
+
+The filtering options work the same way in watch mode:
+
+```bash
+# Watch only specific directories
+ctx index --watch -p "src/**/*.ts"
+
+# Watch but ignore test files
+ctx index --watch -i "**/*.test.ts"
+```
+
 ### Index Options Reference
 
 ```
 ctx index [OPTIONS]
 
 Options:
-  -w, --watch    Watch for changes and reindex automatically
-  -v, --verbose  Show verbose output (files being indexed)
-  -f, --force    Force full reindex (clears existing database)
+  -w, --watch                    Watch for changes and reindex automatically
+  -v, --verbose                  Show verbose output (files being indexed)
+      --force                    Force full reindex (clears existing database)
+      --no-gitignore             Disable .gitignore pattern matching
+      --no-default-ignores       Disable built-in ignore patterns
+  -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
+  -p, --pattern <PATTERN>        Include patterns - only index matching files (can be repeated)
 ```
 
 ## Searching
@@ -658,9 +690,13 @@ This single file contains:
 ctx index [OPTIONS]
 
 Options:
-  -w, --watch    Watch for changes and reindex automatically
-  -v, --verbose  Show verbose output
-  -f, --force    Force full reindex (clears existing database)
+  -w, --watch                    Watch for changes and reindex automatically
+  -v, --verbose                  Show verbose output
+      --force                    Force full reindex (clears existing database)
+      --no-gitignore             Disable .gitignore pattern matching
+      --no-default-ignores       Disable built-in ignore patterns
+  -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
+  -p, --pattern <PATTERN>        Include patterns - only index matching files
 ```
 
 ### Query

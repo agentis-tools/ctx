@@ -82,8 +82,24 @@ pub enum Command {
         verbose: bool,
 
         /// Force full reindex (clears existing database)
-        #[arg(long, short)]
+        #[arg(long)]
         force: bool,
+
+        /// Disable .gitignore pattern matching
+        #[arg(long)]
+        no_gitignore: bool,
+
+        /// Disable built-in ignore patterns
+        #[arg(long)]
+        no_default_ignores: bool,
+
+        /// Additional ignore patterns (can be repeated)
+        #[arg(short = 'i', long = "ignore")]
+        ignore_patterns: Vec<String>,
+
+        /// File patterns or paths to include (glob syntax supported)
+        #[arg(short = 'p', long = "pattern")]
+        include_patterns: Vec<String>,
     },
 
     /// Query the code intelligence database
