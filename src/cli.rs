@@ -375,6 +375,25 @@ pub enum Command {
         #[arg(long)]
         no_tree: bool,
     },
+
+    /// Generate code quality audit report
+    Audit {
+        /// Output format (text, json, markdown)
+        #[arg(long = "output", short = 'o', default_value = "text")]
+        output_format: String,
+
+        /// Minimum score threshold (fails if below, 0.0-10.0)
+        #[arg(long)]
+        min_score: Option<f32>,
+
+        /// Categories to check (comma-separated: complexity,duplication,coverage,modularity,naming)
+        #[arg(long)]
+        categories: Option<String>,
+
+        /// Only audit changed files (not yet implemented)
+        #[arg(long)]
+        incremental: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

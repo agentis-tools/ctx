@@ -1,4 +1,5 @@
 mod analytics;
+mod audit;
 mod cli;
 mod db;
 mod default_ignores;
@@ -168,6 +169,12 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             show_sizes,
             no_tree,
         ),
+        Some(Command::Audit {
+            output_format,
+            min_score,
+            categories,
+            incremental,
+        }) => run_audit(&output_format, min_score, categories, incremental),
         None => run_context(args),
     }
 }
@@ -1975,6 +1982,72 @@ fn run_review(
         show_sizes,
         no_tree,
     )
+}
+
+/// Run code quality audit.
+fn run_audit(
+    format: &str,
+    min_score: Option<f32>,
+    categories: Option<String>,
+    _incremental: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use audit::{run_audit as do_audit, AuditConfig};
+
+    let root = env::current_dir()?;
+
+    // Open database
+    let db = index::open_database(&root).map_err(|_| {
+        "No index found. Run 'ctx index' first to build the code intelligence database."
+    })?;
+
+    // Open analytics (optional, provides complexity analysis)
+    let analytics = analytics::Analytics::open(&root).ok();
+
+    // Parse categories if provided
+    let category_list = categories
+        .as_ref()
+        .map(|c| c.split(',').map(|s| s.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    // Build config
+    let config = AuditConfig {
+        categories: category_list,
+        path: root.clone(),
+        incremental: false, // Not implemented yet
+        min_score,
+    };
+
+    eprintln!("Running code quality audit...\n");
+
+    // Run audit
+    let report = do_audit(&db, analytics.as_ref(), &config)?;
+
+    // Output in requested format
+    match format {
+        "json" => {
+            let json = report.format_json()?;
+            println!("{}", json);
+        }
+        "markdown" | "md" => {
+            println!("{}", report.format_markdown());
+        }
+        _ => {
+            // Default: text
+            println!("{}", report.format_text());
+        }
+    }
+
+    // Exit with non-zero if below threshold
+    if !report.passed {
+        eprintln!(
+            "\nAudit failed: score {:.1} below threshold {:.1}",
+            report.overall_score,
+            report.threshold.unwrap_or(0.0)
+        );
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
 
 // --- Graph output helpers ---
