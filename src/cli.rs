@@ -413,6 +413,14 @@ pub enum Command {
         #[arg(long)]
         vi: bool,
     },
+
+    /// Start MCP (Model Context Protocol) server for AI assistant integration
+    #[cfg(feature = "mcp")]
+    Serve {
+        /// Run as MCP server over stdio (for Claude Desktop integration)
+        #[arg(long)]
+        mcp: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

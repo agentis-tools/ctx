@@ -7,6 +7,8 @@ mod diff;
 mod embeddings;
 mod formatter;
 mod index;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod output;
 mod parser;
 mod shell;
@@ -183,6 +185,8 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             no_history,
             vi,
         }) => run_shell(history, no_history, vi),
+        #[cfg(feature = "mcp")]
+        Some(Command::Serve { mcp }) => run_serve(mcp),
         None => run_context(args),
     }
 }
@@ -2086,6 +2090,30 @@ fn run_shell(
     }
 
     shell::run_shell(config)
+}
+
+/// Run the MCP server.
+#[cfg(feature = "mcp")]
+fn run_serve(mcp: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if !mcp {
+        eprintln!("Error: Please specify --mcp flag to start the MCP server.");
+        eprintln!("Usage: ctx serve --mcp");
+        std::process::exit(1);
+    }
+
+    let root = env::current_dir()?;
+
+    // Create a tokio runtime for the async MCP server
+    let rt = tokio::runtime::Runtime::new()?;
+
+    rt.block_on(async {
+        mcp::run_mcp_server(root).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error>
+        })
+    })
 }
 
 // --- Graph output helpers ---
