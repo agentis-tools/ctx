@@ -1,0 +1,40 @@
+# Pre-commit hooks for ctx code quality audit
+# See https://pre-commit.com for more info
+#
+# Usage in your project's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/yourusername/ctx
+#       rev: v0.2.0  # or specific commit
+#       hooks:
+#         - id: ctx-audit
+#           args: [--min-score, "7.0"]
+#         - id: ctx-audit-incremental
+#           args: [--min-score, "7.0"]
+
+- id: ctx-audit
+  name: ctx audit (full)
+  description: Run full code quality audit
+  entry: ctx audit
+  language: system
+  types: [file]
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+
+- id: ctx-audit-incremental
+  name: ctx audit (incremental)
+  description: Run code quality audit on changed files only
+  entry: ctx audit --incremental
+  language: system
+  types: [file]
+  pass_filenames: false
+  stages: [pre-commit]
+
+- id: ctx-audit-strict
+  name: ctx audit (strict)
+  description: Run full audit with strict threshold (8.0)
+  entry: ctx audit --min-score 8.0
+  language: system
+  types: [file]
+  pass_filenames: false
+  stages: [pre-push]

@@ -2011,7 +2011,7 @@ fn run_audit(
     format: &str,
     min_score: Option<f32>,
     categories: Option<String>,
-    _incremental: bool,
+    incremental: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use audit::{run_audit as do_audit, AuditConfig};
 
@@ -2035,11 +2035,15 @@ fn run_audit(
     let config = AuditConfig {
         categories: category_list,
         path: root.clone(),
-        incremental: false, // Not implemented yet
+        incremental,
         min_score,
     };
 
-    eprintln!("Running code quality audit...\n");
+    if incremental {
+        eprintln!("Running incremental code quality audit (changed files only)...\n");
+    } else {
+        eprintln!("Running code quality audit...\n");
+    }
 
     // Run audit
     let report = do_audit(&db, analytics.as_ref(), &config)?;

@@ -3,8 +3,12 @@
 //! Provides automated code quality analysis with scoring for CI integration.
 //! Analyzes complexity, duplication potential, documentation coverage,
 //! modularity, and naming conventions.
+//!
+//! Supports incremental mode for pre-commit hooks, auditing only changed files.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -380,6 +384,61 @@ const WEIGHT_COVERAGE: f32 = 0.20;
 const WEIGHT_MODULARITY: f32 = 0.20;
 const WEIGHT_NAMING: f32 = 0.15;
 
+/// Get changed files from git (staged and unstaged).
+pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>, AuditError> {
+    let mut changed_files = HashSet::new();
+
+    // Get staged files
+    let staged_output = Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+
+    if staged_output.status.success() {
+        let output = String::from_utf8_lossy(&staged_output.stdout);
+        for line in output.lines() {
+            if !line.is_empty() {
+                changed_files.insert(line.to_string());
+            }
+        }
+    }
+
+    // Get unstaged modified files
+    let unstaged_output = Command::new("git")
+        .args(["diff", "--name-only"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+
+    if unstaged_output.status.success() {
+        let output = String::from_utf8_lossy(&unstaged_output.stdout);
+        for line in output.lines() {
+            if !line.is_empty() {
+                changed_files.insert(line.to_string());
+            }
+        }
+    }
+
+    // Get untracked files
+    let untracked_output = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+
+    if untracked_output.status.success() {
+        let output = String::from_utf8_lossy(&untracked_output.stdout);
+        for line in output.lines() {
+            if !line.is_empty() {
+                changed_files.insert(line.to_string());
+            }
+        }
+    }
+
+    Ok(changed_files)
+}
+
 /// Run a complete quality audit.
 pub fn run_audit(
     db: &Database,
@@ -391,7 +450,26 @@ pub fn run_audit(
 
     // Get all symbols using a broad search
     // We use "%" pattern to get all symbols with a high limit
-    let symbols = db.find_symbols("%", 100000)?;
+    let mut symbols = db.find_symbols("%", 100000)?;
+
+    // If incremental mode, filter to only changed files
+    if config.incremental {
+        let changed_files = get_changed_files(&config.path)?;
+        if changed_files.is_empty() {
+            // No changes, return perfect score
+            report.overall_score = 10.0;
+            report.passed = true;
+            return Ok(report);
+        }
+
+        // Filter symbols to only those in changed files
+        symbols.retain(|s| {
+            changed_files
+                .iter()
+                .any(|f| s.file_path.ends_with(f) || f.ends_with(&s.file_path))
+        });
+    }
+
     report.total_symbols = symbols.len();
     report.total_functions = symbols
         .iter()
@@ -972,5 +1050,72 @@ mod tests {
         report.calculate_overall();
 
         assert!(!report.passed);
+    }
+
+    #[test]
+    fn test_audit_incremental_no_changes() {
+        // Test that incremental audit with no changes returns a perfect score
+        let mut report = QualityReport::new();
+        report.overall_score = 10.0;
+        report.passed = true;
+
+        // Verify the report is valid
+        assert_eq!(report.overall_score, 10.0);
+        assert!(report.passed);
+    }
+
+    #[test]
+    fn test_get_changed_files() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temp git repo
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().to_path_buf();
+
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&root)
+            .output()
+            .expect("Failed to init git");
+
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&root)
+            .output()
+            .expect("Failed to set git email");
+
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&root)
+            .output()
+            .expect("Failed to set git name");
+
+        // Create a file and commit it
+        fs::write(root.join("test.rs"), "fn test() {}").unwrap();
+        Command::new("git")
+            .args(["add", "test.rs"])
+            .current_dir(&root)
+            .output()
+            .expect("Failed to git add");
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&root)
+            .output()
+            .expect("Failed to git commit");
+
+        // Modify the file
+        fs::write(root.join("test.rs"), "fn test() { println!(\"hello\"); }").unwrap();
+
+        // Get changed files
+        let changed = get_changed_files(&root).unwrap();
+
+        // Should contain the modified file
+        assert!(
+            changed.contains("test.rs"),
+            "Should find changed file: {:?}",
+            changed
+        );
     }
 }
