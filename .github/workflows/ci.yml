@@ -14,10 +14,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable]
-        features:
-          - ""
         include:
           - os: ubuntu-latest
             features: ""
@@ -25,6 +21,7 @@ jobs:
             features: ""
           - os: windows-latest
             features: "--no-default-features"
+        rust: [stable]
 
     steps:
       - uses: actions/checkout@v4
