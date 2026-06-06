@@ -103,16 +103,7 @@ fn run(args: Args) -> Result<()> {
             show_sizes,
             no_tree,
         }) => commands::run_smart(
-            &task,
-            max_tokens,
-            depth,
-            top,
-            explain,
-            dry_run,
-            openai,
-            format,
-            show_sizes,
-            no_tree,
+            &task, max_tokens, depth, top, explain, dry_run, openai, format, show_sizes, no_tree,
         ),
         Some(Command::Diff {
             revision,

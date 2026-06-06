@@ -3,22 +3,21 @@
 //! Handles the interactive shell and MCP server.
 
 use std::env;
+use std::path::PathBuf;
 
-use ctx::error::Result;
 use crate::shell;
+use ctx::error::Result;
 
 /// Run the interactive shell.
-pub fn run_shell(
-    history: Option<std::path::PathBuf>,
-    no_history: bool,
-    vi: bool,
-) -> Result<()> {
+pub fn run_shell(history: Option<PathBuf>, no_history: bool, vi: bool) -> Result<()> {
     let root = env::current_dir()?;
 
-    let mut config = shell::ShellConfig::default();
-    config.db_path = root;
-    config.no_history = no_history;
-    config.vi_mode = vi;
+    let mut config = shell::ShellConfig {
+        db_path: root,
+        no_history,
+        vi_mode: vi,
+        ..Default::default()
+    };
 
     if let Some(h) = history {
         config.history_file = h;
@@ -30,8 +29,8 @@ pub fn run_shell(
 /// Run the MCP server.
 #[cfg(feature = "mcp")]
 pub fn run_serve(mcp: bool) -> Result<()> {
-    use ctx::error::CtxError;
     use crate::mcp;
+    use ctx::error::CtxError;
 
     if !mcp {
         eprintln!("Error: Please specify --mcp flag to start the MCP server.");

@@ -24,7 +24,7 @@ fn output_file_deps_dot(deps: &[(String, String, i64)]) {
     }
 
     for node in &nodes {
-        let short_name = node.split('/').last().unwrap_or(node);
+        let short_name = node.split('/').next_back().unwrap_or(node);
         println!("  \"{}\" [label=\"{}\"];", node, short_name);
     }
 
@@ -43,8 +43,8 @@ fn output_file_deps_mermaid(deps: &[(String, String, i64)]) {
     println!("graph LR");
     for (i, (src, tgt, _)) in deps.iter().enumerate() {
         if tgt != "external" {
-            let src_short = src.split('/').last().unwrap_or(src);
-            let tgt_short = tgt.split('/').last().unwrap_or(tgt);
+            let src_short = src.split('/').next_back().unwrap_or(src);
+            let tgt_short = tgt.split('/').next_back().unwrap_or(tgt);
             println!("  A{}[{}] --> B{}[{}]", i, src_short, i, tgt_short);
         }
     }
@@ -91,7 +91,7 @@ fn output_call_graph_dot(graph: &[(String, String, String, String)]) {
     }
 
     for (i, (file, symbols)) in files.iter().enumerate() {
-        let short_file = file.split('/').last().unwrap_or(file);
+        let short_file = file.split('/').next_back().unwrap_or(file);
         println!("  subgraph cluster_{} {{", i);
         println!("    label=\"{}\";", short_file);
         println!("    style=filled;");
@@ -125,9 +125,7 @@ fn output_call_graph_mermaid(graph: &[(String, String, String, String)]) {
 }
 
 /// Output call graph in JSON format.
-fn output_call_graph_json(
-    graph: &[(String, String, String, String)],
-) -> Result<()> {
+fn output_call_graph_json(graph: &[(String, String, String, String)]) -> Result<()> {
     let nodes: Vec<_> = graph
         .iter()
         .flat_map(|(sf, sn, tf, tn)| {
@@ -149,12 +147,7 @@ fn output_call_graph_json(
 }
 
 /// Generate a dependency graph visualization.
-pub fn run_graph(
-    output: &str,
-    by_file: bool,
-    filter: Option<String>,
-    depth: i32,
-) -> Result<()> {
+pub fn run_graph(output: &str, by_file: bool, filter: Option<String>, depth: i32) -> Result<()> {
     let root = env::current_dir()?;
     let analytics = analytics::Analytics::open(&root)?;
 

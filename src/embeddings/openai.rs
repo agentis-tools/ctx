@@ -98,9 +98,7 @@ impl OpenAIProvider {
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
             .default_headers(headers)
             .build()
-            .map_err(|e| {
-                CtxError::embedding(format!("Failed to build HTTP client: {}", e))
-            })?;
+            .map_err(|e| CtxError::embedding(format!("Failed to build HTTP client: {}", e)))?;
 
         Ok(Self {
             client,
@@ -222,9 +220,10 @@ impl OpenAIProvider {
         match status {
             StatusCode::OK => {
                 // Parse successful response
-                let api_response: EmbeddingResponse = response.json().await.map_err(|e| {
-                    CtxError::embedding(format!("Failed to parse response: {}", e))
-                })?;
+                let api_response: EmbeddingResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| CtxError::embedding(format!("Failed to parse response: {}", e)))?;
 
                 self.parse_response(api_response)
             }
@@ -258,10 +257,7 @@ impl OpenAIProvider {
                     }
                 }
 
-                Err(CtxError::embedding(format!(
-                    "HTTP {}: {}",
-                    status, body
-                )))
+                Err(CtxError::embedding(format!("HTTP {}: {}", status, body)))
             }
         }
     }
@@ -404,10 +400,7 @@ mod tests {
 
         let result = provider.parse_response(response);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            CtxError::RateLimited(_)
-        ));
+        assert!(matches!(result.unwrap_err(), CtxError::RateLimited(_)));
     }
 
     #[test]
@@ -447,7 +440,9 @@ mod tests {
     fn test_embed_batch_real() {
         let provider = OpenAIProvider::from_env().expect("OPENAI_API_KEY not set");
         let texts = vec!["Hello", "World", "Test"];
-        let embeddings = provider.embed_batch(&texts).expect("Batch embedding failed");
+        let embeddings = provider
+            .embed_batch(&texts)
+            .expect("Batch embedding failed");
         assert_eq!(embeddings.len(), 3);
         for emb in &embeddings {
             assert_eq!(emb.dim(), OPENAI_EMBEDDING_DIM);

@@ -1,13 +1,13 @@
-# Contributing to context
+# Contributing to ctx
 
-Thanks for your interest in contributing! This document outlines how to get started.
+Thank you for your interest in contributing to ctx! This document outlines how to get started and what we expect from contributions.
 
-## Development Setup
+## Getting Started
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/context.git
-   cd context
+   git clone https://github.com/saldestechnology/ctx.git
+   cd ctx
    ```
 
 2. **Build the project**
@@ -15,43 +15,45 @@ Thanks for your interest in contributing! This document outlines how to get star
    cargo build
    ```
 
-3. **Run tests**
-   ```bash
-   cargo test
-   ```
-
-4. **Run the CLI**
+3. **Run the CLI**
    ```bash
    cargo run -- --help
    cargo run -- src/
    ```
 
+4. **Build with optional MCP support**
+   ```bash
+   cargo build --features mcp
+   ```
+
 ## Making Changes
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Run tests (`cargo test`)
-5. Run clippy (`cargo clippy`)
-6. Format code (`cargo fmt`)
-7. Commit your changes (`git commit -am 'Add my feature'`)
-8. Push to your fork (`git push origin feature/my-feature`)
-9. Open a Pull Request
+1. Create a feature branch (`git checkout -b feature/my-feature`)
+2. Make your changes
+3. Run the checks below
+4. Push to your fork and open a Pull Request
 
-## Code Style
+## Before Submitting
 
-- Run `cargo fmt` before committing
-- Run `cargo clippy` and address any warnings
-- Add tests for new functionality
-- Keep commits focused and atomic
+Please ensure all of the following pass:
 
-## Areas for Contribution
+```bash
+# Format code
+cargo fmt
 
-- **New output formats** - Add support for JSON, YAML, or custom templates
-- **Performance** - Optimize for very large codebases
-- **Features** - Token counting, file size limits, depth limits
-- **Documentation** - Improve README, add examples
-- **Tests** - Increase test coverage
+# Lint (zero warnings allowed)
+cargo clippy -- -D warnings
+
+# Run tests
+cargo test
+
+# Verify it still publishes cleanly
+cargo publish --dry-run
+```
+
+## IDE Configuration
+
+The repository includes `.vscode` and `.idea` in `.gitignore`. Feel free to add local IDE configs but do not commit them.
 
 ## Reporting Issues
 
@@ -59,8 +61,12 @@ When reporting issues, please include:
 - Your OS and Rust version (`rustc --version`)
 - Steps to reproduce
 - Expected vs actual behavior
-- Relevant error messages
+- Relevant error messages or stack traces
+
+## Security Issues
+
+Please see [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 
 ## Questions?
 
-Open an issue with the `question` label.
+Open an issue with the `question` label or start a discussion in the repository.

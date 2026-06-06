@@ -252,11 +252,10 @@ fn build_all_contextignore_matcher(root: &Path) -> Option<Gitignore> {
 
     // Add root .contextignore
     let contextignore_path = root.join(".contextignore");
-    if contextignore_path.exists() {
-        if builder.add(&contextignore_path).is_none() {
+    if contextignore_path.exists()
+        && builder.add(&contextignore_path).is_none() {
             found_any = true;
         }
-    }
 
     // Recursively find nested .contextignore files
     fn add_nested(builder: &mut GitignoreBuilder, dir: &Path, found: &mut bool) {
@@ -273,11 +272,10 @@ fn build_all_contextignore_matcher(root: &Path) -> Option<Gitignore> {
                 }
 
                 let contextignore = path.join(".contextignore");
-                if contextignore.exists() {
-                    if builder.add(&contextignore).is_none() {
+                if contextignore.exists()
+                    && builder.add(&contextignore).is_none() {
                         *found = true;
                     }
-                }
 
                 add_nested(builder, &path, found);
             }
@@ -367,11 +365,11 @@ fn get_all_git_excludes_files(root: &Path) -> Vec<PathBuf> {
 
 /// Expand ~ to home directory in a path string.
 fn expand_tilde(path_str: &str) -> Option<PathBuf> {
-    if path_str.starts_with("~/") {
+    if let Some(stripped) = path_str.strip_prefix("~/") {
         let home = std::env::var("HOME")
             .ok()
             .or_else(|| std::env::var("USERPROFILE").ok())?;
-        Some(PathBuf::from(home).join(&path_str[2..]))
+        Some(PathBuf::from(home).join(stripped))
     } else {
         Some(PathBuf::from(path_str))
     }
@@ -461,7 +459,10 @@ fn is_glob_pattern(pattern: &str) -> bool {
 
 /// Build a GlobSet from include patterns.
 /// Absolute glob patterns are normalized by stripping the root prefix.
-fn build_include_globset(root: &Path, patterns: &[String]) -> Result<Option<GlobSet>, globset::Error> {
+fn build_include_globset(
+    root: &Path,
+    patterns: &[String],
+) -> Result<Option<GlobSet>, globset::Error> {
     let glob_patterns: Vec<&String> = patterns.iter().filter(|p| is_glob_pattern(p)).collect();
 
     if glob_patterns.is_empty() {
@@ -888,9 +889,21 @@ mod tests {
         let config = WalkerConfig::default();
 
         // Hidden files (starting with .) should be filtered - matching WalkBuilder default
-        assert!(!should_include_file(root, Path::new("/project/.env"), &config));
-        assert!(!should_include_file(root, Path::new("/project/.envrc"), &config));
-        assert!(!should_include_file(root, Path::new("/project/.github/workflows/ci.yml"), &config));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/.env"),
+            &config
+        ));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/.envrc"),
+            &config
+        ));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/.github/workflows/ci.yml"),
+            &config
+        ));
 
         // Non-hidden files with similar names should be included
         assert!(should_include_file(

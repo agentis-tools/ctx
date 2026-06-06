@@ -25,7 +25,7 @@ use crate::walker::{discover_files, WalkerConfig};
 
 /// Convert database error to io::Error.
 fn db_error<E: std::fmt::Display>(e: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e.to_string())
+    io::Error::other(e.to_string())
 }
 
 /// Extract parent name from an ID string (format: "path::parent::name").
@@ -110,7 +110,7 @@ impl Indexer {
         // Open database
         let db_path = ctx_dir.join(DB_FILE);
         let db = Database::open(&db_path)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(Self {
             db,
@@ -126,7 +126,7 @@ impl Indexer {
     pub fn new_in_memory(root: &Path) -> io::Result<Self> {
         let root = root.canonicalize()?;
         let db = Database::open_in_memory()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(Self {
             db,
@@ -184,7 +184,7 @@ impl Indexer {
             let needs_update = self
                 .db
                 .needs_update(&rel_path, &hash)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             if !needs_update {
                 seen_files.push(rel_path.clone());
@@ -482,7 +482,7 @@ impl Indexer {
         let needs_update = self
             .db
             .needs_update(&rel_path, &hash)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         if !needs_update {
             return Ok(false);
@@ -492,7 +492,7 @@ impl Indexer {
         let parse_result = self
             .parser
             .parse(&abs_path, &content)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Parse failed"))?;
+            .ok_or_else(|| io::Error::other("Parse failed"))?;
 
         // Store
         self.store_file(&rel_path, &content, &hash, &parse_result)?;
@@ -596,7 +596,7 @@ impl Indexer {
         let indexed_files = self
             .db
             .get_indexed_files()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         for file in indexed_files {
             if !seen_files.contains(&file) {
@@ -605,7 +605,7 @@ impl Indexer {
                 }
                 self.db
                     .delete_file(&file)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                    .map_err(|e| io::Error::other(e.to_string()))?;
             }
         }
 
@@ -650,7 +650,7 @@ pub fn open_database(root: &Path) -> io::Result<Database> {
         ));
     }
 
-    Database::open(&db_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+    Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))
 }
 
 /// Watch mode for automatic reindexing.
@@ -692,12 +692,12 @@ pub mod watch {
         let (tx, rx) = channel();
 
         let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         debouncer
             .watcher()
             .watch(&root, RecursiveMode::Recursive)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         eprintln!("\nWatching for changes... (press Ctrl+C to stop)");
 

@@ -11,11 +11,7 @@ use ctx::index;
 use ctx::utils::{truncate_path, truncate_str};
 
 /// Analyze code complexity and flag high fan-out functions.
-pub fn run_complexity(
-    threshold: i64,
-    warnings_only: bool,
-    output: &str,
-) -> Result<()> {
+pub fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Result<()> {
     let root = env::current_dir()?;
     let analytics = analytics::Analytics::open(&root)?;
 
@@ -56,8 +52,8 @@ pub fn run_complexity(
         println!("Code Complexity Analysis (threshold: {})", threshold);
         println!("{}", "=".repeat(90));
         println!(
-            "{:<35} {:>8} {:>8} {:>8} {:<10} {}",
-            "FUNCTION", "FAN-OUT", "FAN-IN", "SCORE", "SEVERITY", "FILE"
+            "{:<35} {:>8} {:>8} {:>8} {:<10} FILE",
+            "FUNCTION", "FAN-OUT", "FAN-IN", "SCORE", "SEVERITY"
         );
         println!("{}", "-".repeat(90));
 
@@ -102,11 +98,7 @@ pub fn run_complexity(
 }
 
 /// Detect duplicate or similar code blocks.
-pub fn run_duplicates(
-    similarity_threshold: u32,
-    min_lines: u32,
-    output: &str,
-) -> Result<()> {
+pub fn run_duplicates(similarity_threshold: u32, min_lines: u32, output: &str) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 

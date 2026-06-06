@@ -232,6 +232,7 @@ impl PythonParser {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Extract symbols from the AST.
     fn extract_symbols(
         &self,
@@ -438,20 +439,16 @@ fn extract_docstring(node: &Node, source: &str) -> Option<String> {
 
     // Get first child of block
     let mut cursor = body.walk();
-    for child in body.children(&mut cursor) {
-        if child.kind() == "expression_statement" {
-            let mut inner_cursor = child.walk();
-            for inner_child in child.children(&mut inner_cursor) {
-                if inner_child.kind() == "string" {
-                    let text = inner_child.utf8_text(source.as_bytes()).ok()?;
-                    return Some(clean_docstring(text));
-                }
+    let first_child = body.children(&mut cursor).next()?;
+    if first_child.kind() == "expression_statement" {
+        let mut inner_cursor = first_child.walk();
+        for inner_child in first_child.children(&mut inner_cursor) {
+            if inner_child.kind() == "string" {
+                let text = inner_child.utf8_text(source.as_bytes()).ok()?;
+                return Some(clean_docstring(text));
             }
         }
-        // Only check the first statement
-        break;
     }
-
     None
 }
 

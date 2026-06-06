@@ -11,12 +11,7 @@ use ctx::index;
 use ctx::utils::{truncate_path, truncate_str};
 
 /// Generate embeddings for all symbols.
-pub fn run_embed(
-    force: bool,
-    verbose: bool,
-    batch_size: usize,
-    use_openai: bool,
-) -> Result<()> {
+pub fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -77,8 +72,12 @@ pub fn run_embed(
         }
     };
 
-    let embedded =
-        embeddings::embed_missing_symbols(&db, provider.as_ref(), batch_size, Some(&progress_callback))?;
+    let embedded = embeddings::embed_missing_symbols(
+        &db,
+        provider.as_ref(),
+        batch_size,
+        Some(&progress_callback),
+    )?;
 
     if verbose {
         eprintln!();
@@ -96,11 +95,7 @@ pub fn run_embed(
 }
 
 /// Watch for index changes and auto-embed new symbols.
-pub fn run_embed_watch(
-    verbose: bool,
-    batch_size: usize,
-    use_openai: bool,
-) -> Result<()> {
+pub fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result<()> {
     use notify::RecursiveMode;
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
     use std::sync::mpsc::channel;
@@ -142,7 +137,8 @@ pub fn run_embed_watch(
                 "Initial embedding: {} symbols missing embeddings...",
                 total_symbols - existing
             );
-            let embedded = embeddings::embed_missing_symbols(&db, provider.as_ref(), batch_size, None)?;
+            let embedded =
+                embeddings::embed_missing_symbols(&db, provider.as_ref(), batch_size, None)?;
             println!("Embedded {} symbols", embedded);
         } else {
             println!("All {} symbols already have embeddings", total_symbols);
@@ -235,12 +231,7 @@ pub fn run_embed_watch(
 }
 
 /// Run semantic search using embeddings.
-pub fn run_semantic(
-    query: &str,
-    limit: usize,
-    output: &str,
-    use_openai: bool,
-) -> Result<()> {
+pub fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -271,16 +262,15 @@ pub fn run_semantic(
         for (stored_provider, _model, stored_dim, count) in &metadata {
             let stored_dim = *stored_dim as usize;
             if stored_dim != query_dim {
-                eprintln!(
-                    "Warning: Embedding dimension mismatch detected!"
-                );
+                eprintln!("Warning: Embedding dimension mismatch detected!");
                 eprintln!(
                     "  Stored: {} embeddings from '{}' with dimension {}",
                     count, stored_provider, stored_dim
                 );
                 eprintln!(
                     "  Query:  Using '{}' with dimension {}",
-                    provider.name(), query_dim
+                    provider.name(),
+                    query_dim
                 );
                 eprintln!(
                     "  Results may be inaccurate. Re-run 'ctx embed{}' to regenerate embeddings.",
@@ -324,7 +314,7 @@ pub fn run_semantic(
             results.len()
         );
         println!("{}", "-".repeat(80));
-        println!("{:<35} {:<10} {:<8} {}", "SYMBOL", "KIND", "SCORE", "FILE");
+        println!("{:<35} {:<10} {:<8} FILE", "SYMBOL", "KIND", "SCORE");
         println!("{}", "-".repeat(80));
 
         for result in &results {

@@ -1,6 +1,7 @@
 //! Data models for code intelligence.
 
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Represents a tracked file in the codebase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,27 +58,30 @@ impl SymbolKind {
             SymbolKind::Parameter => "parameter",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for SymbolKind {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "function" => Some(SymbolKind::Function),
-            "method" => Some(SymbolKind::Method),
-            "struct" => Some(SymbolKind::Struct),
-            "enum" => Some(SymbolKind::Enum),
-            "trait" => Some(SymbolKind::Trait),
-            "impl" => Some(SymbolKind::Impl),
-            "const" => Some(SymbolKind::Const),
-            "static" => Some(SymbolKind::Static),
-            "type" => Some(SymbolKind::Type),
-            "macro" => Some(SymbolKind::Macro),
-            "module" => Some(SymbolKind::Module),
-            "field" => Some(SymbolKind::Field),
-            "variant" => Some(SymbolKind::Variant),
-            "interface" => Some(SymbolKind::Interface),
-            "class" => Some(SymbolKind::Class),
-            "variable" => Some(SymbolKind::Variable),
-            "parameter" => Some(SymbolKind::Parameter),
-            _ => None,
+            "function" => Ok(SymbolKind::Function),
+            "method" => Ok(SymbolKind::Method),
+            "struct" => Ok(SymbolKind::Struct),
+            "enum" => Ok(SymbolKind::Enum),
+            "trait" => Ok(SymbolKind::Trait),
+            "impl" => Ok(SymbolKind::Impl),
+            "const" => Ok(SymbolKind::Const),
+            "static" => Ok(SymbolKind::Static),
+            "type" => Ok(SymbolKind::Type),
+            "macro" => Ok(SymbolKind::Macro),
+            "module" => Ok(SymbolKind::Module),
+            "field" => Ok(SymbolKind::Field),
+            "variant" => Ok(SymbolKind::Variant),
+            "interface" => Ok(SymbolKind::Interface),
+            "class" => Ok(SymbolKind::Class),
+            "variable" => Ok(SymbolKind::Variable),
+            "parameter" => Ok(SymbolKind::Parameter),
+            _ => Err(()),
         }
     }
 }
@@ -104,14 +108,17 @@ impl Visibility {
             Visibility::InPath => "in_path",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for Visibility {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "public" | "pub" => Visibility::Public,
-            "crate" | "pub(crate)" => Visibility::Crate,
-            "super" | "pub(super)" => Visibility::Super,
-            "in_path" => Visibility::InPath,
-            _ => Visibility::Private,
+            "public" | "pub" => Ok(Visibility::Public),
+            "crate" | "pub(crate)" => Ok(Visibility::Crate),
+            "super" | "pub(super)" => Ok(Visibility::Super),
+            "in_path" => Ok(Visibility::InPath),
+            _ => Ok(Visibility::Private),
         }
     }
 }
@@ -235,19 +242,22 @@ impl EdgeKind {
             EdgeKind::Contains => "contains",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for EdgeKind {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "calls" => Some(EdgeKind::Calls),
-            "imports" => Some(EdgeKind::Imports),
-            "uses" => Some(EdgeKind::Uses),
-            "extends" => Some(EdgeKind::Extends),
-            "implements" => Some(EdgeKind::Implements),
-            "returns" => Some(EdgeKind::Returns),
-            "parameter" => Some(EdgeKind::Parameter),
-            "field" => Some(EdgeKind::Field),
-            "contains" => Some(EdgeKind::Contains),
-            _ => None,
+            "calls" => Ok(EdgeKind::Calls),
+            "imports" => Ok(EdgeKind::Imports),
+            "uses" => Ok(EdgeKind::Uses),
+            "extends" => Ok(EdgeKind::Extends),
+            "implements" => Ok(EdgeKind::Implements),
+            "returns" => Ok(EdgeKind::Returns),
+            "parameter" => Ok(EdgeKind::Parameter),
+            "field" => Ok(EdgeKind::Field),
+            "contains" => Ok(EdgeKind::Contains),
+            _ => Err(()),
         }
     }
 }

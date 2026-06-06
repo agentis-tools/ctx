@@ -4,8 +4,8 @@
 
 use std::env;
 
-use ctx::analytics;
 use crate::cli::OutputFormat;
+use ctx::analytics;
 use ctx::diff::{self, diff_context, format_pr_header, format_summary, get_pr_info, DiffConfig};
 use ctx::error::{CtxError, Result};
 use ctx::index;
@@ -101,7 +101,7 @@ pub fn run_diff(
             eprintln!("Error: Invalid revision '{}'", r);
             std::process::exit(1);
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(e),
     };
 
     // Show summary if requested
@@ -178,7 +178,7 @@ pub fn run_review(
             eprintln!("Install it from https://cli.github.com/");
             std::process::exit(1);
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(e),
     };
 
     // Print PR header

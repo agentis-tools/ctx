@@ -4,8 +4,8 @@
 
 use std::env;
 
-use ctx::analytics;
 use crate::cli::OutputFormat;
+use ctx::analytics;
 use ctx::embeddings::EmbeddingProvider;
 use ctx::error::Result;
 use ctx::index;
@@ -149,10 +149,7 @@ pub fn run_smart(
         output::stream_context(&root, &entries, format.to_lib(), !no_tree, show_sizes)?
     };
 
-    eprintln!(
-        "Generated context: {} files",
-        output_result.file_count
-    );
+    eprintln!("Generated context: {} files", output_result.file_count);
 
     Ok(())
 }

@@ -1,6 +1,7 @@
 //! SQLite schema and database operations.
 
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
@@ -25,6 +26,7 @@ static VEC_EXTENSION_AVAILABLE: AtomicBool = AtomicBool::new(false);
 /// This must be called before any Database connections are opened.
 /// It is safe to call multiple times - initialization only happens once.
 /// Returns true if the extension was loaded successfully.
+#[allow(clippy::missing_transmute_annotations)]
 pub fn init_vec_extension() -> bool {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -891,6 +893,7 @@ impl Database {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     /// Get all embeddings with their symbol metadata.
     pub fn get_all_embeddings(
         &self,
@@ -984,7 +987,8 @@ impl Database {
                 qualified_name: row.get(3)?,
                 kind: SymbolKind::from_str(&row.get::<_, String>(4)?)
                     .unwrap_or(SymbolKind::Function),
-                visibility: Visibility::from_str(&row.get::<_, String>(5)?),
+                visibility: Visibility::from_str(&row.get::<_, String>(5)?)
+                    .unwrap_or_default(),
                 signature: row.get(6)?,
                 brief: row.get(7)?,
                 docstring: row.get(8)?,
@@ -1045,8 +1049,8 @@ impl Database {
                 )
                 .unwrap_or(false);
 
-            if !exists {
-                if self
+            if !exists
+                && self
                     .conn
                     .execute(
                         "INSERT INTO symbol_vectors (embedding, symbol_id) VALUES (?, ?)",
@@ -1056,7 +1060,6 @@ impl Database {
                 {
                     count += 1;
                 }
-            }
         }
 
         Ok(count)
@@ -1077,6 +1080,7 @@ impl Database {
     /// This uses indexed KNN search which is O(log n) instead of O(n).
     ///
     /// Returns (symbol_id, name, kind, file_path, line, distance) tuples.
+    #[allow(clippy::type_complexity)]
     /// Distance is L2 distance (lower is more similar).
     pub fn vector_search(
         &self,
@@ -1552,7 +1556,7 @@ fn symbol_from_row(row: &rusqlite::Row) -> Symbol {
         name: row.get(2).unwrap_or_default(),
         qualified_name: row.get(3).ok(),
         kind: SymbolKind::from_str(&kind_str).unwrap_or(SymbolKind::Function),
-        visibility: Visibility::from_str(&visibility_str),
+        visibility: Visibility::from_str(&visibility_str).unwrap_or_default(),
         signature: row.get(6).ok(),
         brief: row.get(7).ok(),
         docstring: row.get(8).ok(),

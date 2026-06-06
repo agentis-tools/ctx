@@ -1,5 +1,10 @@
 # ctx
 
+[![Crates.io](https://img.shields.io/crates/v/ctx)](https://crates.io/crates/ctx)
+[![CI](https://github.com/saldestechnology/ctx/actions/workflows/ci.yml/badge.svg)](https://github.com/saldestechnology/ctx/actions)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](#license)
+[![Rust Version](https://img.shields.io/badge/rust-1.91%2B-orange)](https://www.rust-lang.org)
+
 A fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence for understanding symbol relationships.
 
 ## Two Tools in One
@@ -148,20 +153,20 @@ fn main() {
 ```markdown
 # Project Context
 
-## Project Tree
-\`\`\`
-my-project/
-├── src/
-│   └── main.rs
-└── Cargo.toml
-\`\`\`
+ ## Project Tree
+ ```
+ my-project/
+ ├── src/
+ │   └── main.rs
+ └── Cargo.toml
+ ```
 
-## /src/main.rs
-\`\`\`rs
-fn main() {
-    println!("Hello, world!");
-}
-\`\`\`
+ ## /src/main.rs
+ ```rust
+ fn main() {
+     println!("Hello, world!");
+ }
+ ```
 ```
 
 ### JSON
@@ -602,6 +607,19 @@ ctx> impact handleAuth
 ctx> source handleAuth
 ```
 
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on development setup, coding style, and the pull request process.
+
+## Security
+
+To report a security vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+This project is licensed under either of:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option.

@@ -254,6 +254,7 @@ impl Default for SolidityParser {
 }
 
 /// Extract contract parts (functions, state variables, events, structs, enums).
+#[allow(clippy::too_many_arguments)]
 fn extract_contract_parts(
     parts: &[ContractPart],
     file_path: &str,
@@ -521,16 +522,13 @@ fn path_to_string(path: &pt::ImportPath) -> String {
 /// Extract function visibility from attributes.
 fn extract_function_visibility(attrs: &[FunctionAttribute]) -> Visibility {
     for attr in attrs {
-        match attr {
-            FunctionAttribute::Visibility(vis) => match vis {
-                SolVisibility::Public(_) | SolVisibility::External(_) => {
-                    return Visibility::Public;
-                }
-                SolVisibility::Internal(_) => return Visibility::Crate,
-                SolVisibility::Private(_) => return Visibility::Private,
-            },
-            _ => {}
-        }
+        if let FunctionAttribute::Visibility(vis) = attr { match vis {
+            SolVisibility::Public(_) | SolVisibility::External(_) => {
+                return Visibility::Public;
+            }
+            SolVisibility::Internal(_) => return Visibility::Crate,
+            SolVisibility::Private(_) => return Visibility::Private,
+        } }
     }
     // Default visibility in Solidity is internal for state variables,
     // but functions without visibility are a compiler error in recent versions
@@ -673,8 +671,7 @@ fn extract_contract_name(source: &str) -> Option<String> {
     for line in source.lines() {
         let trimmed = line.trim();
         for keyword in &["contract ", "interface ", "library "] {
-            if trimmed.starts_with(keyword) {
-                let rest = &trimmed[keyword.len()..];
+            if let Some(rest) = trimmed.strip_prefix(keyword) {
                 let name = rest
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .next()
@@ -947,6 +944,8 @@ fn extract_calls_from_statement(
 }
 
 /// Extract calls from an expression.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::only_used_in_recursion)]
 fn extract_calls_from_expr(
     expr: &Expression,
     file_path: &str,

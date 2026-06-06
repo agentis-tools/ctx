@@ -301,7 +301,7 @@ impl GoParser {
             let brief = docstring.as_ref().and_then(|d| extract_brief(d));
 
             // Determine visibility (Go uses capitalization)
-            let visibility = if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+            let visibility = if name.chars().next().is_some_and(|c| c.is_uppercase()) {
                 Visibility::Public
             } else {
                 Visibility::Private

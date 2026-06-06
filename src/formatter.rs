@@ -48,7 +48,10 @@ impl XmlFormatter {
 
 impl Formatter for XmlFormatter {
     fn format_tree(&self, tree: &str) -> String {
-        format!("<project_tree>\n{}</project_tree>", Self::escape_xml_text(tree))
+        format!(
+            "<project_tree>\n{}</project_tree>",
+            Self::escape_xml_text(tree)
+        )
     }
 
     fn format_file(&self, entry: &FileEntry, content: &str) -> String {
@@ -176,7 +179,7 @@ impl Formatter for PlainFormatter {
 }
 
 /// JSON formatter.
-/// 
+///
 /// Outputs structured JSON with the format:
 /// ```json
 /// {
@@ -186,7 +189,7 @@ impl Formatter for PlainFormatter {
 ///   ]
 /// }
 /// ```
-/// 
+///
 /// Note: JSON streaming outputs newline-delimited JSON objects (NDJSON) for each file,
 /// since partial JSON arrays aren't valid JSON.
 pub struct JsonFormatter;
@@ -231,10 +234,7 @@ impl Formatter for JsonFormatter {
                 tree, // Already JSON-escaped from format_tree
                 files_block
             ),
-            None => format!(
-                r#"{{"files":[{}]}}"#,
-                files_block
-            ),
+            None => format!(r#"{{"files":[{}]}}"#, files_block),
         }
     }
 
@@ -283,14 +283,17 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    /// Parse format from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "xml" => Some(Self::Xml),
-            "markdown" | "md" => Some(Self::Markdown),
-            "plain" => Some(Self::Plain),
-            "json" => Some(Self::Json),
-            _ => None,
+            "xml" => Ok(Self::Xml),
+            "markdown" | "md" => Ok(Self::Markdown),
+            "plain" => Ok(Self::Plain),
+            "json" => Ok(Self::Json),
+            _ => Err(()),
         }
     }
 }
@@ -476,11 +479,11 @@ mod tests {
         let entry2 = make_entry("src/lib.rs");
         let file1 = formatter.format_file(&entry1, "fn main() {}");
         let file2 = formatter.format_file(&entry2, "pub mod test;");
-        
+
         // Streaming uses newline separator (NDJSON format)
         let separator = formatter.separator();
         assert_eq!(separator, "\n");
-        
+
         // Each line should be valid JSON
         let parsed1: serde_json::Value = serde_json::from_str(&file1).expect("Invalid JSON");
         let parsed2: serde_json::Value = serde_json::from_str(&file2).expect("Invalid JSON");

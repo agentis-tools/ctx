@@ -21,8 +21,7 @@ pub fn parse_params<T: serde::de::DeserializeOwned>(
 ) -> Result<T, rmcp::ErrorData> {
     let args = args.ok_or_else(|| invalid_params("Missing required parameters"))?;
 
-    serde_json::from_value(Value::Object(args.clone()))
-        .map_err(|e| invalid_params(e.to_string()))
+    serde_json::from_value(Value::Object(args.clone())).map_err(|e| invalid_params(e.to_string()))
 }
 
 /// Helper to create a JSON schema object from a type.

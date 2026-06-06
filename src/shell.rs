@@ -407,11 +407,7 @@ Available Commands:
 }
 
 /// Find symbols by pattern.
-fn cmd_find(
-    db: &Database,
-    args: &[&str],
-    context: Option<&str>,
-) -> Result<()> {
+fn cmd_find(db: &Database, args: &[&str], context: Option<&str>) -> Result<()> {
     let pattern = args[0];
     let limit = 20;
 
@@ -462,11 +458,7 @@ fn cmd_search(db: &Database, args: &[&str]) -> Result<()> {
 }
 
 /// Show source code for a symbol.
-fn cmd_source(
-    db: &Database,
-    args: &[&str],
-    context: Option<&str>,
-) -> Result<()> {
+fn cmd_source(db: &Database, args: &[&str], context: Option<&str>) -> Result<()> {
     let pattern = args[0];
 
     let symbols = db.find_symbols_filtered(pattern, 1, context, None)?;
@@ -500,11 +492,7 @@ fn cmd_source(
 }
 
 /// Explain a symbol.
-fn cmd_explain(
-    db: &Database,
-    args: &[&str],
-    context: Option<&str>,
-) -> Result<()> {
+fn cmd_explain(db: &Database, args: &[&str], context: Option<&str>) -> Result<()> {
     let pattern = args[0];
 
     let symbols = db.find_symbols_filtered(pattern, 1, context, None)?;
@@ -534,11 +522,7 @@ fn cmd_explain(
 }
 
 /// Show callers of a function.
-fn cmd_callers(
-    _db: &Database,
-    analytics: &Analytics,
-    args: &[&str],
-) -> Result<()> {
+fn cmd_callers(_db: &Database, analytics: &Analytics, args: &[&str]) -> Result<()> {
     let name = args[0];
     let depth = 2;
 
@@ -560,11 +544,7 @@ fn cmd_callers(
 }
 
 /// Show callees of a function.
-fn cmd_callees(
-    _db: &Database,
-    analytics: &Analytics,
-    args: &[&str],
-) -> Result<()> {
+fn cmd_callees(_db: &Database, analytics: &Analytics, args: &[&str]) -> Result<()> {
     let name = args[0];
     let depth = 2;
 
@@ -650,10 +630,7 @@ fn cmd_stats(db: &Database) -> Result<()> {
 }
 
 /// Run audit command.
-fn cmd_audit(
-    db: &Database,
-    analytics: Option<&Analytics>,
-) -> Result<()> {
+fn cmd_audit(db: &Database, analytics: Option<&Analytics>) -> Result<()> {
     use ctx::audit::{run_audit, AuditConfig};
 
     let config = AuditConfig::default();

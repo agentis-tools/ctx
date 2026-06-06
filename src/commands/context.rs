@@ -36,12 +36,14 @@ pub fn run_context(args: Args) -> Result<()> {
     }
 
     // Parse encoding
-    let encoding = tokens::Encoding::from_str(&args.encoding).ok_or_else(|| {
-        format!(
-            "Invalid encoding '{}'. Valid options: cl100k_base, o200k_base, p50k_base",
-            args.encoding
-        )
-    })?;
+    let encoding: tokens::Encoding = std::str::FromStr::from_str(&args.encoding)
+        .ok()
+        .ok_or_else(|| {
+            format!(
+                "Invalid encoding '{}'. Valid options: cl100k_base, o200k_base, p50k_base",
+                args.encoding
+            )
+        })?;
 
     // Handle --count-only mode: just count tokens without output
     if args.count_only {

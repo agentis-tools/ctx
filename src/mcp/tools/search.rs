@@ -3,7 +3,9 @@
 use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{invalid_params, parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams};
+use super::{
+    invalid_params, parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams,
+};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
@@ -50,14 +52,16 @@ pub async fn search_symbols(
 
     let limit = params.limit.unwrap_or(20);
 
-    let symbols = server.with_db(|db| {
-        db.find_symbols_filtered(
-            &params.query,
-            limit,
-            params.file.as_deref(),
-            params.kind.as_deref(),
-        )
-    }).map_err(|e| internal_error(e.to_string()))?;
+    let symbols = server
+        .with_db(|db| {
+            db.find_symbols_filtered(
+                &params.query,
+                limit,
+                params.file.as_deref(),
+                params.kind.as_deref(),
+            )
+        })
+        .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -67,7 +71,11 @@ pub async fn search_symbols(
     }
 
     // Format results
-    let mut output = format!("Found {} symbols matching '{}':\n\n", symbols.len(), params.query);
+    let mut output = format!(
+        "Found {} symbols matching '{}':\n\n",
+        symbols.len(),
+        params.query
+    );
     for symbol in &symbols {
         output.push_str(&format!(
             "- {} ({}) in {}:{}\n",
@@ -96,14 +104,16 @@ pub async fn get_definition(
     let params: DefinitionParams = parse_params(args)?;
 
     // First, try to find the symbol
-    let symbols = server.with_db(|db| {
-        db.find_symbols_filtered(
-            &params.symbol,
-            100,
-            params.file.as_deref(),
-            params.kind.as_deref(),
-        )
-    }).map_err(|e| internal_error(e.to_string()))?;
+    let symbols = server
+        .with_db(|db| {
+            db.find_symbols_filtered(
+                &params.symbol,
+                100,
+                params.file.as_deref(),
+                params.kind.as_deref(),
+            )
+        })
+        .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -137,7 +147,8 @@ pub async fn get_definition(
     // Get the source for the first matching symbol
     let sym = &symbols[0];
     let sym_id = sym.id.clone();
-    let source = server.with_db(|db| db.get_source(&sym_id))
+    let source = server
+        .with_db(|db| db.get_source(&sym_id))
         .map_err(|e| internal_error(e.to_string()))?;
 
     match source {
@@ -171,9 +182,9 @@ pub async fn find_references(
     let params: ReferencesParams = parse_params(args)?;
 
     // Find the symbol first
-    let symbols = server.with_db(|db| {
-        db.find_symbols_filtered(&params.symbol, 100, params.file.as_deref(), None)
-    }).map_err(|e| internal_error(e.to_string()))?;
+    let symbols = server
+        .with_db(|db| db.find_symbols_filtered(&params.symbol, 100, params.file.as_deref(), None))
+        .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -185,7 +196,8 @@ pub async fn find_references(
     // Get incoming edges (places that reference this symbol)
     let sym = &symbols[0];
     let sym_name = sym.name.clone();
-    let edges = server.with_db(|db| db.get_incoming_edges(&sym_name))
+    let edges = server
+        .with_db(|db| db.get_incoming_edges(&sym_name))
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
@@ -264,12 +276,8 @@ impl Greeter {
         .unwrap();
 
         // Index the project using Indexer
-        let mut indexer = Indexer::with_config(
-            &root,
-            false,
-            crate::walker::WalkerConfig::default(),
-        )
-        .unwrap();
+        let mut indexer =
+            Indexer::with_config(&root, false, crate::walker::WalkerConfig::default()).unwrap();
         indexer.index().unwrap();
 
         let server = CtxServer::new(root).unwrap();
@@ -403,7 +411,11 @@ impl Greeter {
         let result = result.unwrap();
         let text = get_text_content(&result);
         // Should contain the function signature and body, or at least the symbol info
-        assert!(text.contains("hello_world"), "Should contain hello_world: {}", text);
+        assert!(
+            text.contains("hello_world"),
+            "Should contain hello_world: {}",
+            text
+        );
     }
 
     #[tokio::test]

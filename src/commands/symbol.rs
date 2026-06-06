@@ -29,7 +29,10 @@ pub fn run_source(
     if symbols.is_empty() {
         eprintln!("Symbol '{}' not found", symbol);
         if file_pattern.is_some() || kind_filter.is_some() {
-            eprintln!("Try removing filters or use 'ctx query find {}' to see all matches", symbol);
+            eprintln!(
+                "Try removing filters or use 'ctx query find {}' to see all matches",
+                symbol
+            );
         }
         return Ok(());
     }
@@ -53,7 +56,10 @@ pub fn run_source(
         if symbols.len() > 10 {
             eprintln!("  ... and {} more", symbols.len() - 10);
         }
-        eprintln!("\nExample: ctx source {} --file \"{}\"", symbol, symbols[0].file_path);
+        eprintln!(
+            "\nExample: ctx source {} --file \"{}\"",
+            symbol, symbols[0].file_path
+        );
         return Ok(());
     }
 

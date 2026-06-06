@@ -82,10 +82,7 @@ impl Analytics {
         let path_str = sqlite_path.display().to_string();
         let escaped_path = path_str.replace('\'', "''");
         conn.execute(
-            &format!(
-                "ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)",
-                escaped_path
-            ),
+            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
             [],
         )?;
 
@@ -148,7 +145,7 @@ impl Analytics {
     }
 
     /// Get the full call graph starting from a symbol (forward traversal).
-    /// 
+    ///
     /// The `start_name` can be:
     /// - A simple name like "new" (matches first symbol with that name)
     /// - A qualified name like "LocalProvider::new"
@@ -204,20 +201,23 @@ impl Analytics {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![start_name, start_name, start_name, start_name, start_name, max_depth], |row| {
-            Ok(CallGraphNode {
-                name: row.get(0)?,
-                file_path: row.get(1)?,
-                kind: row.get(2)?,
-                depth: row.get(3)?,
-            })
-        })?;
+        let rows = stmt.query_map(
+            params![start_name, start_name, start_name, start_name, start_name, max_depth],
+            |row| {
+                Ok(CallGraphNode {
+                    name: row.get(0)?,
+                    file_path: row.get(1)?,
+                    kind: row.get(2)?,
+                    depth: row.get(3)?,
+                })
+            },
+        )?;
 
         rows.collect()
     }
 
     /// Impact analysis: find all symbols that would be affected by changing the target.
-    /// 
+    ///
     /// The `target_name` can be:
     /// - A simple name like "new" (matches first symbol with that name)
     /// - A qualified name like "LocalProvider::new"
@@ -277,14 +277,24 @@ impl Analytics {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![target_name, target_name, target_name, target_name, target_name, max_depth], |row| {
-            Ok(ImpactNode {
-                name: row.get(0)?,
-                file_path: row.get(1)?,
-                kind: row.get(2)?,
-                distance: row.get(3)?,
-            })
-        })?;
+        let rows = stmt.query_map(
+            params![
+                target_name,
+                target_name,
+                target_name,
+                target_name,
+                target_name,
+                max_depth
+            ],
+            |row| {
+                Ok(ImpactNode {
+                    name: row.get(0)?,
+                    file_path: row.get(1)?,
+                    kind: row.get(2)?,
+                    distance: row.get(3)?,
+                })
+            },
+        )?;
 
         rows.collect()
     }
@@ -329,7 +339,7 @@ impl Analytics {
     }
 
     /// Find if a path exists between two symbols (simplified version).
-    /// 
+    ///
     /// Both `from_name` and `to_name` can be symbol IDs, qualified names, or simple names.
     #[allow(dead_code)]
     pub fn has_path(&self, from_name: &str, to_name: &str, max_depth: i32) -> Result<bool> {
@@ -376,13 +386,15 @@ impl Analytics {
             "#,
         )?;
 
-        let result: bool =
-            stmt.query_row(params![from_name, from_name, from_name, to_name, to_name, to_name, max_depth], |row| row.get(0))?;
+        let result: bool = stmt.query_row(
+            params![from_name, from_name, from_name, to_name, to_name, to_name, max_depth],
+            |row| row.get(0),
+        )?;
         Ok(result)
     }
 
     /// Get the most connected symbols (highest in/out degree).
-    /// 
+    ///
     /// This correctly counts incoming edges per symbol ID, not by name,
     /// avoiding over-counting for common names like "new".
     pub fn most_connected(&self, limit: i32) -> Result<Vec<(String, String, i64, i64)>> {
@@ -423,7 +435,7 @@ impl Analytics {
     }
 
     /// Check if there are any self-recursive functions.
-    /// 
+    ///
     /// Uses target_id when available for accurate recursion detection.
     #[allow(dead_code)]
     pub fn find_recursive_functions(&self) -> Result<Vec<(String, String)>> {
@@ -446,7 +458,7 @@ impl Analytics {
     }
 
     /// Get dependency graph between files (module-level).
-    /// 
+    ///
     /// Uses target_id when available for accurate file resolution.
     pub fn file_dependencies(&self) -> Result<Vec<(String, String, i64)>> {
         let mut stmt = self.conn.prepare(
@@ -473,7 +485,7 @@ impl Analytics {
     }
 
     /// Analyze code complexity based on fan-out (outgoing calls) and fan-in (incoming calls).
-    /// 
+    ///
     /// This correctly counts incoming edges per symbol ID, not by name,
     /// avoiding over-counting for common names like "new".
     pub fn complexity_analysis(&self, threshold: i64) -> Result<Vec<ComplexityResult>> {
@@ -530,7 +542,7 @@ impl Analytics {
     }
 
     /// Get the full call graph (all edges with resolved symbols).
-    /// 
+    ///
     /// Uses target_id when available for accurate symbol resolution.
     pub fn full_call_graph(
         &self,
@@ -568,7 +580,7 @@ mod tests {
 
     fn setup_test_db() -> Result<Connection> {
         let conn = Connection::open_in_memory()?;
-        
+
         // Create schema
         conn.execute_batch(
             r#"
@@ -605,7 +617,7 @@ mod tests {
                 ('run@11', 'helper@21', 'helper', 'calls', NULL);
             "#,
         )?;
-        
+
         Ok(conn)
     }
 
@@ -613,10 +625,14 @@ mod tests {
     fn test_call_graph_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
         let analytics = Analytics { conn };
-        
+
         let result = analytics.call_graph("main", 5);
-        assert!(result.is_ok(), "call_graph query failed: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "call_graph query failed: {:?}",
+            result.err()
+        );
+
         let nodes = result.unwrap();
         assert_eq!(nodes.len(), 2, "Expected 2 nodes (run, helper)");
         assert_eq!(nodes[0].name, "run");
@@ -627,10 +643,14 @@ mod tests {
     fn test_impact_analysis_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
         let analytics = Analytics { conn };
-        
+
         let result = analytics.impact_analysis("helper", 5);
-        assert!(result.is_ok(), "impact_analysis query failed: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "impact_analysis query failed: {:?}",
+            result.err()
+        );
+
         let nodes = result.unwrap();
         assert_eq!(nodes.len(), 2, "Expected 2 nodes (run, main)");
         // run calls helper directly (distance 1)
@@ -643,12 +663,12 @@ mod tests {
     fn test_has_path_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
         let analytics = Analytics { conn };
-        
+
         // main -> run -> helper (path exists)
         let result = analytics.has_path("main", "helper", 5);
         assert!(result.is_ok(), "has_path query failed: {:?}", result.err());
         assert!(result.unwrap(), "Expected path from main to helper");
-        
+
         // helper -> main (no path in reverse direction)
         let result = analytics.has_path("helper", "main", 5);
         assert!(result.is_ok(), "has_path query failed: {:?}", result.err());
@@ -675,13 +695,15 @@ mod tests {
             // Simulate the escaping done in Analytics::open()
             let escaped = path.replace('\'', "''");
             let sql = format!("ATTACH '{}' AS code", escaped);
-            
+
             // The escaped SQL should have balanced quotes
             let quote_count = sql.chars().filter(|c| *c == '\'').count();
             assert_eq!(
-                quote_count % 2, 0,
+                quote_count % 2,
+                0,
                 "SQL for path '{}' has unbalanced quotes: {}",
-                path, sql
+                path,
+                sql
             );
 
             // Single quotes in the path should be doubled

@@ -209,7 +209,6 @@ pub struct DiffContext {
     pub omitted_count: usize,
 }
 
-
 /// Check if current directory is a git repository.
 pub fn is_git_repo() -> bool {
     Command::new("git")
@@ -306,11 +305,7 @@ pub fn parse_diff_output(output: &str) -> Vec<ChangedFile> {
 }
 
 /// Get the changed line ranges for a file.
-fn get_diff_line_ranges(
-    revision: &str,
-    path: &str,
-    staged: bool,
-) -> Result<Vec<(u32, u32)>> {
+fn get_diff_line_ranges(revision: &str, path: &str, staged: bool) -> Result<Vec<(u32, u32)>> {
     let mut args = vec!["diff", "-U0", "--no-color"];
 
     if staged {

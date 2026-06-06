@@ -50,9 +50,16 @@ pub async fn get_callers(
     let params: CallGraphParams = parse_params(args)?;
 
     // Find the function first
-    let symbols = server.with_db(|db| {
-        db.find_symbols_filtered(&params.function, 100, params.file.as_deref(), Some("function"))
-    }).map_err(|e| internal_error(e.to_string()))?;
+    let symbols = server
+        .with_db(|db| {
+            db.find_symbols_filtered(
+                &params.function,
+                100,
+                params.file.as_deref(),
+                Some("function"),
+            )
+        })
+        .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -65,7 +72,8 @@ pub async fn get_callers(
     let sym_name = sym.name.clone();
 
     // Get incoming edges (callers)
-    let edges = server.with_db(|db| db.get_incoming_edges(&sym_name))
+    let edges = server
+        .with_db(|db| db.get_incoming_edges(&sym_name))
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
@@ -75,11 +83,7 @@ pub async fn get_callers(
         ))]));
     }
 
-    let mut output = format!(
-        "Functions that call '{}' ({}):\n\n",
-        sym.name,
-        edges.len()
-    );
+    let mut output = format!("Functions that call '{}' ({}):\n\n", sym.name, edges.len());
 
     for edge in &edges {
         let source_id = edge.source_id.clone();
@@ -107,9 +111,16 @@ pub async fn get_callees(
     let params: CallGraphParams = parse_params(args)?;
 
     // Find the function first
-    let symbols = server.with_db(|db| {
-        db.find_symbols_filtered(&params.function, 100, params.file.as_deref(), Some("function"))
-    }).map_err(|e| internal_error(e.to_string()))?;
+    let symbols = server
+        .with_db(|db| {
+            db.find_symbols_filtered(
+                &params.function,
+                100,
+                params.file.as_deref(),
+                Some("function"),
+            )
+        })
+        .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -122,7 +133,8 @@ pub async fn get_callees(
     let sym_id = sym.id.clone();
 
     // Get outgoing edges (callees)
-    let edges = server.with_db(|db| db.get_outgoing_edges(&sym_id))
+    let edges = server
+        .with_db(|db| db.get_outgoing_edges(&sym_id))
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
@@ -132,11 +144,7 @@ pub async fn get_callees(
         ))]));
     }
 
-    let mut output = format!(
-        "Functions called by '{}' ({}):\n\n",
-        sym.name,
-        edges.len()
-    );
+    let mut output = format!("Functions called by '{}' ({}):\n\n", sym.name, edges.len());
 
     for edge in &edges {
         output.push_str(&format!(
@@ -164,12 +172,13 @@ pub async fn smart_context(
     let params: SmartContextParams = parse_params(args)?;
 
     // Check if embeddings exist
-    let embedding_count = server.with_db(|db| db.count_embeddings())
+    let embedding_count = server
+        .with_db(|db| db.count_embeddings())
         .map_err(|e| internal_error(e.to_string()))?;
 
     if embedding_count == 0 {
         return Err(internal_error(
-            "No embeddings found. Run 'ctx embed' first to generate embeddings."
+            "No embeddings found. Run 'ctx embed' first to generate embeddings.",
         ));
     }
 
@@ -177,7 +186,7 @@ pub async fn smart_context(
     let has_analytics = server.with_analytics(|_| ()).is_some();
     if !has_analytics {
         return Err(internal_error(
-            "Analytics not available. Run 'ctx index' first."
+            "Analytics not available. Run 'ctx index' first.",
         ));
     }
 
@@ -199,28 +208,32 @@ pub async fn smart_context(
                 e
             ))
         })?;
-        provider.embed_async(&params.task).await.map_err(|e| {
-            internal_error(format!("Failed to generate embedding: {}", e))
-        })?
+        provider
+            .embed_async(&params.task)
+            .await
+            .map_err(|e| internal_error(format!("Failed to generate embedding: {}", e)))?
     } else {
         // Use local provider (sync is fine for CPU-bound fastembed)
-        let provider = LocalProvider::new().map_err(|e| {
-            internal_error(format!("Failed to initialize embedding model: {}", e))
-        })?;
-        provider.embed(&params.task).map_err(|e| {
-            internal_error(format!("Failed to generate embedding: {}", e))
-        })?
+        let provider = LocalProvider::new()
+            .map_err(|e| internal_error(format!("Failed to initialize embedding model: {}", e)))?;
+        provider
+            .embed(&params.task)
+            .map_err(|e| internal_error(format!("Failed to generate embedding: {}", e)))?
     };
 
     // Run smart context selection with pre-computed embedding
     let result = {
         let db = server.db.lock().unwrap();
-        let analytics = server.analytics.as_ref()
+        let analytics = server
+            .analytics
+            .as_ref()
             .ok_or_else(|| internal_error("Analytics not available"))?
-            .lock().unwrap();
+            .lock()
+            .unwrap();
 
         smart_context_with_embedding(&db, &analytics, &params.task, &task_embedding, config)
-    }.map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
+    }
+    .map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
 
     if result.selected_files.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -230,10 +243,7 @@ pub async fn smart_context(
     }
 
     // Format output
-    let mut output = format!(
-        "Smart context for: \"{}\"\n\n",
-        params.task
-    );
+    let mut output = format!("Smart context for: \"{}\"\n\n", params.task);
     output.push_str(&format!(
         "Selected {} files ({} tokens){}:\n\n",
         result.selected_files.len(),

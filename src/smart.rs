@@ -173,7 +173,6 @@ pub struct SmartContext {
     pub omitted_count: usize,
 }
 
-
 /// Select files relevant to a task using semantic search and call graph analysis.
 ///
 /// # Algorithm

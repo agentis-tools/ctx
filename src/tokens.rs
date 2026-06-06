@@ -4,6 +4,7 @@
 //! compatible with OpenAI models (GPT-4, GPT-3.5-turbo, etc.).
 
 use std::path::Path;
+use std::str::FromStr;
 use tiktoken_rs::{cl100k_base, o200k_base, p50k_base, CoreBPE};
 
 /// Result of token counting for a text or file.
@@ -53,22 +54,24 @@ pub enum Encoding {
 }
 
 impl Encoding {
-    /// Parse encoding from string.
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "cl100k_base" | "cl100k" => Some(Self::Cl100kBase),
-            "o200k_base" | "o200k" => Some(Self::O200kBase),
-            "p50k_base" | "p50k" => Some(Self::P50kBase),
-            _ => None,
-        }
-    }
-
     /// Get the encoding name as a string.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Cl100kBase => "cl100k_base",
             Self::O200kBase => "o200k_base",
             Self::P50kBase => "p50k_base",
+        }
+    }
+}
+
+impl FromStr for Encoding {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "cl100k_base" | "cl100k" => Ok(Encoding::Cl100kBase),
+            "o200k_base" | "o200k" => Ok(Encoding::O200kBase),
+            "p50k_base" | "p50k" => Ok(Encoding::P50kBase),
+            _ => Err(()),
         }
     }
 }
@@ -98,7 +101,11 @@ pub fn count_tokens_with_encoding(text: &str, encoding: Encoding) -> Result<usiz
 pub fn count_tokens_detailed(text: &str, encoding: Encoding) -> Result<TokenCount, String> {
     let bpe = get_bpe(encoding)?;
     let count = bpe.encode_with_special_tokens(text).len();
-    Ok(TokenCount::with_char_count(count, encoding.as_str(), text.len()))
+    Ok(TokenCount::with_char_count(
+        count,
+        encoding.as_str(),
+        text.len(),
+    ))
 }
 
 /// Count tokens in a file.
@@ -208,7 +215,7 @@ pub fn select_files_by_tokens(
 pub fn estimate_tokens(text: &str) -> usize {
     // Rough approximation: ~4 characters per token for English
     // This is a conservative estimate (actual tokens are usually fewer)
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 #[cfg(test)]
@@ -226,10 +233,10 @@ mod tests {
     #[test]
     fn test_count_tokens_encoding() {
         let text = "fn main() { println!(\"Hello\"); }";
-        
+
         let cl100k = count_tokens_with_encoding(text, Encoding::Cl100kBase).unwrap();
         let o200k = count_tokens_with_encoding(text, Encoding::O200kBase).unwrap();
-        
+
         // Both should give reasonable counts
         assert!(cl100k > 0 && cl100k < 50);
         assert!(o200k > 0 && o200k < 50);
@@ -239,7 +246,7 @@ mod tests {
     fn test_count_tokens_detailed() {
         let text = "Hello, world!";
         let result = count_tokens_detailed(text, Encoding::Cl100kBase).unwrap();
-        
+
         assert!(result.count > 0);
         assert_eq!(result.encoding, "cl100k_base");
         assert_eq!(result.char_count, Some(text.len()));
@@ -248,9 +255,21 @@ mod tests {
     #[test]
     fn test_select_files_by_tokens() {
         let files = vec![
-            FileTokens { path: "a.rs".to_string(), tokens: 100, size_bytes: 400 },
-            FileTokens { path: "b.rs".to_string(), tokens: 200, size_bytes: 800 },
-            FileTokens { path: "c.rs".to_string(), tokens: 150, size_bytes: 600 },
+            FileTokens {
+                path: "a.rs".to_string(),
+                tokens: 100,
+                size_bytes: 400,
+            },
+            FileTokens {
+                path: "b.rs".to_string(),
+                tokens: 200,
+                size_bytes: 800,
+            },
+            FileTokens {
+                path: "c.rs".to_string(),
+                tokens: 150,
+                size_bytes: 600,
+            },
         ];
 
         // All fit
@@ -274,10 +293,20 @@ mod tests {
 
     #[test]
     fn test_encoding_from_str() {
-        assert_eq!(Encoding::from_str("cl100k_base"), Some(Encoding::Cl100kBase));
-        assert_eq!(Encoding::from_str("o200k_base"), Some(Encoding::O200kBase));
-        assert_eq!(Encoding::from_str("p50k_base"), Some(Encoding::P50kBase));
-        assert_eq!(Encoding::from_str("unknown"), None);
+        use std::str::FromStr;
+        assert_eq!(
+            Encoding::from_str("cl100k_base").ok(),
+            Some(Encoding::Cl100kBase)
+        );
+        assert_eq!(
+            Encoding::from_str("o200k_base").ok(),
+            Some(Encoding::O200kBase)
+        );
+        assert_eq!(
+            Encoding::from_str("p50k_base").ok(),
+            Some(Encoding::P50kBase)
+        );
+        assert_eq!(Encoding::from_str("unknown").ok(), None);
     }
 
     #[test]

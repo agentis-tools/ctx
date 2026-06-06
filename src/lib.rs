@@ -72,14 +72,14 @@ pub use error::{CtxError, Result};
 /// use ctx::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::db::{Database, Symbol, Edge, FileRecord, ParseResult, SymbolKind, EdgeKind};
-    pub use crate::index::{Indexer, IndexResult, open_database};
-    pub use crate::parser::{CodeParser, Language};
     pub use crate::analytics::Analytics;
-    pub use crate::embeddings::{EmbeddingProvider, LocalProvider, Embedding};
-    pub use crate::smart::{smart_context, SmartConfig, SmartContext, FileSelection};
+    pub use crate::db::{Database, Edge, EdgeKind, FileRecord, ParseResult, Symbol, SymbolKind};
     pub use crate::diff::{diff_context, DiffConfig, DiffContext};
-    pub use crate::tokens::{count_tokens, Encoding, TokenCount, HasTokenCount};
-    pub use crate::walker::{discover_files, WalkerConfig, FileEntry};
+    pub use crate::embeddings::{Embedding, EmbeddingProvider, LocalProvider};
     pub use crate::error::{CtxError, Result};
+    pub use crate::index::{open_database, IndexResult, Indexer};
+    pub use crate::parser::{CodeParser, Language};
+    pub use crate::smart::{smart_context, FileSelection, SmartConfig, SmartContext};
+    pub use crate::tokens::{count_tokens, Encoding, HasTokenCount, TokenCount};
+    pub use crate::walker::{discover_files, FileEntry, WalkerConfig};
 }

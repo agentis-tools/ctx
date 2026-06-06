@@ -73,7 +73,7 @@ fn print_search_results(
             results.len()
         );
         println!("{}", "-".repeat(75));
-        println!("{:<40} {:<8} {:<6} {}", "SYMBOL", "KIND", "SCORE", "FILE");
+        println!("{:<40} {:<8} {:<6} FILE", "SYMBOL", "KIND", "SCORE");
         println!("{}", "-".repeat(75));
 
         for (symbol, score, match_type) in results {
@@ -81,7 +81,7 @@ fn print_search_results(
             let file = truncate_path(&symbol.file_path, 25);
 
             let score_display = format!("{:.0}%", score * 100.0);
-            let kind_display = format!("{}", symbol.kind.as_str());
+            let kind_display = symbol.kind.as_str().to_string();
 
             println!(
                 "{:<40} {:<8} {:<6} {}:{}",

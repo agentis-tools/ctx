@@ -2,15 +2,16 @@
 name = "ctx"
 version = "0.2.0"
 edition = "2021"
-description = "Fast CLI tool to generate AI-ready context from your codebase"
-license = "MIT"
-repository = "https://github.com/johansaldes/context"
-homepage = "https://github.com/johansaldes/context"
+rust-version = "1.91"
+description = "Fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence"
+documentation = "https://docs.rs/ctx"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/saldestechnology/ctx"
+homepage = "https://github.com/saldestechnology/ctx"
 readme = "README.md"
 keywords = ["cli", "llm", "ai", "context", "prompt"]
 categories = ["command-line-utilities", "development-tools"]
-authors = ["Johan Öhman Saldes <johan@itkonsult.net>"]
-exclude = [".github/"]
+authors = ["Johan Öhman Saldes <johan@saldestechnology.com>"]
 
 [[bin]]
 name = "ctx"

@@ -567,6 +567,7 @@ impl TypeScriptParser {
 }
 
 /// Create an inheritance edge (extends or implements).
+#[allow(clippy::too_many_arguments)]
 fn create_inheritance_edge(
     source_id: &str,
     target_name: &str,

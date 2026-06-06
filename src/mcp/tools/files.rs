@@ -104,8 +104,8 @@ pub async fn get_file_tree(
     };
 
     // Discover files
-    let entries = discover_files(&start_path, &config)
-        .map_err(|e| internal_error(e.to_string()))?;
+    let entries =
+        discover_files(&start_path, &config).map_err(|e| internal_error(e.to_string()))?;
 
     if entries.is_empty() {
         return Ok(CallToolResult::success(vec![Content::text(
@@ -127,10 +127,7 @@ pub async fn get_file_tree(
     };
 
     // Format output as a tree-like structure
-    let mut output = format!(
-        "Project files ({} found):\n\n",
-        entries.len()
-    );
+    let mut output = format!("Project files ({} found):\n\n", entries.len());
 
     // Group by directory for better organization
     let mut current_dir = String::new();

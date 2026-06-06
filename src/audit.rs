@@ -796,7 +796,7 @@ fn score_modularity(analytics: &Analytics) -> Result<(f32, Vec<QualityIssue>)> {
         7.0 - (issues.len() as f32 * 0.5).min(2.0)
     };
 
-    Ok((score.max(2.0).min(10.0), issues))
+    Ok((score.clamp(2.0, 10.0), issues))
 }
 
 /// Score naming convention consistency.
@@ -828,7 +828,7 @@ fn score_naming(symbols: &[Symbol]) -> (f32, Vec<QualityIssue>) {
                         symbol.kind.as_str(),
                         name
                     ),
-                    suggestion: Some(suggest_name_fix(&symbol.kind.as_str(), name)),
+                    suggestion: Some(suggest_name_fix(symbol.kind.as_str(), name)),
                 });
             }
         }

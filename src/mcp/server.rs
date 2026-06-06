@@ -79,9 +79,7 @@ impl ServerHandler for CtxServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::LATEST,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation {
                 name: "ctx".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
@@ -194,12 +192,8 @@ pub fn greet() -> String {
         .unwrap();
 
         // Index the project using Indexer
-        let mut indexer = Indexer::with_config(
-            &root,
-            false,
-            crate::walker::WalkerConfig::default(),
-        )
-        .unwrap();
+        let mut indexer =
+            Indexer::with_config(&root, false, crate::walker::WalkerConfig::default()).unwrap();
         indexer.index().unwrap();
 
         (temp_dir, root)
@@ -232,7 +226,10 @@ pub fn greet() -> String {
 
         // Server creation should fail without index
         let result = CtxServer::new(root);
-        assert!(result.is_err(), "Server should fail without indexed database");
+        assert!(
+            result.is_err(),
+            "Server should fail without indexed database"
+        );
     }
 
     #[test]

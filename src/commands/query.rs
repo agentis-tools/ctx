@@ -4,8 +4,8 @@
 
 use std::env;
 
-use ctx::analytics;
 use crate::cli::QueryCommand;
+use ctx::analytics;
 use ctx::db;
 use ctx::error::Result;
 use ctx::index;
@@ -19,12 +19,7 @@ fn query_find(
     kind: Option<String>,
     file: Option<String>,
 ) -> Result<()> {
-    let symbols = db.find_symbols_filtered(
-        pattern,
-        limit,
-        file.as_deref(),
-        kind.as_deref(),
-    )?;
+    let symbols = db.find_symbols_filtered(pattern, limit, file.as_deref(), kind.as_deref())?;
 
     if symbols.is_empty() {
         eprintln!("No symbols found matching '{}'", pattern);
@@ -35,8 +30,8 @@ fn query_find(
     }
 
     println!(
-        "{:<40} {:<12} {:<10} {}",
-        "SYMBOL", "KIND", "VISIBILITY", "FILE"
+        "{:<40} {:<12} {:<10} FILE",
+        "SYMBOL", "KIND", "VISIBILITY"
     );
     println!("{}", "-".repeat(90));
 
@@ -56,11 +51,7 @@ fn query_find(
 }
 
 /// Handle 'query callers' subcommand.
-fn query_callers(
-    db: &db::Database,
-    function: &str,
-    file_pattern: Option<&str>,
-) -> Result<()> {
+fn query_callers(db: &db::Database, function: &str, file_pattern: Option<&str>) -> Result<()> {
     // First, find the symbol(s) matching the function name with optional file filter
     let symbols = db.find_symbols_filtered(function, 100, file_pattern, None)?;
 
@@ -126,9 +117,9 @@ fn query_callers(
     // Add name-based edges that aren't duplicates and likely refer to this symbol
     for edge in name_edges {
         // Skip if already have this edge (by source_id + line)
-        let is_duplicate = edges.iter().any(|e| {
-            e.source_id == edge.source_id && e.line == edge.line
-        });
+        let is_duplicate = edges
+            .iter()
+            .any(|e| e.source_id == edge.source_id && e.line == edge.line);
         if is_duplicate {
             continue;
         }
@@ -137,7 +128,7 @@ fn query_callers(
         let likely_match = if let Some(ref ctx) = edge.context {
             // Check if context contains our qualified name or parent type
             ctx.contains(qualified_name)
-                || parent_prefix.as_ref().map_or(false, |p| ctx.contains(p))
+                || parent_prefix.as_ref().is_some_and(|p| ctx.contains(p))
         } else {
             // No context - include only if we have no ID-resolved edges
             // (fallback for completely unresolved graphs)
@@ -154,10 +145,7 @@ fn query_callers(
         return Ok(());
     }
 
-    println!(
-        "Functions that call '{}' ({}):",
-        sym.name, sym.file_path
-    );
+    println!("Functions that call '{}' ({}):", sym.name, sym.file_path);
     println!("{}", "-".repeat(60));
 
     for edge in edges {
@@ -226,10 +214,7 @@ fn query_deps(
     let edges = db.get_outgoing_edges(&sym.id)?;
 
     if edges.is_empty() {
-        eprintln!(
-            "No dependencies found for '{}' ({})",
-            symbol, sym.file_path
-        );
+        eprintln!("No dependencies found for '{}' ({})", symbol, sym.file_path);
         return Ok(());
     }
 
@@ -312,9 +297,8 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
                 for d in 1..=depth {
                     let current: Vec<_> = nodes.iter().filter(|n| n.depth == d).collect();
                     for node in &current {
-                        for prev in &prev_depth_nodes {
+                        if let Some(prev) = prev_depth_nodes.first() {
                             println!("  \"{}\" -> \"{}\";", prev, node.name);
-                            break; // Only show one edge per node for simplicity
                         }
                     }
                     prev_depth_nodes = current.iter().map(|n| n.name.as_str()).collect();

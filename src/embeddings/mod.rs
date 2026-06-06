@@ -169,16 +169,16 @@ pub fn semantic_search(
                 // We use 1/(1+d) to convert to similarity
                 return Ok(results
                     .into_iter()
-                    .map(|(symbol_id, name, kind, file_path, line, distance)| {
-                        SearchResult {
+                    .map(
+                        |(symbol_id, name, kind, file_path, line, distance)| SearchResult {
                             symbol_id,
                             score: 1.0 / (1.0 + distance),
                             name,
                             kind,
                             file_path,
                             line,
-                        }
-                    })
+                        },
+                    )
                     .collect());
             }
         }
