@@ -12,13 +12,16 @@ pub struct TokenCount {
     /// Number of tokens
     pub count: usize,
     /// Encoding used (e.g., "cl100k_base")
+    #[allow(dead_code)] // Part of public API
     pub encoding: String,
     /// Original text length in characters (if available)
+    #[allow(dead_code)] // Part of public API
     pub char_count: Option<usize>,
 }
 
 impl TokenCount {
     /// Create a new TokenCount.
+    #[allow(dead_code)] // Part of public API
     pub fn new(count: usize, encoding: &str) -> Self {
         Self {
             count,
@@ -80,6 +83,7 @@ pub fn get_bpe(encoding: Encoding) -> Result<CoreBPE, String> {
 }
 
 /// Count tokens in a text string using the default encoding (cl100k_base).
+#[allow(dead_code)] // Part of public API
 pub fn count_tokens(text: &str) -> Result<usize, String> {
     count_tokens_with_encoding(text, Encoding::default())
 }
@@ -106,6 +110,7 @@ pub fn count_file_tokens(path: &Path, encoding: Encoding) -> Result<TokenCount, 
 
 /// File with its token count.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Part of public API
 pub struct FileTokens {
     /// File path
     pub path: String,
@@ -113,6 +118,53 @@ pub struct FileTokens {
     pub tokens: usize,
     /// File size in bytes
     pub size_bytes: usize,
+}
+
+/// Trait for types that have a token count field.
+///
+/// Used by `select_by_token_budget` to generically select items
+/// that fit within a token budget.
+pub trait HasTokenCount {
+    /// Get the token count for this item.
+    fn token_count(&self) -> usize;
+}
+
+impl HasTokenCount for FileTokens {
+    fn token_count(&self) -> usize {
+        self.tokens
+    }
+}
+
+/// Select items that fit within a token budget (generic version).
+///
+/// Returns items in order of selection (highest priority first) that fit
+/// within the specified token limit. Items are selected greedily - if an item
+/// doesn't fit, it's skipped and the next item is tried.
+///
+/// # Arguments
+/// * `items` - List of items with token counts, in priority order
+/// * `max_tokens` - Maximum total tokens to include
+///
+/// # Returns
+/// * Tuple of (selected items, total tokens used, number of items omitted)
+pub fn select_by_token_budget<T: HasTokenCount>(
+    items: Vec<T>,
+    max_tokens: usize,
+) -> (Vec<T>, usize, usize) {
+    let mut selected = Vec::new();
+    let mut total_tokens = 0;
+    let mut omitted = 0;
+
+    for item in items {
+        if total_tokens + item.token_count() <= max_tokens {
+            total_tokens += item.token_count();
+            selected.push(item);
+        } else {
+            omitted += 1;
+        }
+    }
+
+    (selected, total_tokens, omitted)
 }
 
 /// Select files that fit within a token budget.
@@ -127,6 +179,7 @@ pub struct FileTokens {
 ///
 /// # Returns
 /// * Tuple of (selected files, total tokens used, number of files omitted)
+#[allow(dead_code)] // Part of public API
 pub fn select_files_by_tokens(
     files: &[FileTokens],
     max_tokens: usize,
@@ -151,6 +204,7 @@ pub fn select_files_by_tokens(
 ///
 /// Uses a rough heuristic of ~4 characters per token for English text.
 /// This is useful for quick estimates when exact counts aren't needed.
+#[allow(dead_code)] // Part of public API
 pub fn estimate_tokens(text: &str) -> usize {
     // Rough approximation: ~4 characters per token for English
     // This is a conservative estimate (actual tokens are usually fewer)

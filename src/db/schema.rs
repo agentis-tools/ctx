@@ -388,6 +388,7 @@ impl Database {
     }
 
     /// Insert multiple symbols in a transaction (batch insert for parallel indexing).
+    #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_symbols_batch(&self, symbols: &[Symbol]) -> Result<usize> {
         let tx = self.conn.unchecked_transaction()?;
         let mut count = 0;
@@ -427,6 +428,7 @@ impl Database {
     }
 
     /// Insert multiple edges in a transaction (batch insert for parallel indexing).
+    #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_edges_batch(&self, edges: &[Edge]) -> Result<usize> {
         let tx = self.conn.unchecked_transaction()?;
         let mut count = 0;
@@ -1002,6 +1004,7 @@ impl Database {
     ///
     /// This copies all embeddings with the correct dimension to the symbol_vectors table.
     /// Returns the number of embeddings migrated.
+    #[allow(dead_code)] // Migration utility for future use
     pub fn migrate_embeddings_to_vec(&self) -> Result<usize> {
         if !self.has_vector_search() {
             return Ok(0);

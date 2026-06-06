@@ -3,18 +3,12 @@
 use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{schema_for, CallGraphParams, SmartContextParams};
+use super::{parse_params, schema_for, CallGraphParams, SmartContextParams};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
 fn internal_error(msg: impl Into<String>) -> rmcp::ErrorData {
     rmcp::ErrorData::new(ErrorCode::INTERNAL_ERROR, msg.into(), None)
-}
-
-/// Helper to create an invalid params error.
-#[allow(dead_code)]
-fn invalid_params(msg: impl Into<String>) -> rmcp::ErrorData {
-    rmcp::ErrorData::new(ErrorCode::INVALID_PARAMS, msg.into(), None)
 }
 
 /// Create the get_callers tool definition.
@@ -162,7 +156,9 @@ pub async fn smart_context(
     args: Option<&serde_json::Map<String, Value>>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     use crate::embeddings::local::LocalProvider;
-    use crate::smart::{smart_context as do_smart_context, SmartConfig};
+    use crate::embeddings::openai::OpenAIProvider;
+    use crate::embeddings::{Embedding, EmbeddingProvider};
+    use crate::smart::{smart_context_with_embedding, SmartConfig};
     use crate::tokens::Encoding;
 
     let params: SmartContextParams = parse_params(args)?;
@@ -185,11 +181,6 @@ pub async fn smart_context(
         ));
     }
 
-    // Create embedding provider
-    let provider = LocalProvider::new().map_err(|e| {
-        internal_error(format!("Failed to initialize embedding model: {}", e))
-    })?;
-
     // Configure smart context
     let config = SmartConfig {
         max_tokens: params.max_tokens.unwrap_or(8000),
@@ -198,16 +189,37 @@ pub async fn smart_context(
         encoding: Encoding::default(),
     };
 
-    // Run smart context selection
-    // We need to get both db and analytics at the same time
-    // Since we can't hold both locks, we'll do this in a more complex way
+    // Compute task embedding - use async for OpenAI to avoid blocking
+    let use_openai = params.use_openai.unwrap_or(false);
+    let task_embedding: Embedding = if use_openai {
+        // Use OpenAI with async embedding to avoid blocking the async runtime
+        let provider = OpenAIProvider::from_env().map_err(|e| {
+            internal_error(format!(
+                "Failed to initialize OpenAI provider: {}. Set OPENAI_API_KEY environment variable.",
+                e
+            ))
+        })?;
+        provider.embed_async(&params.task).await.map_err(|e| {
+            internal_error(format!("Failed to generate embedding: {}", e))
+        })?
+    } else {
+        // Use local provider (sync is fine for CPU-bound fastembed)
+        let provider = LocalProvider::new().map_err(|e| {
+            internal_error(format!("Failed to initialize embedding model: {}", e))
+        })?;
+        provider.embed(&params.task).map_err(|e| {
+            internal_error(format!("Failed to generate embedding: {}", e))
+        })?
+    };
+
+    // Run smart context selection with pre-computed embedding
     let result = {
         let db = server.db.lock().unwrap();
         let analytics = server.analytics.as_ref()
             .ok_or_else(|| internal_error("Analytics not available"))?
             .lock().unwrap();
-        
-        do_smart_context(&db, &analytics, &provider, &params.task, config)
+
+        smart_context_with_embedding(&db, &analytics, &params.task, &task_embedding, config)
     }.map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
 
     if result.selected_files.is_empty() {
@@ -259,16 +271,6 @@ pub async fn smart_context(
     }
 
     Ok(CallToolResult::success(vec![Content::text(output)]))
-}
-
-/// Parse tool parameters from JSON.
-fn parse_params<T: serde::de::DeserializeOwned>(
-    args: Option<&serde_json::Map<String, Value>>,
-) -> Result<T, rmcp::ErrorData> {
-    let args = args.ok_or_else(|| invalid_params("Missing required parameters"))?;
-
-    serde_json::from_value(Value::Object(args.clone()))
-        .map_err(|e| invalid_params(e.to_string()))
 }
 
 #[cfg(test)]

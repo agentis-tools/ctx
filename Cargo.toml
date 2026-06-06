@@ -16,6 +16,10 @@ exclude = [".github/"]
 name = "ctx"
 path = "src/main.rs"
 
+[lib]
+name = "ctx"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"

@@ -11,7 +11,8 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
-use super::{Embedding, EmbeddingError, EmbeddingProvider, Result, OPENAI_EMBEDDING_DIM};
+use super::{Embedding, EmbeddingProvider, OPENAI_EMBEDDING_DIM};
+use crate::error::{CtxError, Result};
 
 /// OpenAI API endpoint
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/embeddings";
@@ -87,7 +88,7 @@ impl OpenAIProvider {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|e| EmbeddingError::ApiError(format!("Invalid API key format: {}", e)))?,
+                .map_err(|e| CtxError::embedding(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -98,7 +99,7 @@ impl OpenAIProvider {
             .default_headers(headers)
             .build()
             .map_err(|e| {
-                EmbeddingError::NetworkError(format!("Failed to build HTTP client: {}", e))
+                CtxError::embedding(format!("Failed to build HTTP client: {}", e))
             })?;
 
         Ok(Self {
@@ -109,7 +110,7 @@ impl OpenAIProvider {
 
     /// Create a provider from the OPENAI_API_KEY environment variable.
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| EmbeddingError::InvalidApiKey)?;
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| CtxError::InvalidApiKey)?;
         Self::new(api_key)
     }
 
@@ -128,8 +129,8 @@ impl OpenAIProvider {
         if tokio::runtime::Handle::try_current().is_ok() {
             // We're in an async context - this would deadlock with block_on
             // Return an error instead of panicking
-            return Err(EmbeddingError::ApiError(
-                "Cannot call sync embed() from async context. Use embed_async() instead.".into(),
+            return Err(CtxError::embedding(
+                "Cannot call sync embed() from async context. Use embed_async() instead.",
             ));
         }
 
@@ -155,8 +156,8 @@ impl OpenAIProvider {
                     // Check if error is retryable
                     let should_retry = matches!(
                         &e,
-                        EmbeddingError::RateLimited(_) | EmbeddingError::NetworkError(_)
-                    ) || matches!(&e, EmbeddingError::ApiError(msg) if msg.contains("server error"));
+                        CtxError::RateLimited(_) | CtxError::Embedding(_)
+                    ) || matches!(&e, CtxError::Embedding(msg) if msg.contains("server error"));
 
                     if should_retry && attempt < MAX_RETRIES - 1 {
                         // Exponential backoff: 1s, 2s, 4s
@@ -170,18 +171,20 @@ impl OpenAIProvider {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| EmbeddingError::ApiError("Max retries exceeded".into())))
+        Err(last_error.unwrap_or_else(|| CtxError::embedding("Max retries exceeded")))
     }
 
     /// Async version of embed for use in async contexts (e.g., MCP server).
+    #[allow(dead_code)] // Public API for async contexts
     pub async fn embed_async(&self, text: &str) -> Result<Embedding> {
         let mut results = self.request_async(&[text]).await?;
         results
             .pop()
-            .ok_or_else(|| EmbeddingError::ApiError("Empty response".into()))
+            .ok_or_else(|| CtxError::embedding("Empty response"))
     }
 
     /// Async version of embed_batch for use in async contexts.
+    #[allow(dead_code)] // Public API for async contexts
     pub async fn embed_batch_async(&self, texts: &[&str]) -> Result<Vec<Embedding>> {
         const BATCH_SIZE: usize = 100;
 
@@ -205,11 +208,11 @@ impl OpenAIProvider {
             .await
             .map_err(|e| {
                 if e.is_timeout() {
-                    EmbeddingError::NetworkError(format!("Request timed out: {}", e))
+                    CtxError::embedding(format!("Request timed out: {}", e))
                 } else if e.is_connect() {
-                    EmbeddingError::NetworkError(format!("Connection failed: {}", e))
+                    CtxError::embedding(format!("Connection failed: {}", e))
                 } else {
-                    EmbeddingError::NetworkError(e.to_string())
+                    CtxError::embedding(e.to_string())
                 }
             })?;
 
@@ -220,7 +223,7 @@ impl OpenAIProvider {
             StatusCode::OK => {
                 // Parse successful response
                 let api_response: EmbeddingResponse = response.json().await.map_err(|e| {
-                    EmbeddingError::SerializationError(format!("Failed to parse response: {}", e))
+                    CtxError::embedding(format!("Failed to parse response: {}", e))
                 })?;
 
                 self.parse_response(api_response)
@@ -233,13 +236,13 @@ impl OpenAIProvider {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap_or(60);
-                Err(EmbeddingError::RateLimited(retry_after))
+                Err(CtxError::RateLimited(retry_after))
             }
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(EmbeddingError::InvalidApiKey),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(CtxError::InvalidApiKey),
             s if s.is_server_error() => {
                 // 5xx errors - retryable
                 let body = response.text().await.unwrap_or_default();
-                Err(EmbeddingError::ApiError(format!(
+                Err(CtxError::embedding(format!(
                     "server error ({}): {}",
                     status, body
                 )))
@@ -251,11 +254,11 @@ impl OpenAIProvider {
                 // Try to parse as API error
                 if let Ok(error_response) = serde_json::from_str::<EmbeddingResponse>(&body) {
                     if let Some(error) = error_response.error {
-                        return Err(EmbeddingError::ApiError(error.message));
+                        return Err(CtxError::embedding(error.message));
                     }
                 }
 
-                Err(EmbeddingError::ApiError(format!(
+                Err(CtxError::embedding(format!(
                     "HTTP {}: {}",
                     status, body
                 )))
@@ -268,20 +271,20 @@ impl OpenAIProvider {
         // Check for API errors
         if let Some(error) = response.error {
             if error.message.contains("rate limit") {
-                return Err(EmbeddingError::RateLimited(60));
+                return Err(CtxError::RateLimited(60));
             }
             if error.message.contains("invalid api key")
                 || error.message.contains("Incorrect API key")
             {
-                return Err(EmbeddingError::InvalidApiKey);
+                return Err(CtxError::InvalidApiKey);
             }
-            return Err(EmbeddingError::ApiError(error.message));
+            return Err(CtxError::embedding(error.message));
         }
 
         // Extract embeddings
         let data = response
             .data
-            .ok_or_else(|| EmbeddingError::ApiError("No data in response".into()))?;
+            .ok_or_else(|| CtxError::embedding("No data in response"))?;
 
         let mut embeddings = Vec::with_capacity(data.len());
 
@@ -289,7 +292,7 @@ impl OpenAIProvider {
             let vector = item.embedding;
 
             if vector.len() != OPENAI_EMBEDDING_DIM {
-                return Err(EmbeddingError::DimensionMismatch {
+                return Err(CtxError::DimensionMismatch {
                     expected: OPENAI_EMBEDDING_DIM,
                     actual: vector.len(),
                 });
@@ -315,7 +318,7 @@ impl EmbeddingProvider for OpenAIProvider {
         let mut results = self.request(&[text])?;
         results
             .pop()
-            .ok_or_else(|| EmbeddingError::ApiError("Empty response".into()))
+            .ok_or_else(|| CtxError::embedding("Empty response"))
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>> {
@@ -383,7 +386,7 @@ mod tests {
 
         let result = provider.parse_response(response);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), EmbeddingError::InvalidApiKey));
+        assert!(matches!(result.unwrap_err(), CtxError::InvalidApiKey));
     }
 
     #[test]
@@ -403,7 +406,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            EmbeddingError::RateLimited(_)
+            CtxError::RateLimited(_)
         ));
     }
 
@@ -423,7 +426,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            EmbeddingError::DimensionMismatch {
+            CtxError::DimensionMismatch {
                 expected: 1536,
                 actual: 100
             }

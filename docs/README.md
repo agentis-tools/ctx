@@ -134,9 +134,15 @@ Options:
 | `ctx embed` | Generate embeddings for semantic search |
 | `ctx source` | Get the source code for a symbol |
 | `ctx explain` | Explain a symbol with its relationships |
+| `ctx smart` | Intelligently select files for a task |
+| `ctx diff` | Generate context for git changes |
+| `ctx review` | Generate context for PR review (GitHub) |
+| `ctx audit` | Run code quality analysis |
 | `ctx complexity` | Analyze code complexity and fan-out |
 | `ctx duplicates` | Detect duplicate or similar code |
 | `ctx graph` | Generate dependency graph visualization |
+| `ctx shell` | Interactive codebase explorer |
+| `ctx serve` | Start MCP server (requires `--features mcp`) |
 
 ### Index Options
 
@@ -229,11 +235,93 @@ Options:
       --depth <N>       Maximum traversal depth [default: 3]
 ```
 
+### Smart Context Options
+
+```
+ctx smart <TASK> [OPTIONS]
+
+Arguments:
+  <TASK>  Natural language description of the task
+
+Options:
+      --max-tokens <N>  Maximum tokens in output [default: 8000]
+      --depth <N>       Call graph expansion depth [default: 2]
+      --top <N>         Number of initial semantic matches [default: 10]
+      --explain         Show selection reasoning for each file
+      --dry-run         Preview selection without generating context
+      --openai          Use OpenAI embeddings instead of local model
+```
+
+### Diff Context Options
+
+```
+ctx diff [REVISION] [OPTIONS]
+
+Arguments:
+  [REVISION]  Git revision or range [default: HEAD~1]
+
+Options:
+      --max-tokens <N>  Maximum tokens in output [default: 8000]
+      --depth <N>       Call graph context depth [default: 1]
+      --changes-only    Only include changed files (no context expansion)
+      --staged          Include staged changes only
+      --summary         Include change summary
+```
+
+### PR Review Options
+
+```
+ctx review <PR> [OPTIONS]
+
+Arguments:
+  <PR>  PR number or URL
+
+Options:
+      --repo <REPO>       Repository (owner/name, auto-detected if not specified)
+      --include-comments  Include PR comments in output
+      --max-tokens <N>    Maximum tokens in output [default: 8000]
+      --depth <N>         Call graph context depth [default: 1]
+      --changes-only      Only include changed files
+      --summary           Include change summary
+```
+
+### Audit Options
+
+```
+ctx audit [OPTIONS]
+
+Options:
+  -o, --output <FMT>    Output format: text, json, markdown [default: text]
+      --min-score <N>   Minimum score threshold (fails if below, 0.0-10.0)
+      --categories <C>  Categories to check (comma-separated)
+      --incremental     Only audit changed files
+```
+
+### Interactive Shell Options
+
+```
+ctx shell [OPTIONS]
+
+Options:
+      --history <PATH>  History file location
+      --no-history      Disable command history
+      --vi              Use vi editing mode (default: emacs)
+```
+
+### MCP Server Options
+
+```
+ctx serve [OPTIONS]
+
+Options:
+      --mcp  Run as MCP server over stdio (for Claude Desktop integration)
+```
+
 ## Key Features
 
 - **Fast** - Written in Rust, indexes thousands of files in seconds
 - **Smart filtering** - Respects .gitignore, excludes binaries and 170+ patterns
-- **Multi-language** - Rust, TypeScript, JavaScript, Python, Solidity
+- **Multi-language** - Rust, TypeScript, JavaScript, Python, Go, Solidity
 - **Single file database** - Everything in one portable SQLite file
 - **Incremental updates** - Only reindex what changed
 - **Watch mode** - Auto-reindex on file changes
@@ -242,6 +330,11 @@ Options:
 - **Impact analysis** - Know what breaks before you change code
 - **Code quality** - Complexity scoring and duplicate detection
 - **Graph visualization** - DOT, Mermaid, and JSON output formats
+- **Smart context** - AI-powered file selection based on task description
+- **Diff-aware context** - Generate context focused on git changes
+- **PR review** - GitHub integration for pull request analysis
+- **Interactive shell** - REPL for codebase exploration
+- **MCP server** - Claude Desktop integration via Model Context Protocol
 
 ## Use Cases
 

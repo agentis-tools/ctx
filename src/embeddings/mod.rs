@@ -24,42 +24,15 @@
 pub mod local;
 pub mod openai;
 
-use thiserror::Error;
+// Re-export providers for convenience
+pub use local::LocalProvider;
+pub use openai::OpenAIProvider;
+
+use crate::error::Result;
 
 /// Embedding dimension for different models
 pub const OPENAI_EMBEDDING_DIM: usize = 1536; // text-embedding-3-small
 pub const LOCAL_EMBEDDING_DIM: usize = 384; // all-MiniLM-L6-v2
-
-/// Errors that can occur during embedding operations.
-#[derive(Error, Debug)]
-pub enum EmbeddingError {
-    #[error("API error: {0}")]
-    ApiError(String),
-
-    #[error("Rate limited: retry after {0} seconds")]
-    RateLimited(u64),
-
-    #[error("Invalid API key")]
-    InvalidApiKey,
-
-    #[error("Network error: {0}")]
-    NetworkError(String),
-
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
-
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-
-    #[error("Model not found: {0}")]
-    ModelNotFound(String),
-
-    #[error("Dimension mismatch: expected {expected}, got {actual}")]
-    DimensionMismatch { expected: usize, actual: usize },
-}
-
-/// Result type for embedding operations.
-pub type Result<T> = std::result::Result<T, EmbeddingError>;
 
 /// A vector embedding.
 #[derive(Debug, Clone)]
@@ -95,15 +68,13 @@ impl Embedding {
     /// Serialize to JSON for storage.
     #[allow(dead_code)]
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string(&self.vector)
-            .map_err(|e| EmbeddingError::SerializationError(e.to_string()))
+        Ok(serde_json::to_string(&self.vector)?)
     }
 
     /// Deserialize from JSON.
     #[allow(dead_code)]
     pub fn from_json(json: &str) -> Result<Self> {
-        let vector: Vec<f32> = serde_json::from_str(json)
-            .map_err(|e| EmbeddingError::SerializationError(e.to_string()))?;
+        let vector: Vec<f32> = serde_json::from_str(json)?;
         Ok(Self::new(vector))
     }
 }
@@ -225,9 +196,7 @@ fn semantic_search_slow(
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
     // Get all embeddings from database
-    let all_embeddings = db
-        .get_all_embeddings()
-        .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
+    let all_embeddings = db.get_all_embeddings()?;
 
     // Compute similarity for each
     let mut scored: Vec<_> = all_embeddings
@@ -267,9 +236,7 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
 
     loop {
         // Get symbols without embeddings
-        let symbols = db
-            .get_symbols_without_embeddings(batch_size as i64)
-            .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
+        let symbols = db.get_symbols_without_embeddings(batch_size as i64)?;
 
         if symbols.is_empty() {
             break;
@@ -285,8 +252,7 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
 
         // Store embeddings
         for (symbol, embedding) in symbols.iter().zip(embeddings.iter()) {
-            db.store_embedding(&symbol.id, provider.name(), "default", &embedding.vector)
-                .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
+            db.store_embedding(&symbol.id, provider.name(), "default", &embedding.vector)?;
         }
 
         total_embedded += symbols.len();

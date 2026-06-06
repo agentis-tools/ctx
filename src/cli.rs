@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
-#[derive(ValueEnum, Clone, Debug, Default, PartialEq)]
+/// CLI output format (with clap integration).
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
 pub enum OutputFormat {
     #[default]
     Xml,
@@ -9,6 +10,18 @@ pub enum OutputFormat {
     Md,
     Plain,
     Json,
+}
+
+impl OutputFormat {
+    /// Convert to library OutputFormat.
+    pub fn to_lib(self) -> ctx::formatter::OutputFormat {
+        match self {
+            OutputFormat::Xml => ctx::formatter::OutputFormat::Xml,
+            OutputFormat::Markdown | OutputFormat::Md => ctx::formatter::OutputFormat::Markdown,
+            OutputFormat::Plain => ctx::formatter::OutputFormat::Plain,
+            OutputFormat::Json => ctx::formatter::OutputFormat::Json,
+        }
+    }
 }
 
 #[derive(Parser, Debug)]

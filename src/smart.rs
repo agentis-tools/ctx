@@ -20,8 +20,9 @@ use std::path::Path;
 
 use crate::analytics::{Analytics, CallGraphNode, ImpactNode};
 use crate::db::Database;
-use crate::embeddings::{semantic_search, EmbeddingProvider, SearchResult};
-use crate::tokens::{count_file_tokens, Encoding};
+use crate::embeddings::{semantic_search, Embedding, EmbeddingProvider, SearchResult};
+use crate::error::{CtxError, Result};
+use crate::tokens::{count_file_tokens, select_by_token_budget, Encoding, HasTokenCount};
 
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
@@ -72,11 +73,13 @@ pub enum SelectionReason {
         depth: i32,
     },
     /// In the same module as a matched symbol
+    #[allow(dead_code)] // Used in tests and pattern matching
     SameModule {
         /// The related symbol
         symbol: String,
     },
     /// User explicitly requested this file
+    #[allow(dead_code)] // Used in tests and pattern matching
     Explicit,
 }
 
@@ -125,6 +128,12 @@ pub struct FileSelection {
     pub token_count: usize,
 }
 
+impl HasTokenCount for FileSelection {
+    fn token_count(&self) -> usize {
+        self.token_count
+    }
+}
+
 impl FileSelection {
     /// Create a new file selection.
     fn new(path: String, reason: SelectionReason) -> Self {
@@ -152,6 +161,7 @@ impl FileSelection {
 #[derive(Debug, Clone)]
 pub struct SmartContext {
     /// The task description used for selection
+    #[allow(dead_code)] // Part of public API
     pub task: String,
     /// Selected files with their relevance information
     pub selected_files: Vec<FileSelection>,
@@ -163,37 +173,6 @@ pub struct SmartContext {
     pub omitted_count: usize,
 }
 
-/// Error type for smart context operations.
-#[derive(Debug)]
-pub enum SmartError {
-    /// Database error
-    Database(String),
-    /// Embedding error
-    Embedding(String),
-    /// Analytics error
-    Analytics(String),
-    /// No relevant files found
-    NoMatches,
-    /// File reading error
-    FileRead(String),
-    /// Token counting error
-    TokenCount(String),
-}
-
-impl std::fmt::Display for SmartError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SmartError::Database(e) => write!(f, "Database error: {}", e),
-            SmartError::Embedding(e) => write!(f, "Embedding error: {}", e),
-            SmartError::Analytics(e) => write!(f, "Analytics error: {}", e),
-            SmartError::NoMatches => write!(f, "No relevant files found for the task"),
-            SmartError::FileRead(e) => write!(f, "File read error: {}", e),
-            SmartError::TokenCount(e) => write!(f, "Token counting error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for SmartError {}
 
 /// Select files relevant to a task using semantic search and call graph analysis.
 ///
@@ -215,18 +194,31 @@ pub fn smart_context(
     provider: &dyn EmbeddingProvider,
     task: &str,
     config: SmartConfig,
-) -> Result<SmartContext, SmartError> {
+) -> Result<SmartContext> {
     // 1. Embed the task description
-    let task_embedding = provider
-        .embed(task)
-        .map_err(|e| SmartError::Embedding(e.to_string()))?;
+    let task_embedding = provider.embed(task)?;
 
+    smart_context_with_embedding(db, analytics, task, &task_embedding, config)
+}
+
+/// Select files relevant to a task using a pre-computed embedding.
+///
+/// This variant is useful when the embedding has been computed asynchronously
+/// (e.g., in the MCP server with OpenAI's async API) to avoid blocking the async runtime.
+///
+/// See [`smart_context`] for the full algorithm description.
+pub fn smart_context_with_embedding(
+    db: &Database,
+    analytics: &Analytics,
+    task: &str,
+    task_embedding: &Embedding,
+    config: SmartConfig,
+) -> Result<SmartContext> {
     // 2. Semantic search for matching symbols
-    let matches = semantic_search(db, &task_embedding, config.top)
-        .map_err(|e| SmartError::Embedding(e.to_string()))?;
+    let matches = semantic_search(db, task_embedding, config.top)?;
 
     if matches.is_empty() {
-        return Err(SmartError::NoMatches);
+        return Err(CtxError::NoMatches);
     }
 
     // 3. Build file selection map
@@ -259,7 +251,7 @@ pub fn smart_context(
     rank_files(&mut selections);
 
     // 6. Apply token limit
-    let (selected, total_tokens, omitted) = select_by_tokens(selections, config.max_tokens);
+    let (selected, total_tokens, omitted) = select_by_token_budget(selections, config.max_tokens);
 
     Ok(SmartContext {
         task: task.to_string(),
@@ -288,7 +280,7 @@ fn expand_symbol(
     analytics: &Analytics,
     result: &SearchResult,
     depth: i32,
-) -> Result<(), SmartError> {
+) -> Result<()> {
     // Expand callers (who calls this symbol - impact analysis)
     if let Ok(callers) = analytics.impact_analysis(&result.symbol_id, depth) {
         for caller in callers {
@@ -361,29 +353,6 @@ fn rank_files(files: &mut [FileSelection]) {
             .partial_cmp(&a.relevance_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-}
-
-/// Select files that fit within the token budget.
-///
-/// Returns (selected files, total tokens, omitted count).
-fn select_by_tokens(
-    files: Vec<FileSelection>,
-    max_tokens: usize,
-) -> (Vec<FileSelection>, usize, usize) {
-    let mut selected = Vec::new();
-    let mut total_tokens = 0;
-    let mut omitted = 0;
-
-    for file in files {
-        if total_tokens + file.token_count <= max_tokens {
-            total_tokens += file.token_count;
-            selected.push(file);
-        } else {
-            omitted += 1;
-        }
-    }
-
-    (selected, total_tokens, omitted)
 }
 
 /// Count tokens in a file, returning 0 on error.
@@ -529,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn test_select_by_tokens() {
+    fn test_select_by_token_budget() {
         let files = vec![
             FileSelection {
                 path: "a.rs".to_string(),
@@ -552,19 +521,19 @@ mod tests {
         ];
 
         // All fit
-        let (selected, total, omitted) = select_by_tokens(files.clone(), 500);
+        let (selected, total, omitted) = select_by_token_budget(files.clone(), 500);
         assert_eq!(selected.len(), 3);
         assert_eq!(total, 450);
         assert_eq!(omitted, 0);
 
         // Only first two fit
-        let (selected, total, omitted) = select_by_tokens(files.clone(), 300);
+        let (selected, total, omitted) = select_by_token_budget(files.clone(), 300);
         assert_eq!(selected.len(), 2);
         assert_eq!(total, 300);
         assert_eq!(omitted, 1);
 
         // Only first fits
-        let (selected, total, omitted) = select_by_tokens(files, 150);
+        let (selected, total, omitted) = select_by_token_budget(files, 150);
         assert_eq!(selected.len(), 1);
         assert_eq!(total, 100);
         assert_eq!(omitted, 2);

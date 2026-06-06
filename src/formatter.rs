@@ -268,13 +268,38 @@ fn format_path_for_output(path: &Path) -> String {
     }
 }
 
-/// Get a formatter instance based on format name.
-pub fn get_formatter(format: &crate::cli::OutputFormat) -> Box<dyn Formatter> {
-    use crate::cli::OutputFormat;
+/// Output format for context generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// XML format (default)
+    #[default]
+    Xml,
+    /// Markdown format
+    Markdown,
+    /// Plain text format
+    Plain,
+    /// JSON format
+    Json,
+}
 
+impl OutputFormat {
+    /// Parse format from string.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "xml" => Some(Self::Xml),
+            "markdown" | "md" => Some(Self::Markdown),
+            "plain" => Some(Self::Plain),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
+/// Get a formatter instance based on format.
+pub fn get_formatter(format: OutputFormat) -> Box<dyn Formatter> {
     match format {
         OutputFormat::Xml => Box::new(XmlFormatter),
-        OutputFormat::Markdown | OutputFormat::Md => Box::new(MarkdownFormatter),
+        OutputFormat::Markdown => Box::new(MarkdownFormatter),
         OutputFormat::Plain => Box::new(PlainFormatter),
         OutputFormat::Json => Box::new(JsonFormatter),
     }

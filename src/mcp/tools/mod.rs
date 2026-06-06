@@ -4,10 +4,26 @@ pub mod analysis;
 pub mod files;
 pub mod search;
 
-use rmcp::model::Tool;
+use rmcp::model::{ErrorCode, Tool};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
+
+/// Helper to create an invalid params error.
+pub fn invalid_params(msg: impl Into<String>) -> rmcp::ErrorData {
+    rmcp::ErrorData::new(ErrorCode::INVALID_PARAMS, msg.into(), None)
+}
+
+/// Parse tool parameters from JSON.
+pub fn parse_params<T: serde::de::DeserializeOwned>(
+    args: Option<&serde_json::Map<String, Value>>,
+) -> Result<T, rmcp::ErrorData> {
+    let args = args.ok_or_else(|| invalid_params("Missing required parameters"))?;
+
+    serde_json::from_value(Value::Object(args.clone()))
+        .map_err(|e| invalid_params(e.to_string()))
+}
 
 /// Helper to create a JSON schema object from a type.
 fn schema_for<T: JsonSchema>() -> Arc<serde_json::Map<String, serde_json::Value>> {
@@ -117,6 +133,9 @@ pub struct SmartContextParams {
     /// Number of initial semantic matches (default: 10).
     #[serde(default = "default_top")]
     pub top: Option<usize>,
+    /// Use OpenAI embeddings instead of local (requires OPENAI_API_KEY).
+    #[serde(default)]
+    pub use_openai: Option<bool>,
 }
 
 fn default_limit() -> Option<i32> {

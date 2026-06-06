@@ -22,19 +22,28 @@ ctx query callers handleLogin  # Who calls this function?
 - **Glob pattern support** - Select files with patterns like `"src/**/*.rs"` or `"**/*.ts"`
 - **Smart ignore system** - Respects `.gitignore` and `.contextignore`
 - **Built-in filtering** - Excludes binary files, `node_modules`, build artifacts, and 170+ patterns
-- **Multiple output formats** - XML (default), Markdown, or plain text
+- **Multiple output formats** - XML (default), Markdown, JSON, or plain text
 - **Project tree visualization** - ASCII tree showing file structure
 - **Streaming output** - Files output as processed, pipeable to clipboard
+- **Token counting** - Count tokens for LLM context window management
 
 ### Code Intelligence
-- **Multi-language parsing** - Rust, TypeScript, JavaScript, JSX/TSX, Python, Solidity, YAML
+- **Multi-language parsing** - Rust, TypeScript, JavaScript, JSX/TSX, Python, Go, Solidity, YAML
 - **Symbol extraction** - Functions, classes, interfaces, structs, enums, traits
 - **Rich relationship tracking** - Calls, extends, implements, and imports edges
 - **Call graph analysis** - Track function calls and dependencies
 - **Impact analysis** - See what would be affected by changing a symbol
 - **Keyword search** - FTS5-powered search across symbols and documentation
-- **Semantic search** - Embedding-based natural language search (OpenAI)
+- **Semantic search** - Embedding-based natural language search (local or OpenAI)
 - **Watch mode** - Automatic reindexing on file changes
+
+### Advanced Features
+- **Smart context selection** - AI-powered file selection based on task description
+- **Diff-aware context** - Generate context focused on git changes
+- **PR review context** - GitHub integration for pull request analysis
+- **Code quality audit** - Automated quality analysis with CI integration
+- **Interactive shell** - REPL for codebase exploration
+- **MCP server** - Claude Desktop integration via Model Context Protocol
 
 ## Installation
 
@@ -46,6 +55,11 @@ Or build from source:
 ```bash
 cargo build --release
 # Binary at ./target/release/ctx
+```
+
+### With MCP Support (for Claude Desktop)
+```bash
+cargo build --release --features mcp
 ```
 
 ## Quick Start
@@ -64,6 +78,15 @@ ctx src/ | pbcopy
 
 # Markdown format
 ctx --format markdown src/
+
+# JSON format
+ctx --format json src/
+
+# Count tokens only
+ctx --count-only src/
+
+# Limit output to token budget
+ctx --max-tokens 8000 src/
 ```
 
 ### Code Intelligence
@@ -75,10 +98,13 @@ ctx index
 # Search for symbols (keyword matching)
 ctx search "handleRequest"
 
-# Semantic search (natural language, requires OpenAI API key)
-export OPENAI_API_KEY=sk-...
-ctx embed                          # Generate embeddings once
-ctx semantic "authentication logic" # Search by meaning
+# Generate embeddings for semantic search
+ctx embed                          # Local model (default, ~90MB download)
+ctx embed --openai                 # OpenAI API (requires OPENAI_API_KEY)
+
+# Semantic search (natural language)
+ctx semantic "authentication logic"
+ctx semantic "error handling" --openai
 
 # Find all callers of a function
 ctx query callers authenticate
@@ -138,25 +164,65 @@ fn main() {
 \`\`\`
 ```
 
+### JSON
+```json
+{
+  "project_tree": "my-project/\n├── src/\n│   └── main.rs\n└── Cargo.toml",
+  "files": [
+    {
+      "name": "main.rs",
+      "path": "/src/main.rs",
+      "content": "fn main() {\n    println!(\"Hello, world!\");\n}"
+    }
+  ]
+}
+```
+
 ## Code Intelligence Commands
 
 ### `ctx index`
 Build or update the code intelligence database.
 
 ```bash
-ctx index              # Incremental index
-ctx index --force      # Full reindex (clears database)
-ctx index --watch      # Watch mode with auto-reindex
-ctx index --verbose    # Show files being indexed
+ctx index                    # Incremental index
+ctx index --force            # Full reindex (clears database)
+ctx index --watch            # Watch mode with auto-reindex
+ctx index --verbose          # Show files being indexed
+ctx index --parallel         # Use parallel parsing (faster on multi-core)
+ctx index --no-gitignore     # Include gitignored files
+ctx index -i "tests/"        # Additional ignore patterns
+ctx index -p "src/**/*.rs"   # Only index specific patterns
 ```
 
 ### `ctx search <query>`
-Search for symbols using semantic matching.
+Search for symbols using keyword matching (FTS5).
 
 ```bash
-ctx search "auth"              # Find symbols related to auth
-ctx search "parse config"      # Natural language search
-ctx search "handleRequest" --limit 10
+ctx search "auth"                  # Find symbols related to auth
+ctx search "handleRequest"         # Find exact symbol names
+ctx search "parse config" --limit 10
+ctx search "handler" --output json # JSON output
+```
+
+### `ctx semantic <query>`
+Search using embeddings for natural language queries.
+
+```bash
+ctx semantic "authentication logic"     # Local embeddings (default)
+ctx semantic "error handling" --openai  # OpenAI embeddings
+ctx semantic "database queries" --limit 20
+```
+
+### `ctx embed`
+Generate embeddings for semantic search.
+
+```bash
+ctx embed                    # Generate with local model
+ctx embed --openai           # Generate with OpenAI API
+ctx embed --force            # Re-embed all symbols
+ctx embed --verbose          # Show progress
+ctx embed --batch-size 100   # Custom batch size
+ctx embed --watch            # Watch for index changes and auto-embed
 ```
 
 ### `ctx query`
@@ -165,12 +231,13 @@ Query the code intelligence database.
 ```bash
 # Find symbols by name pattern
 ctx query find "handle*" --kind function
+ctx query find "User*" --file "src/models/*.rs"
 
 # Show callers of a function
 ctx query callers myFunction --depth 3
 
 # Show dependencies of a symbol
-ctx query deps MyClass
+ctx query deps MyClass --depth 2
 
 # Visualize call graph (text, json, or dot format)
 ctx query graph entryPoint --depth 5 --output dot
@@ -190,6 +257,8 @@ Get detailed information about a symbol including its relationships.
 
 ```bash
 ctx explain handleAuth
+ctx explain MyClass --file "src/models/*.rs"
+ctx explain process --kind function
 ```
 
 ### `ctx source <symbol>`
@@ -197,7 +266,176 @@ Retrieve the source code for a symbol.
 
 ```bash
 ctx source MyClass::processData
+ctx source authenticate --file "src/auth/*.rs"
 ```
+
+## Smart Context Selection
+
+Intelligently select files relevant to a task using semantic search and call graph analysis:
+
+```bash
+ctx smart "add user authentication" --max-tokens 8000
+ctx smart "fix login bug" --explain      # Show selection reasoning
+ctx smart "refactor parser" --dry-run    # Preview without output
+ctx smart "add caching" --openai         # Use OpenAI embeddings
+ctx smart "update API" --depth 3         # Deeper call graph expansion
+ctx smart "fix tests" --top 20           # More initial semantic matches
+```
+
+**Options:**
+- `--max-tokens <N>` - Maximum tokens in output (default: 8000)
+- `--depth <N>` - Call graph expansion depth (default: 2)
+- `--top <N>` - Number of initial semantic matches (default: 10)
+- `--explain` - Show selection reasoning for each file
+- `--dry-run` - Preview selection without generating context
+- `--openai` - Use OpenAI embeddings instead of local model
+
+## Diff-Aware Context
+
+Get context for changed files with automatic dependency expansion:
+
+```bash
+ctx diff                      # Changes since HEAD~1
+ctx diff main                 # Changes vs main branch
+ctx diff HEAD~3               # Changes in last 3 commits
+ctx diff --staged             # Only staged changes
+ctx diff --summary            # Include change summary
+ctx diff --changes-only       # No context expansion
+ctx diff --max-tokens 10000   # Custom token budget
+ctx diff --depth 2            # Call graph context depth
+```
+
+## PR Review Context
+
+Generate context for GitHub pull request review:
+
+```bash
+ctx review 123                      # PR #123 in current repo
+ctx review 123 --repo owner/name    # Specify repository
+ctx review 123 --include-comments   # Include PR comments
+ctx review 123 --summary            # Include change summary
+ctx review 123 --changes-only       # Only changed files
+```
+
+**Requirements:** GitHub CLI (`gh`) must be installed and authenticated.
+
+## Code Quality Audit
+
+Automated quality analysis with CI integration:
+
+```bash
+ctx audit                          # Full quality report
+ctx audit --min-score 7.0          # Quality gate (exit 1 if below)
+ctx audit --output json            # JSON output for CI
+ctx audit --output markdown        # Markdown report
+ctx audit --categories complexity,duplication  # Specific categories
+ctx audit --incremental            # Only changed files (pre-commit)
+```
+
+**Categories:**
+- `complexity` - Function complexity (fan-out/fan-in analysis)
+- `duplication` - Potential code duplication
+- `coverage` - Documentation coverage
+- `modularity` - Module coupling analysis
+- `naming` - Naming convention checks
+
+## Complexity Analysis
+
+Analyze code complexity and identify high fan-out functions:
+
+```bash
+ctx complexity                     # Default threshold (10)
+ctx complexity --threshold 20      # Custom threshold
+ctx complexity --warnings-only     # Only show issues
+ctx complexity --output json       # JSON output
+```
+
+## Duplicate Detection
+
+Detect duplicate or similar code blocks:
+
+```bash
+ctx duplicates                     # Default settings
+ctx duplicates --similarity 90     # 90% similarity threshold
+ctx duplicates --min-lines 10      # Minimum 10 lines
+ctx duplicates --output json       # JSON output
+```
+
+## Dependency Graph
+
+Generate dependency graph visualizations:
+
+```bash
+ctx graph                          # DOT format (default)
+ctx graph --output mermaid         # Mermaid diagram
+ctx graph --output json            # JSON format
+ctx graph --by-file                # Group by file/module
+ctx graph --filter "src/auth/*"    # Filter to specific files
+ctx graph --depth 5                # Maximum depth
+```
+
+## Interactive Shell
+
+REPL for codebase exploration:
+
+```bash
+ctx shell                   # Start shell
+ctx shell --vi              # Vi editing mode
+ctx shell --no-history      # Disable history
+ctx shell --history ~/.my_ctx_history  # Custom history file
+```
+
+**Shell Commands:**
+- `find <pattern>` - Find symbols by name
+- `search <query>` - Hybrid search (text + semantic)
+- `source <symbol>` - Show source code
+- `explain <symbol>` - Explain symbol with relationships
+- `callers <fn>` - Show function callers
+- `callees <fn>` - Show function callees
+- `impact <symbol>` - Impact analysis
+- `complexity` - Show high-complexity functions
+- `stats` - Codebase statistics
+- `audit` - Run code quality audit
+- `cd <path>` - Set file path context
+- `pwd` - Show current context
+- `clear` - Clear screen
+- `help` - Show help
+- `exit` - Exit shell
+
+## MCP Server (Claude Desktop)
+
+Expose ctx to AI assistants via Model Context Protocol:
+
+```bash
+# Build with MCP support
+cargo build --release --features mcp
+
+# Run MCP server
+ctx serve --mcp
+```
+
+Configure Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "ctx",
+      "args": ["serve", "--mcp"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
+**Available MCP Tools:**
+- `search_symbols` - Search for symbols by name pattern
+- `get_definition` - Get the source code for a symbol
+- `find_references` - Find all references to a symbol
+- `get_callers` - Get functions that call a given function
+- `get_callees` - Get functions called by a given function
+- `get_file` - Read a file's contents
+- `get_file_tree` - List files in the project
+- `smart_context` - Intelligently select files for a task
 
 ## Ignore System
 
@@ -222,6 +460,16 @@ vendor/
 third_party/
 ```
 
+### Built-in Ignore Patterns
+The tool automatically ignores:
+- Version control (`.git/`, `.svn/`, `.hg/`)
+- IDE directories (`.vscode/`, `.idea/`)
+- Lock files (`package-lock.json`, `yarn.lock`, `Cargo.lock`)
+- Dependencies (`node_modules/`, `vendor/`, `Pods/`)
+- Build outputs (`dist/`, `build/`, `target/`, `.next/`)
+- Cache directories (`.cache/`, `tmp/`)
+- Binary files and media
+
 ## Supported Languages
 
 | Language | Extensions | Symbol Extraction | Edge Types |
@@ -232,6 +480,7 @@ third_party/
 | JavaScript | `.js`, `.mjs`, `.cjs` | Functions, classes, arrow functions | Calls, Extends, Imports |
 | JSX | `.jsx` | Functions, components | Calls, Extends, Imports |
 | Python | `.py`, `.pyi` | Functions, classes, methods, constants | Calls, Extends, Imports |
+| Go | `.go` | Functions, structs, interfaces, methods | Calls, Implements, Imports |
 | Solidity | `.sol` | Contracts, functions, events, structs | Calls |
 | YAML | `.yaml`, `.yml` | File tracking (no symbols) | N/A |
 
@@ -245,75 +494,9 @@ third_party/
 - **SQLite** - Persistent storage for symbols, edges, embeddings, and compressed source
 - **DuckDB** - In-memory analytical engine for recursive graph queries
 - **Tree-sitter** - Fast, accurate parsing for all supported languages
-- **OpenAI** - Optional embedding generation for semantic search
-
-## New Commands
-
-### Smart Context Selection
-
-Intelligently select files relevant to a task:
-
-```bash
-ctx smart "add user authentication" --max-tokens 8000
-ctx smart "fix login bug" --explain --dry-run
-```
-
-### Diff-Aware Context
-
-Get context for changed files:
-
-```bash
-ctx diff                    # Changes since HEAD
-ctx diff main               # Changes vs main branch
-ctx diff HEAD~3 --summary   # Summary of recent changes
-```
-
-### Code Quality Audit
-
-Automated quality analysis with CI integration:
-
-```bash
-ctx audit                          # Full quality report
-ctx audit --min-score 7.0          # Quality gate
-ctx audit --incremental            # Only changed files
-ctx audit --output json            # For CI integration
-```
-
-### Interactive Shell
-
-REPL for codebase exploration:
-
-```bash
-ctx shell                   # Start shell
-ctx shell --vi              # Vi editing mode
-```
-
-Shell commands: `find`, `search`, `callers`, `callees`, `source`, `explain`, `stats`
-
-### MCP Server (Claude Desktop)
-
-Expose ctx to AI assistants via Model Context Protocol:
-
-```bash
-# Build with MCP support
-cargo build --features mcp
-
-# Run MCP server
-ctx serve --mcp
-```
-
-Configure Claude Desktop (`claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "ctx": {
-      "command": "ctx",
-      "args": ["serve", "--mcp"],
-      "cwd": "/path/to/project"
-    }
-  }
-}
-```
+- **fastembed** - Local embedding generation (all-MiniLM-L6-v2, 384 dimensions)
+- **OpenAI** - Optional embedding generation (text-embedding-3-small, 1536 dimensions)
+- **sqlite-vec** - Fast vector similarity search
 
 ## CLI Reference
 
@@ -325,18 +508,22 @@ USAGE:
     ctx <COMMAND>
 
 COMMANDS:
-    index     Build or update the code intelligence index
-    query     Query the code intelligence database
-    search    Search for symbols using keyword matching
-    semantic  Search using embeddings (natural language)
-    embed     Generate embeddings for semantic search
-    source    Get the source code for a symbol
-    explain   Explain a symbol with its relationships
-    smart     Intelligently select files for a task
-    diff      Generate context for changed files
-    audit     Run code quality analysis
-    shell     Interactive codebase explorer
-    serve     Start MCP server (with --mcp flag)
+    index       Build or update the code intelligence index
+    query       Query the code intelligence database
+    search      Search for symbols using keyword matching
+    semantic    Search using embeddings (natural language)
+    embed       Generate embeddings for semantic search
+    source      Get the source code for a symbol
+    explain     Explain a symbol with its relationships
+    smart       Intelligently select files for a task
+    diff        Generate context for changed files
+    review      Generate context for PR review (GitHub)
+    audit       Run code quality analysis
+    complexity  Analyze code complexity
+    duplicates  Detect duplicate code blocks
+    graph       Generate dependency graph
+    shell       Interactive codebase explorer
+    serve       Start MCP server (with --mcp flag, requires mcp feature)
 
 CONTEXT OPTIONS:
     -f, --format <FORMAT>    Output format [default: xml] [values: xml, markdown, md, plain, json]
@@ -349,12 +536,17 @@ CONTEXT OPTIONS:
         --stats              Print stats after completion
         --count-only         Only count tokens, don't output
         --max-tokens <N>     Limit output to N tokens
+        --encoding <ENC>     Tokenizer encoding [default: cl100k_base]
 
 INDEX OPTIONS:
-    -w, --watch     Watch for changes and reindex automatically
-    -v, --verbose   Show verbose output
-    -f, --force     Force full reindex (clears existing database)
-    -j, --parallel  Use parallel parsing (faster on multi-core)
+    -w, --watch              Watch for changes and reindex automatically
+    -v, --verbose            Show verbose output
+        --force              Force full reindex (clears existing database)
+    -j, --parallel           Use parallel parsing (faster on multi-core)
+        --no-gitignore       Disable .gitignore pattern matching
+        --no-default-ignores Disable built-in ignore patterns
+    -i, --ignore <PATTERN>   Additional ignore patterns
+    -p, --pattern <PATTERN>  File patterns to include
 ```
 
 ## Performance
@@ -365,4 +557,51 @@ INDEX OPTIONS:
 - Fast vector search with sqlite-vec
 - Compressed source storage (~70% size reduction)
 - In-memory DuckDB for fast analytical queries
+- Local embeddings with fastembed (~90MB model, runs offline)
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | Required for `--openai` flag with `embed` and `semantic` commands |
+| `GITHUB_TOKEN` | Optional for `review` command (uses `gh` CLI auth by default) |
+
+## Examples
+
+### Generate context for a bug fix
+```bash
+# Find relevant code and generate context
+ctx smart "fix authentication timeout bug" --max-tokens 10000 | pbcopy
+```
+
+### Review a pull request
+```bash
+# Get context for PR review
+ctx review 42 --summary --include-comments
+```
+
+### Pre-commit quality check
+```bash
+# Add to .git/hooks/pre-commit
+ctx audit --min-score 7.0 --incremental || exit 1
+```
+
+### CI/CD integration
+```bash
+# In your CI pipeline
+ctx audit --output json > quality-report.json
+ctx audit --min-score 8.0 || exit 1
+```
+
+### Explore codebase interactively
+```bash
+ctx shell
+ctx> find handleAuth
+ctx> callers handleAuth
+ctx> impact handleAuth
+ctx> source handleAuth
+```
+
+## License
+
+MIT

@@ -21,7 +21,8 @@ use std::process::Command;
 
 use crate::analytics::Analytics;
 use crate::db::Database;
-use crate::tokens::{count_tokens_with_encoding, Encoding};
+use crate::error::{CtxError, Result};
+use crate::tokens::{count_tokens_with_encoding, select_by_token_budget, Encoding, HasTokenCount};
 
 /// Configuration for diff-aware context generation.
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ pub struct DiffConfig {
     /// Include staged changes only
     pub staged: bool,
     /// Include change summary in output
+    #[allow(dead_code)] // Config option for future use
     pub summary: bool,
     /// Tokenizer encoding
     pub encoding: Encoding,
@@ -140,8 +142,15 @@ pub struct ContextFile {
     pub token_count: usize,
 }
 
+impl HasTokenCount for ContextFile {
+    fn token_count(&self) -> usize {
+        self.token_count
+    }
+}
+
 /// Reason why a file is included in context.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Variant data used for debug output
 pub enum ContextReason {
     /// File was directly changed
     Changed(ChangeType),
@@ -153,6 +162,7 @@ pub enum ContextReason {
 
 impl ContextReason {
     /// Get a human-readable description.
+    #[allow(dead_code)] // Public API for future use
     pub fn description(&self) -> String {
         match self {
             ContextReason::Changed(ct) => format!("changed ({})", ct.as_str()),
@@ -174,6 +184,7 @@ pub struct AffectedSymbol {
     /// File containing the symbol
     pub file_path: String,
     /// Line number
+    #[allow(dead_code)] // Used for debug output
     pub line: u32,
     /// Symbol kind
     pub kind: String,
@@ -198,43 +209,6 @@ pub struct DiffContext {
     pub omitted_count: usize,
 }
 
-/// Error type for diff operations.
-#[derive(Debug)]
-pub enum DiffError {
-    /// Git command failed
-    GitError(String),
-    /// Not a git repository
-    NotGitRepo,
-    /// Invalid revision
-    InvalidRevision(String),
-    /// No changes found
-    NoChanges,
-    /// Database error
-    Database(String),
-    /// IO error
-    Io(std::io::Error),
-}
-
-impl std::fmt::Display for DiffError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DiffError::GitError(e) => write!(f, "Git error: {}", e),
-            DiffError::NotGitRepo => write!(f, "Not a git repository"),
-            DiffError::InvalidRevision(r) => write!(f, "Invalid revision: {}", r),
-            DiffError::NoChanges => write!(f, "No changes found"),
-            DiffError::Database(e) => write!(f, "Database error: {}", e),
-            DiffError::Io(e) => write!(f, "IO error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for DiffError {}
-
-impl From<std::io::Error> for DiffError {
-    fn from(e: std::io::Error) -> Self {
-        DiffError::Io(e)
-    }
-}
 
 /// Check if current directory is a git repository.
 pub fn is_git_repo() -> bool {
@@ -246,9 +220,9 @@ pub fn is_git_repo() -> bool {
 }
 
 /// Get the list of changed files for a revision.
-pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile>, DiffError> {
+pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile>> {
     if !is_git_repo() {
-        return Err(DiffError::NotGitRepo);
+        return Err(CtxError::NotGitRepo);
     }
 
     // Build the git diff command
@@ -265,16 +239,16 @@ pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("unknown revision") || stderr.contains("bad revision") {
-            return Err(DiffError::InvalidRevision(revision.to_string()));
+            return Err(CtxError::InvalidRevision(revision.to_string()));
         }
-        return Err(DiffError::GitError(stderr.to_string()));
+        return Err(CtxError::git(stderr.to_string()));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let files = parse_diff_output(&stdout);
 
     if files.is_empty() {
-        return Err(DiffError::NoChanges);
+        return Err(CtxError::NoChanges);
     }
 
     // Get detailed diff info for each file
@@ -336,7 +310,7 @@ fn get_diff_line_ranges(
     revision: &str,
     path: &str,
     staged: bool,
-) -> Result<Vec<(u32, u32)>, DiffError> {
+) -> Result<Vec<(u32, u32)>> {
     let mut args = vec!["diff", "-U0", "--no-color"];
 
     if staged {
@@ -399,7 +373,7 @@ fn parse_hunk_header(header: &str) -> Option<(u32, u32)> {
 }
 
 /// Get diff statistics (lines added, removed) for a file.
-fn get_diff_stats(revision: &str, path: &str, staged: bool) -> Result<(usize, usize), DiffError> {
+fn get_diff_stats(revision: &str, path: &str, staged: bool) -> Result<(usize, usize)> {
     let mut args = vec!["diff", "--numstat"];
 
     if staged {
@@ -435,10 +409,8 @@ pub fn find_symbols_in_lines(
     db: &Database,
     file_path: &str,
     changed_ranges: &[(u32, u32)],
-) -> Result<Vec<AffectedSymbol>, DiffError> {
-    let symbols = db
-        .find_symbols_in_file(file_path)
-        .map_err(|e| DiffError::Database(e.to_string()))?;
+) -> Result<Vec<AffectedSymbol>> {
+    let symbols = db.find_symbols_in_file(file_path)?;
 
     let mut affected = Vec::new();
 
@@ -471,7 +443,7 @@ pub fn diff_context(
     db: &Database,
     analytics: &Analytics,
     config: DiffConfig,
-) -> Result<DiffContext, DiffError> {
+) -> Result<DiffContext> {
     // 1. Get changed files
     let changed_files = get_changed_files(revision, config.staged)?;
 
@@ -528,7 +500,7 @@ pub fn diff_context(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let (selected, total_tokens, omitted) = select_by_tokens(files, config.max_tokens);
+    let (selected, total_tokens, omitted) = select_by_token_budget(files, config.max_tokens);
 
     Ok(DiffContext {
         revision: revision.to_string(),
@@ -605,27 +577,6 @@ fn add_context_file(
             },
         );
     }
-}
-
-/// Select files within token budget.
-fn select_by_tokens(
-    files: Vec<ContextFile>,
-    max_tokens: usize,
-) -> (Vec<ContextFile>, usize, usize) {
-    let mut selected = Vec::new();
-    let mut total_tokens = 0;
-    let mut omitted = 0;
-
-    for file in files {
-        if total_tokens + file.token_count <= max_tokens {
-            total_tokens += file.token_count;
-            selected.push(file);
-        } else {
-            omitted += 1;
-        }
-    }
-
-    (selected, total_tokens, omitted)
 }
 
 /// Format a summary of changes for output.
@@ -722,7 +673,7 @@ pub struct PrComment {
 }
 
 /// Get PR information using gh CLI.
-pub fn get_pr_info(pr: &str, repo: Option<&str>) -> Result<PrInfo, DiffError> {
+pub fn get_pr_info(pr: &str, repo: Option<&str>) -> Result<PrInfo> {
     let mut args = vec![
         "pr",
         "view",
@@ -738,25 +689,25 @@ pub fn get_pr_info(pr: &str, repo: Option<&str>) -> Result<PrInfo, DiffError> {
 
     let output = Command::new("gh").args(&args).output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            DiffError::GitError(
+            CtxError::git(
                 "GitHub CLI (gh) not found. Install it from https://cli.github.com/".to_string(),
             )
         } else {
-            DiffError::Io(e)
+            CtxError::Io(e)
         }
     })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(DiffError::InvalidRevision(format!("PR #{} not found", pr)));
+            return Err(CtxError::InvalidRevision(format!("PR #{} not found", pr)));
         }
-        return Err(DiffError::GitError(stderr.to_string()));
+        return Err(CtxError::git(stderr.to_string()));
     }
 
     // Parse JSON response
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| DiffError::GitError(format!("Failed to parse gh output: {}", e)))?;
+        .map_err(|e| CtxError::git(format!("Failed to parse gh output: {}", e)))?;
 
     Ok(PrInfo {
         number: json["number"].as_u64().unwrap_or(0),
@@ -952,7 +903,7 @@ index abc123..def456 100644
     }
 
     #[test]
-    fn test_select_by_tokens() {
+    fn test_select_by_token_budget() {
         let files = vec![
             ContextFile {
                 path: "a.rs".to_string(),
@@ -975,13 +926,13 @@ index abc123..def456 100644
         ];
 
         // All fit
-        let (selected, total, omitted) = select_by_tokens(files.clone(), 500);
+        let (selected, total, omitted) = select_by_token_budget(files.clone(), 500);
         assert_eq!(selected.len(), 3);
         assert_eq!(total, 450);
         assert_eq!(omitted, 0);
 
         // Only first two fit
-        let (selected, total, omitted) = select_by_tokens(files.clone(), 300);
+        let (selected, total, omitted) = select_by_token_budget(files.clone(), 300);
         assert_eq!(selected.len(), 2);
         assert_eq!(total, 300);
         assert_eq!(omitted, 1);

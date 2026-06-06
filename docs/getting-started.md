@@ -400,6 +400,115 @@ ctx automatically excludes:
 ctx -i "*.test.ts" -i "fixtures/" src/
 ```
 
+## Part 6: Smart Context Selection
+
+Let ctx intelligently select files based on your task:
+
+```bash
+# Describe what you're working on
+ctx smart "add user authentication" --max-tokens 8000
+
+# Preview what would be selected
+ctx smart "fix login bug" --dry-run
+
+# See why each file was selected
+ctx smart "refactor parser" --explain
+```
+
+## Part 7: Diff-Aware Context
+
+Generate context focused on code changes:
+
+```bash
+# Changes since last commit
+ctx diff
+
+# Changes vs main branch
+ctx diff main
+
+# Only staged changes
+ctx diff --staged
+
+# Include change summary
+ctx diff --summary
+```
+
+## Part 8: PR Review Context
+
+Generate context for GitHub pull request review:
+
+```bash
+# Review PR #123
+ctx review 123
+
+# Include PR comments
+ctx review 123 --include-comments
+
+# With change summary
+ctx review 123 --summary
+```
+
+**Note:** Requires GitHub CLI (`gh`) to be installed and authenticated.
+
+## Part 9: Code Quality Audit
+
+Run automated quality analysis:
+
+```bash
+# Full quality report
+ctx audit
+
+# Quality gate for CI
+ctx audit --min-score 7.0
+
+# JSON output for automation
+ctx audit --output json
+```
+
+## Part 10: Interactive Shell
+
+Explore your codebase interactively:
+
+```bash
+ctx shell
+```
+
+Shell commands:
+- `find <pattern>` - Find symbols
+- `search <query>` - Hybrid search
+- `callers <fn>` - Show callers
+- `callees <fn>` - Show callees
+- `source <symbol>` - Show source
+- `explain <symbol>` - Explain symbol
+- `impact <symbol>` - Impact analysis
+- `stats` - Codebase statistics
+- `help` - Show all commands
+
+## Part 11: MCP Server (Claude Desktop)
+
+Integrate ctx with Claude Desktop:
+
+```bash
+# Build with MCP support
+cargo build --release --features mcp
+
+# Run MCP server
+ctx serve --mcp
+```
+
+Configure Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "ctx",
+      "args": ["serve", "--mcp"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
 ## Common Workflows
 
 ### Workflow 1: Quick LLM Context
@@ -452,6 +561,36 @@ ctx duplicates --similarity 75
 
 # Understand file dependencies
 ctx graph --by-file --output mermaid
+```
+
+### Workflow 5: Smart Context for Tasks
+
+```bash
+# Let ctx select relevant files for your task
+ctx smart "add caching to the database layer" --max-tokens 10000 | pbcopy
+
+# Preview selection first
+ctx smart "fix authentication bug" --dry-run --explain
+```
+
+### Workflow 6: PR Review
+
+```bash
+# Get context for reviewing a PR
+ctx review 42 --summary --include-comments
+
+# Focus on just the changed files
+ctx review 42 --changes-only
+```
+
+### Workflow 7: CI/CD Integration
+
+```bash
+# Quality gate in CI pipeline
+ctx audit --min-score 7.0 --output json > quality-report.json
+
+# Pre-commit hook
+ctx audit --incremental --min-score 7.0 || exit 1
 ```
 
 ## Next Steps

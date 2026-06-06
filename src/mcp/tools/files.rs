@@ -4,18 +4,13 @@ use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
 use serde_json::Value;
 use std::fs;
 
-use super::{schema_for, FileTreeParams, GetFileParams};
+use super::{invalid_params, parse_params, schema_for, FileTreeParams, GetFileParams};
 use crate::mcp::server::CtxServer;
 use crate::walker::{discover_files, WalkerConfig};
 
 /// Helper to create an internal error.
 fn internal_error(msg: impl Into<String>) -> rmcp::ErrorData {
     rmcp::ErrorData::new(ErrorCode::INTERNAL_ERROR, msg.into(), None)
-}
-
-/// Helper to create an invalid params error.
-fn invalid_params(msg: impl Into<String>) -> rmcp::ErrorData {
-    rmcp::ErrorData::new(ErrorCode::INVALID_PARAMS, msg.into(), None)
 }
 
 /// Create the get_file tool definition.
@@ -164,16 +159,6 @@ pub async fn get_file_tree(
     }
 
     Ok(CallToolResult::success(vec![Content::text(output)]))
-}
-
-/// Parse tool parameters from JSON.
-fn parse_params<T: serde::de::DeserializeOwned>(
-    args: Option<&serde_json::Map<String, Value>>,
-) -> Result<T, rmcp::ErrorData> {
-    let args = args.ok_or_else(|| invalid_params("Missing required parameters"))?;
-
-    serde_json::from_value(Value::Object(args.clone()))
-        .map_err(|e| invalid_params(e.to_string()))
 }
 
 #[cfg(test)]

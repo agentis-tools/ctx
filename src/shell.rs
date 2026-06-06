@@ -13,8 +13,9 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Config, EditMode, Editor, Helper};
 
-use crate::analytics::Analytics;
-use crate::db::Database;
+use ctx::analytics::Analytics;
+use ctx::db::Database;
+use ctx::error::Result;
 
 /// Shell configuration.
 #[derive(Debug, Clone)]
@@ -142,9 +143,9 @@ impl Validator for ShellHelper {}
 impl Helper for ShellHelper {}
 
 /// Run the interactive shell.
-pub fn run_shell(config: ShellConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_shell(config: ShellConfig) -> Result<()> {
     // Open database
-    let db = crate::index::open_database(&config.db_path)?;
+    let db = ctx::index::open_database(&config.db_path)?;
 
     // Open analytics (optional)
     let analytics = Analytics::open(&config.db_path).ok();
@@ -233,7 +234,7 @@ fn execute_command(
     db: &Database,
     analytics: Option<&Analytics>,
     current_context: &mut Option<String>,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<bool> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.is_empty() {
         return Ok(false);
@@ -410,7 +411,7 @@ fn cmd_find(
     db: &Database,
     args: &[&str],
     context: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let pattern = args[0];
     let limit = 20;
 
@@ -435,7 +436,7 @@ fn cmd_find(
 }
 
 /// Hybrid search.
-fn cmd_search(db: &Database, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_search(db: &Database, args: &[&str]) -> Result<()> {
     let query = args.join(" ");
     let limit = 20;
 
@@ -465,7 +466,7 @@ fn cmd_source(
     db: &Database,
     args: &[&str],
     context: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let pattern = args[0];
 
     let symbols = db.find_symbols_filtered(pattern, 1, context, None)?;
@@ -503,7 +504,7 @@ fn cmd_explain(
     db: &Database,
     args: &[&str],
     context: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let pattern = args[0];
 
     let symbols = db.find_symbols_filtered(pattern, 1, context, None)?;
@@ -537,7 +538,7 @@ fn cmd_callers(
     _db: &Database,
     analytics: &Analytics,
     args: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let name = args[0];
     let depth = 2;
 
@@ -563,7 +564,7 @@ fn cmd_callees(
     _db: &Database,
     analytics: &Analytics,
     args: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let name = args[0];
     let depth = 2;
 
@@ -585,7 +586,7 @@ fn cmd_callees(
 }
 
 /// Show impact analysis.
-fn cmd_impact(analytics: &Analytics, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_impact(analytics: &Analytics, args: &[&str]) -> Result<()> {
     let name = args[0];
     let depth = 3;
 
@@ -608,7 +609,7 @@ fn cmd_impact(analytics: &Analytics, args: &[&str]) -> Result<(), Box<dyn std::e
 }
 
 /// Show complexity analysis.
-fn cmd_complexity(analytics: &Analytics) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_complexity(analytics: &Analytics) -> Result<()> {
     let results = analytics.complexity_analysis(10)?;
 
     let high_complexity: Vec<_> = results
@@ -633,7 +634,7 @@ fn cmd_complexity(analytics: &Analytics) -> Result<(), Box<dyn std::error::Error
 }
 
 /// Show codebase statistics.
-fn cmd_stats(db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_stats(db: &Database) -> Result<()> {
     let stats = db.get_stats()?;
 
     println!("Codebase Statistics:");
@@ -652,8 +653,8 @@ fn cmd_stats(db: &Database) -> Result<(), Box<dyn std::error::Error>> {
 fn cmd_audit(
     db: &Database,
     analytics: Option<&Analytics>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::audit::{run_audit, AuditConfig};
+) -> Result<()> {
+    use ctx::audit::{run_audit, AuditConfig};
 
     let config = AuditConfig::default();
     let report = run_audit(db, analytics, &config)?;

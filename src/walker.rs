@@ -435,6 +435,7 @@ pub struct FileEntry {
 }
 
 /// Configuration for the file walker.
+#[derive(Debug, Clone)]
 pub struct WalkerConfig {
     pub use_gitignore: bool,
     pub use_default_ignores: bool,

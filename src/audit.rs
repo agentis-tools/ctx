@@ -15,36 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::analytics::Analytics;
 use crate::db::models::{Symbol, Visibility};
 use crate::db::Database;
-
-/// Error type for audit operations.
-#[derive(Debug)]
-pub enum AuditError {
-    Database(String),
-    Analytics(String),
-}
-
-impl std::fmt::Display for AuditError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AuditError::Database(msg) => write!(f, "Database error: {}", msg),
-            AuditError::Analytics(msg) => write!(f, "Analytics error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for AuditError {}
-
-impl From<rusqlite::Error> for AuditError {
-    fn from(e: rusqlite::Error) -> Self {
-        AuditError::Database(e.to_string())
-    }
-}
-
-impl From<duckdb::Error> for AuditError {
-    fn from(e: duckdb::Error) -> Self {
-        AuditError::Analytics(e.to_string())
-    }
-}
+use crate::error::{CtxError, Result};
 
 /// Configuration for audit analysis.
 #[derive(Debug, Clone)]
@@ -366,8 +337,8 @@ impl QualityReport {
     }
 
     /// Format as JSON output.
-    pub fn format_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
+    pub fn format_json(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
     }
 }
 
@@ -384,8 +355,28 @@ const WEIGHT_COVERAGE: f32 = 0.20;
 const WEIGHT_MODULARITY: f32 = 0.20;
 const WEIGHT_NAMING: f32 = 0.15;
 
+/// Threshold constants for quality scoring.
+pub mod thresholds {
+    /// Coverage thresholds for documentation scoring.
+    pub const COVERAGE_EXCELLENT: f32 = 0.95;
+    pub const COVERAGE_GOOD: f32 = 0.80;
+    pub const COVERAGE_ACCEPTABLE: f32 = 0.60;
+    pub const COVERAGE_POOR: f32 = 0.40;
+
+    /// Naming violation rate thresholds.
+    pub const NAMING_EXCELLENT: f32 = 0.01;
+    pub const NAMING_GOOD: f32 = 0.05;
+    pub const NAMING_ACCEPTABLE: f32 = 0.20;
+    pub const NAMING_POOR: f32 = 0.40;
+
+    /// Modularity thresholds.
+    pub const HIGH_COUPLING_THRESHOLD: usize = 20;
+    pub const EXTERNAL_RATIO_HIGH: f32 = 0.5;
+    pub const EXTERNAL_RATIO_MEDIUM: f32 = 0.3;
+}
+
 /// Get changed files from git (staged and unstaged).
-pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>, AuditError> {
+pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>> {
     let mut changed_files = HashSet::new();
 
     // Get staged files
@@ -393,7 +384,7 @@ pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>, AuditError> 
         .args(["diff", "--cached", "--name-only"])
         .current_dir(root)
         .output()
-        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+        .map_err(|e| CtxError::git(format!("Failed to run git: {}", e)))?;
 
     if staged_output.status.success() {
         let output = String::from_utf8_lossy(&staged_output.stdout);
@@ -409,7 +400,7 @@ pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>, AuditError> 
         .args(["diff", "--name-only"])
         .current_dir(root)
         .output()
-        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+        .map_err(|e| CtxError::git(format!("Failed to run git: {}", e)))?;
 
     if unstaged_output.status.success() {
         let output = String::from_utf8_lossy(&unstaged_output.stdout);
@@ -425,7 +416,7 @@ pub fn get_changed_files(root: &PathBuf) -> Result<HashSet<String>, AuditError> 
         .args(["ls-files", "--others", "--exclude-standard"])
         .current_dir(root)
         .output()
-        .map_err(|e| AuditError::Database(format!("Failed to run git: {}", e)))?;
+        .map_err(|e| CtxError::git(format!("Failed to run git: {}", e)))?;
 
     if untracked_output.status.success() {
         let output = String::from_utf8_lossy(&untracked_output.stdout);
@@ -444,7 +435,7 @@ pub fn run_audit(
     db: &Database,
     analytics: Option<&Analytics>,
     config: &AuditConfig,
-) -> Result<QualityReport, AuditError> {
+) -> Result<QualityReport> {
     let mut report = QualityReport::new();
     report.threshold = config.min_score;
 
@@ -566,7 +557,7 @@ pub fn run_audit(
 fn score_complexity(
     analytics: &Analytics,
     _symbols: &[Symbol],
-) -> Result<(f32, Vec<QualityIssue>), AuditError> {
+) -> Result<(f32, Vec<QualityIssue>)> {
     let mut issues = Vec::new();
 
     // Get complexity data from analytics
@@ -739,13 +730,14 @@ fn score_coverage(symbols: &[Symbol]) -> (f32, Vec<QualityIssue>) {
     }
 
     // Calculate score based on coverage percentage
-    let score = if coverage >= 0.95 {
+    use thresholds::*;
+    let score = if coverage >= COVERAGE_EXCELLENT {
         10.0
-    } else if coverage >= 0.80 {
+    } else if coverage >= COVERAGE_GOOD {
         8.0
-    } else if coverage >= 0.60 {
+    } else if coverage >= COVERAGE_ACCEPTABLE {
         6.0
-    } else if coverage >= 0.40 {
+    } else if coverage >= COVERAGE_POOR {
         4.0
     } else {
         2.0
@@ -755,7 +747,7 @@ fn score_coverage(symbols: &[Symbol]) -> (f32, Vec<QualityIssue>) {
 }
 
 /// Score modularity based on file dependencies.
-fn score_modularity(analytics: &Analytics) -> Result<(f32, Vec<QualityIssue>), AuditError> {
+fn score_modularity(analytics: &Analytics) -> Result<(f32, Vec<QualityIssue>)> {
     let mut issues = Vec::new();
 
     // Get file dependencies
@@ -779,7 +771,10 @@ fn score_modularity(analytics: &Analytics) -> Result<(f32, Vec<QualityIssue>), A
         *file_dep_counts.entry(source).or_default() += 1;
     }
 
-    for (file, count) in file_dep_counts.iter().filter(|(_, &c)| c > 20) {
+    for (file, count) in file_dep_counts
+        .iter()
+        .filter(|(_, &c)| c > thresholds::HIGH_COUPLING_THRESHOLD)
+    {
         issues.push(QualityIssue {
             severity: Severity::Warning,
             category: "modularity".to_string(),
@@ -791,9 +786,9 @@ fn score_modularity(analytics: &Analytics) -> Result<(f32, Vec<QualityIssue>), A
     }
 
     // Calculate score
-    let score = if external_ratio > 0.5 {
+    let score = if external_ratio > thresholds::EXTERNAL_RATIO_HIGH {
         5.0
-    } else if external_ratio > 0.3 {
+    } else if external_ratio > thresholds::EXTERNAL_RATIO_MEDIUM {
         6.0
     } else if issues.is_empty() {
         9.0 - (external_ratio * 2.0)
@@ -846,13 +841,14 @@ fn score_naming(symbols: &[Symbol]) -> (f32, Vec<QualityIssue>) {
     }
 
     let violation_rate = violations as f32 / total as f32;
-    let score = if violation_rate <= 0.01 {
+    use thresholds::*;
+    let score = if violation_rate <= NAMING_EXCELLENT {
         10.0
-    } else if violation_rate <= 0.05 {
+    } else if violation_rate <= NAMING_GOOD {
         8.0
-    } else if violation_rate <= 0.20 {
+    } else if violation_rate <= NAMING_ACCEPTABLE {
         6.0
-    } else if violation_rate <= 0.40 {
+    } else if violation_rate <= NAMING_POOR {
         4.0
     } else {
         2.0

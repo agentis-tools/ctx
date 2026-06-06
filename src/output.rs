@@ -2,8 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use crate::cli::OutputFormat;
-use crate::formatter::get_formatter;
+use crate::formatter::{get_formatter, OutputFormat};
 use crate::tree::generate_tree;
 use crate::walker::FileEntry;
 
@@ -18,7 +17,7 @@ pub struct ContextResult {
 pub fn generate_context(
     root: &Path,
     entries: &[FileEntry],
-    format: &OutputFormat,
+    format: OutputFormat,
     include_tree: bool,
     show_sizes: bool,
 ) -> io::Result<ContextResult> {
@@ -79,7 +78,7 @@ pub fn generate_context(
 pub fn stream_context(
     root: &Path,
     entries: &[FileEntry],
-    format: &OutputFormat,
+    format: OutputFormat,
     include_tree: bool,
     show_sizes: bool,
 ) -> io::Result<ContextResult> {
@@ -163,10 +162,10 @@ fn read_file_content(path: &Path) -> io::Result<String> {
 }
 
 /// Get the separator between file blocks based on format.
-fn get_separator(format: &OutputFormat) -> String {
+fn get_separator(format: OutputFormat) -> String {
     match format {
         OutputFormat::Xml => "\n".to_string(),
-        OutputFormat::Markdown | OutputFormat::Md => "\n\n".to_string(),
+        OutputFormat::Markdown => "\n\n".to_string(),
         OutputFormat::Plain => "\n".to_string(),
         OutputFormat::Json => ",".to_string(), // Comma for non-streaming JSON array
     }
@@ -178,11 +177,11 @@ mod tests {
 
     #[test]
     fn test_separator_xml() {
-        assert_eq!(get_separator(&OutputFormat::Xml), "\n");
+        assert_eq!(get_separator(OutputFormat::Xml), "\n");
     }
 
     #[test]
     fn test_separator_markdown() {
-        assert_eq!(get_separator(&OutputFormat::Markdown), "\n\n");
+        assert_eq!(get_separator(OutputFormat::Markdown), "\n\n");
     }
 }

@@ -6,7 +6,8 @@
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::sync::Mutex;
 
-use super::{Embedding, EmbeddingError, EmbeddingProvider, Result, LOCAL_EMBEDDING_DIM};
+use super::{Embedding, EmbeddingProvider, LOCAL_EMBEDDING_DIM};
+use crate::error::{CtxError, Result};
 
 /// Local embedding provider using fastembed.
 pub struct LocalProvider {
@@ -27,7 +28,7 @@ impl LocalProvider {
 
         let text_embedding =
             TextEmbedding::try_new(InitOptions::new(model).with_show_download_progress(true))
-                .map_err(|e| EmbeddingError::ModelNotFound(e.to_string()))?;
+                .map_err(|e| CtxError::ModelNotFound(e.to_string()))?;
 
         Ok(Self {
             model: Mutex::new(text_embedding),
@@ -62,16 +63,16 @@ impl EmbeddingProvider for LocalProvider {
         let mut model = self
             .model
             .lock()
-            .map_err(|e| EmbeddingError::ApiError(format!("Lock error: {}", e)))?;
+            .map_err(|e| CtxError::embedding(format!("Lock error: {}", e)))?;
 
         let embeddings = model
             .embed(vec![text], None)
-            .map_err(|e| EmbeddingError::ApiError(e.to_string()))?;
+            .map_err(|e| CtxError::embedding(e.to_string()))?;
 
         let vector = embeddings
             .into_iter()
             .next()
-            .ok_or_else(|| EmbeddingError::ApiError("Empty embedding result".into()))?;
+            .ok_or_else(|| CtxError::embedding("Empty embedding result"))?;
 
         Ok(Embedding::new(vector))
     }
@@ -80,13 +81,13 @@ impl EmbeddingProvider for LocalProvider {
         let mut model = self
             .model
             .lock()
-            .map_err(|e| EmbeddingError::ApiError(format!("Lock error: {}", e)))?;
+            .map_err(|e| CtxError::embedding(format!("Lock error: {}", e)))?;
 
         let texts_owned: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
 
         let embeddings = model
             .embed(texts_owned, None)
-            .map_err(|e| EmbeddingError::ApiError(e.to_string()))?;
+            .map_err(|e| CtxError::embedding(e.to_string()))?;
 
         Ok(embeddings.into_iter().map(Embedding::new).collect())
     }
