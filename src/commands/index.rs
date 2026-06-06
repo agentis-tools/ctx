@@ -25,17 +25,17 @@ pub struct IndexConfig {
 
 impl IndexConfig {
     /// Create a new IndexConfig from CLI arguments.
-#[allow(clippy::too_many_arguments)]
-pub fn new(
-    watch: bool,
-    verbose: bool,
-    force: bool,
-    parallel: bool,
-    no_gitignore: bool,
-    no_default_ignores: bool,
-    ignore_patterns: Vec<String>,
-    include_patterns: Vec<String>,
-) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        watch: bool,
+        verbose: bool,
+        force: bool,
+        parallel: bool,
+        no_gitignore: bool,
+        no_default_ignores: bool,
+        ignore_patterns: Vec<String>,
+        include_patterns: Vec<String>,
+    ) -> Self {
         Self {
             watch,
             verbose,

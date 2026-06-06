@@ -252,10 +252,9 @@ fn build_all_contextignore_matcher(root: &Path) -> Option<Gitignore> {
 
     // Add root .contextignore
     let contextignore_path = root.join(".contextignore");
-    if contextignore_path.exists()
-        && builder.add(&contextignore_path).is_none() {
-            found_any = true;
-        }
+    if contextignore_path.exists() && builder.add(&contextignore_path).is_none() {
+        found_any = true;
+    }
 
     // Recursively find nested .contextignore files
     fn add_nested(builder: &mut GitignoreBuilder, dir: &Path, found: &mut bool) {
@@ -272,10 +271,9 @@ fn build_all_contextignore_matcher(root: &Path) -> Option<Gitignore> {
                 }
 
                 let contextignore = path.join(".contextignore");
-                if contextignore.exists()
-                    && builder.add(&contextignore).is_none() {
-                        *found = true;
-                    }
+                if contextignore.exists() && builder.add(&contextignore).is_none() {
+                    *found = true;
+                }
 
                 add_nested(builder, &path, found);
             }

@@ -109,8 +109,7 @@ impl Indexer {
 
         // Open database
         let db_path = ctx_dir.join(DB_FILE);
-        let db = Database::open(&db_path)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        let db = Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(Self {
             db,
@@ -125,8 +124,7 @@ impl Indexer {
     #[allow(dead_code)]
     pub fn new_in_memory(root: &Path) -> io::Result<Self> {
         let root = root.canonicalize()?;
-        let db = Database::open_in_memory()
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        let db = Database::open_in_memory().map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(Self {
             db,

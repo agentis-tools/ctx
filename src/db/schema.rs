@@ -987,8 +987,7 @@ impl Database {
                 qualified_name: row.get(3)?,
                 kind: SymbolKind::from_str(&row.get::<_, String>(4)?)
                     .unwrap_or(SymbolKind::Function),
-                visibility: Visibility::from_str(&row.get::<_, String>(5)?)
-                    .unwrap_or_default(),
+                visibility: Visibility::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
                 signature: row.get(6)?,
                 brief: row.get(7)?,
                 docstring: row.get(8)?,
@@ -1057,9 +1056,9 @@ impl Database {
                         params![vector_bytes, symbol_id],
                     )
                     .is_ok()
-                {
-                    count += 1;
-                }
+            {
+                count += 1;
+            }
         }
 
         Ok(count)

@@ -282,8 +282,7 @@ pub enum OutputFormat {
     Json,
 }
 
-impl OutputFormat {
-}
+impl OutputFormat {}
 
 impl std::str::FromStr for OutputFormat {
     type Err = ();

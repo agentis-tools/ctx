@@ -522,13 +522,15 @@ fn path_to_string(path: &pt::ImportPath) -> String {
 /// Extract function visibility from attributes.
 fn extract_function_visibility(attrs: &[FunctionAttribute]) -> Visibility {
     for attr in attrs {
-        if let FunctionAttribute::Visibility(vis) = attr { match vis {
-            SolVisibility::Public(_) | SolVisibility::External(_) => {
-                return Visibility::Public;
+        if let FunctionAttribute::Visibility(vis) = attr {
+            match vis {
+                SolVisibility::Public(_) | SolVisibility::External(_) => {
+                    return Visibility::Public;
+                }
+                SolVisibility::Internal(_) => return Visibility::Crate,
+                SolVisibility::Private(_) => return Visibility::Private,
             }
-            SolVisibility::Internal(_) => return Visibility::Crate,
-            SolVisibility::Private(_) => return Visibility::Private,
-        } }
+        }
     }
     // Default visibility in Solidity is internal for state variables,
     // but functions without visibility are a compiler error in recent versions

@@ -29,10 +29,7 @@ fn query_find(
         return Ok(());
     }
 
-    println!(
-        "{:<40} {:<12} {:<10} FILE",
-        "SYMBOL", "KIND", "VISIBILITY"
-    );
+    println!("{:<40} {:<12} {:<10} FILE", "SYMBOL", "KIND", "VISIBILITY");
     println!("{}", "-".repeat(90));
 
     for symbol in symbols {
@@ -127,8 +124,7 @@ fn query_callers(db: &db::Database, function: &str, file_pattern: Option<&str>) 
         // Determine if this edge likely refers to our symbol
         let likely_match = if let Some(ref ctx) = edge.context {
             // Check if context contains our qualified name or parent type
-            ctx.contains(qualified_name)
-                || parent_prefix.as_ref().is_some_and(|p| ctx.contains(p))
+            ctx.contains(qualified_name) || parent_prefix.as_ref().is_some_and(|p| ctx.contains(p))
         } else {
             // No context - include only if we have no ID-resolved edges
             // (fallback for completely unresolved graphs)
