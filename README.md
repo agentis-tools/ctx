@@ -158,20 +158,20 @@ fn main() {
 ```markdown
 # Project Context
 
- ## Project Tree
- ```
- my-project/
- ├── src/
- │   └── main.rs
- └── Cargo.toml
- ```
+## Project Tree
+```
+my-project/
+├── src/
+│   └── main.rs
+└── Cargo.toml
+```
 
- ## /src/main.rs
- ```rust
- fn main() {
-     println!("Hello, world!");
- }
- ```
+## /src/main.rs
+```rust
+fn main() {
+    println!("Hello, world!");
+}
+```
 ```
 
 ### JSON
