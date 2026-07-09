@@ -10,13 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `ctx check`: architecture rules engine driven by `.ctx/rules.toml` -- declare layers as glob patterns over indexed files, then enforce `forbidden` layer dependencies, `allowed_dependents` whitelists, `limit` metric thresholds (fan-in / fan-out / complexity / file symbols), and `no_new_dependents` frozen paths; supports `--against REF` to scope violations to changed files, `--list` to inspect parsed rules, and `--json`; exits 1 when violations are found (see `ctx check --help` for a full example)
 - Global `--json` flag: `search`, `semantic`, `query find/callers/deps/graph/impact/stats/files`, and `explain` emit a single machine-readable JSON document wrapped in a stable envelope (`ctx_version`, `command`, `generated_at`, `data`); see `docs/json-output.md`
-- Index schema versioning via SQLite `PRAGMA user_version`; opening an index built with an incompatible schema now fails with a clear "run `ctx index --force`" message (pre-existing indexes are stamped silently)
+- Index schema versioning via SQLite `PRAGMA user_version`; opening an index built with an incompatible schema now fails with a clear "run `ctx index --force`" message
 - Shared complexity metrics (fan-in / fan-out / complexity) available directly from the SQLite index, mirroring the DuckDB formula
 - `ctx index --force` now also removes stale SQLite `-wal`/`-shm` sidecar files
+- MinHash structural fingerprints: `ctx index` now fingerprints every function/method (normalized token shingles: identifiers -> `ID`, string/number literals -> `LIT`, comments dropped) into the new `symbol_fingerprints` table, incrementally per changed file
+- `ctx duplicates --against <REF>` limits results to pairs where at least one function is in a file changed relative to a git reference
+- `ctx duplicates --fail-on-found` exits with code 1 when any near-duplicate pair is reported (default remains informational, exit 0)
+- `ctx duplicates` supports the global `--json` envelope (`data.pairs` with SymbolRefs, similarity, token counts, plus `skipped_languages`)
 
 ### Changed
 - **Breaking:** exit codes now follow a three-way convention: 0 = clean, 1 = findings, 2 = operational error (errors previously exited with code 1)
 - **Breaking:** `search --output json` and `semantic --output json` now emit the new envelope instead of the old ad-hoc JSON arrays; `query graph --output json` is an alias for `--json` (`complexity`/`graph`/`audit` keep their legacy shapes for now)
+- **Breaking:** `ctx duplicates` is now a MinHash-based structural near-duplicate detector. The old line-based `--similarity <PERCENT>`, `--min-lines <N>`, and `--output` flags are removed. The new `--threshold <F>` (default 0.85) is a Jaccard similarity from 0.0 to 1.0 over normalized 5-token shingles -- 0.85 means 85% of shingles are shared, not that 85% of lines match -- and `--min-tokens <N>` (default 50) filters short functions. Renamed variables and changed literals no longer hide duplicates; idiomatic boilerplate may appear (raise `--min-tokens` to filter it). Solidity functions are skipped (no tree-sitter grammar). Existing indexes lack fingerprints and must be rebuilt: run `ctx index --force` (index schema is now v2)
 
 ## [0.2.1] - 2026-06-17
 

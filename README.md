@@ -373,14 +373,25 @@ ctx complexity --output json       # JSON output
 
 ## Duplicate Detection
 
-Detect duplicate or similar code blocks:
+Detect structurally similar functions with MinHash fingerprints built during
+`ctx index`. Functions are compared by the Jaccard similarity of their
+normalized token shingles (identifiers -> `ID`, literals -> `LIT`, comments
+dropped), so renamed variables and changed string literals still match.
+Solidity functions are skipped (no tree-sitter grammar).
 
 ```bash
-ctx duplicates                     # Default settings
-ctx duplicates --similarity 90     # 90% similarity threshold
-ctx duplicates --min-lines 10      # Minimum 10 lines
-ctx duplicates --output json       # JSON output
+ctx duplicates                     # Default: Jaccard >= 0.85, >= 50 tokens
+ctx duplicates --threshold 0.9     # Require 90% shingle overlap (0.0-1.0)
+ctx duplicates --min-tokens 80     # Ignore functions under 80 tokens
+ctx duplicates --against main      # Only pairs touching files changed vs main
+ctx duplicates --fail-on-found     # Exit 1 when any pair is found (CI gate)
+ctx duplicates --json              # Machine-readable JSON envelope
 ```
+
+> **Breaking change:** the old line-based `--similarity <PERCENT>` /
+> `--min-lines <N>` flags are gone. `--threshold` is a 0.0-1.0 Jaccard
+> similarity over 5-token shingles, not a percentage of matching lines.
+> Rebuild the index once with `ctx index --force` after upgrading.
 
 ## Dependency Graph
 
@@ -541,7 +552,7 @@ COMMANDS:
     review      Generate context for PR review (GitHub)
     audit       Run code quality analysis
     complexity  Analyze code complexity
-    duplicates  Detect duplicate code blocks
+    duplicates  Detect structurally similar functions (MinHash)
     graph       Generate dependency graph
     shell       Interactive codebase explorer
     serve       Start MCP server (with --mcp flag, requires mcp feature)

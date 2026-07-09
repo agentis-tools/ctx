@@ -14,10 +14,16 @@ use super::models::*;
 /// Current index schema version, stamped into SQLite's `PRAGMA user_version`.
 ///
 /// Bump this whenever the schema changes in a way that is incompatible with
-/// existing databases. Databases with `user_version = 0` are pre-versioning
-/// databases whose schema is identical to v1; they are silently stamped.
-/// Any other mismatch is reported as [`crate::error::CtxError::SchemaVersionMismatch`].
-pub const SCHEMA_VERSION: i64 = 1;
+/// existing databases. Fresh databases (no tables yet) are initialized and
+/// stamped with the current version; any existing database with a different
+/// version -- including pre-versioning (v0) databases, which lack the
+/// `symbol_fingerprints` table -- is reported as
+/// [`crate::error::CtxError::SchemaVersionMismatch`].
+///
+/// History:
+/// - v1: initial versioned schema
+/// - v2: adds `symbol_fingerprints` (MinHash near-duplicate detection)
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Default embedding dimension for vector search.
 /// This matches OpenAI text-embedding-ada-002 (1536) and text-embedding-3-small (1536).
@@ -101,26 +107,40 @@ impl Database {
 
     /// Validate `PRAGMA user_version` against [`SCHEMA_VERSION`].
     ///
-    /// Version `0` means a fresh database or a pre-versioning (v0) database
-    /// whose schema is identical to v1; it is silently stamped to the current
-    /// version. Any other mismatch is an error.
+    /// A fresh database (version `0` and no tables yet) is silently stamped
+    /// to the current version. A pre-versioning (v0) database that already
+    /// has tables lacks the `symbol_fingerprints` table, so it is rejected
+    /// like any other version mismatch.
     fn check_schema_version(&self) -> crate::error::Result<()> {
         let found: i64 = self
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
-        if found == 0 {
-            self.conn
-                .pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            Ok(())
-        } else if found == SCHEMA_VERSION {
-            Ok(())
-        } else {
-            Err(crate::error::CtxError::SchemaVersionMismatch {
-                found,
-                expected: SCHEMA_VERSION,
-            })
+        if found == SCHEMA_VERSION {
+            return Ok(());
         }
+
+        if found == 0 {
+            let has_tables: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'",
+                    [],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !has_tables {
+                self.conn
+                    .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                return Ok(());
+            }
+        }
+
+        Err(crate::error::CtxError::SchemaVersionMismatch {
+            found,
+            expected: SCHEMA_VERSION,
+        })
     }
 
     /// Configure the SQLite connection for optimal performance and concurrency.
@@ -219,6 +239,18 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(provider);
+
+            -- MinHash fingerprints for near-duplicate function detection
+            -- (see src/fingerprint.rs). Rows are cascade-deleted with their
+            -- symbols when a file is re-indexed or removed.
+            CREATE TABLE IF NOT EXISTS symbol_fingerprints (
+                symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                minhash BLOB NOT NULL,
+                token_count INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_fingerprints_file ON symbol_fingerprints(file_path);
 
             -- Full-text search index for semantic search
             CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
@@ -1528,111 +1560,52 @@ impl Database {
         Ok(context_resolved + unique_resolved + same_file_unique)
     }
 
-    /// Find duplicate code blocks using content hashing and similarity.
-    pub fn find_duplicates(
-        &self,
-        similarity_threshold: u32,
-        min_lines: u32,
-    ) -> Result<Vec<DuplicateResult>> {
-        // Get all function/method symbols with their source code
-        // Use DISTINCT and unique id to avoid duplicate rows
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT DISTINCT id, name, file_path, line_start, line_end, source
-            FROM symbols
-            WHERE kind IN ('function', 'method')
-              AND source IS NOT NULL
-              AND (line_end - line_start) >= ?
-            ORDER BY id
-            "#,
-        )?;
-
-        let symbols: Vec<(String, String, String, u32, u32, String)> = stmt
-            .query_map([min_lines], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut duplicates = Vec::new();
-        let threshold = similarity_threshold as f64 / 100.0;
-
-        // Track seen pairs to avoid duplicates
-        let mut seen_pairs: std::collections::HashSet<(String, String)> =
-            std::collections::HashSet::new();
-
-        // Compare each pair of symbols
-        for i in 0..symbols.len() {
-            for j in (i + 1)..symbols.len() {
-                let (id1, name1, file1, line1, end1, source1) = &symbols[i];
-                let (id2, name2, file2, line2, end2, source2) = &symbols[j];
-
-                // Skip if same symbol (by id or by file+line)
-                if id1 == id2 || (file1 == file2 && line1 == line2) {
-                    continue;
-                }
-
-                // Create canonical pair key (smaller id first) to avoid duplicates
-                let pair_key = if id1 < id2 {
-                    (id1.clone(), id2.clone())
-                } else {
-                    (id2.clone(), id1.clone())
-                };
-
-                // Skip if we've already seen this pair
-                if seen_pairs.contains(&pair_key) {
-                    continue;
-                }
-
-                // Normalize and compare source code
-                let norm1 = normalize_code(source1);
-                let norm2 = normalize_code(source2);
-
-                let similarity = calculate_similarity(&norm1, &norm2);
-
-                if similarity >= threshold {
-                    // Mark this pair as seen
-                    seen_pairs.insert(pair_key);
-
-                    // Create a content hash for grouping
-                    let hash = format!("{:x}", md5_hash(&norm1));
-
-                    duplicates.push(DuplicateResult {
-                        name1: name1.clone(),
-                        file1: file1.clone(),
-                        line1: *line1,
-                        name2: name2.clone(),
-                        file2: file2.clone(),
-                        line2: *line2,
-                        similarity: similarity * 100.0,
-                        lines: ((end1 - line1) + (end2 - line2)) / 2,
-                        hash,
-                    });
-                }
+    /// Insert (or replace) a batch of MinHash fingerprints in one transaction.
+    pub fn insert_fingerprints_batch(&self, fingerprints: &[Fingerprint]) -> Result<usize> {
+        if fingerprints.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT OR REPLACE INTO symbol_fingerprints (symbol_id, file_path, minhash, token_count)
+                VALUES (?, ?, ?, ?)
+                "#,
+            )?;
+            for fp in fingerprints {
+                stmt.execute(params![
+                    fp.symbol_id,
+                    fp.file_path,
+                    fp.minhash,
+                    fp.token_count
+                ])?;
             }
         }
+        tx.commit()?;
+        Ok(fingerprints.len())
+    }
 
-        // Sort by similarity (highest first), guarding against NaN/Inf
-        duplicates.sort_by(
-            |a, b| match (a.similarity.is_finite(), b.similarity.is_finite()) {
-                (true, true) => b
-                    .similarity
-                    .partial_cmp(&a.similarity)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                (false, false) => std::cmp::Ordering::Equal,
-            },
-        );
-
-        Ok(duplicates)
+    /// Load all fingerprints with at least `min_tokens` tokens, ordered by
+    /// symbol id (so callers get a stable, canonical order).
+    pub fn get_fingerprints(&self, min_tokens: i64) -> Result<Vec<Fingerprint>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT symbol_id, file_path, minhash, token_count
+            FROM symbol_fingerprints
+            WHERE token_count >= ?
+            ORDER BY symbol_id
+            "#,
+        )?;
+        let rows = stmt.query_map([min_tokens], |row| {
+            Ok(Fingerprint {
+                symbol_id: row.get(0)?,
+                file_path: row.get(1)?,
+                minhash: row.get(2)?,
+                token_count: row.get(3)?,
+            })
+        })?;
+        rows.collect()
     }
 }
 
@@ -1706,78 +1679,6 @@ fn glob_to_like_pattern(pattern: &str) -> String {
     }
 
     result
-}
-
-/// Normalize code for comparison (remove whitespace, comments, variable names).
-fn normalize_code(code: &str) -> String {
-    code.lines()
-        .map(|line| {
-            // Remove leading/trailing whitespace
-            let trimmed = line.trim();
-            // Remove single-line comments
-            let without_comment = if let Some(idx) = trimmed.find("//") {
-                &trimmed[..idx]
-            } else if let Some(idx) = trimmed.find('#') {
-                &trimmed[..idx]
-            } else {
-                trimmed
-            };
-            without_comment.trim()
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Calculate similarity between two strings using Jaccard similarity on tokens.
-fn calculate_similarity(s1: &str, s2: &str) -> f64 {
-    let tokens1: std::collections::HashSet<&str> = s1
-        .split(|c: char| {
-            c.is_whitespace()
-                || c == '('
-                || c == ')'
-                || c == '{'
-                || c == '}'
-                || c == ';'
-                || c == ','
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-
-    let tokens2: std::collections::HashSet<&str> = s2
-        .split(|c: char| {
-            c.is_whitespace()
-                || c == '('
-                || c == ')'
-                || c == '{'
-                || c == '}'
-                || c == ';'
-                || c == ','
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-
-    if tokens1.is_empty() && tokens2.is_empty() {
-        return 1.0;
-    }
-    if tokens1.is_empty() || tokens2.is_empty() {
-        return 0.0;
-    }
-
-    let intersection = tokens1.intersection(&tokens2).count();
-    let union = tokens1.union(&tokens2).count();
-
-    intersection as f64 / union as f64
-}
-
-/// Simple MD5-like hash for grouping duplicates (not cryptographically secure).
-fn md5_hash(s: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    hasher.finish()
 }
 
 /// Preprocess a search query into keywords.
@@ -1897,20 +1798,6 @@ pub struct FileComplexity {
     pub symbol_count: i64,
 }
 
-/// Result of duplicate detection.
-#[derive(Debug, Clone)]
-pub struct DuplicateResult {
-    pub name1: String,
-    pub file1: String,
-    pub line1: u32,
-    pub name2: String,
-    pub file2: String,
-    pub line2: u32,
-    pub similarity: f64,
-    pub lines: u32,
-    pub hash: String,
-}
-
 /// Extension trait for optional query results.
 trait ResultExt<T> {
     fn optional(self) -> Result<Option<T>>;
@@ -1956,24 +1843,28 @@ mod tests {
     }
 
     #[test]
-    fn test_v0_database_is_silently_stamped() {
+    fn test_legacy_v0_database_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("codebase.sqlite");
 
-        // Create a database, then reset it to the pre-versioning state (v0).
+        // Create a database, then reset it to the pre-versioning state (v0
+        // with existing tables). Pre-versioning databases lack the
+        // symbol_fingerprints table, so they must be rebuilt.
         drop(Database::open(&db_path).unwrap());
         {
             let conn = Connection::open(&db_path).unwrap();
             conn.pragma_update(None, "user_version", 0).unwrap();
         }
 
-        // Opening a v0 database succeeds and stamps the current version.
-        let db = Database::open(&db_path).unwrap();
-        let version: i64 = db
-            .conn
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, SCHEMA_VERSION);
+        let err = Database::open(&db_path).unwrap_err();
+        match &err {
+            crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
+                assert_eq!(*found, 0);
+                assert_eq!(*expected, SCHEMA_VERSION);
+            }
+            other => panic!("expected SchemaVersionMismatch, got: {}", other),
+        }
+        assert!(err.to_string().contains("ctx index --force"));
     }
 
     #[test]
@@ -1981,21 +1872,84 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("codebase.sqlite");
 
-        drop(Database::open(&db_path).unwrap());
-        {
-            let conn = Connection::open(&db_path).unwrap();
-            conn.pragma_update(None, "user_version", 99).unwrap();
-        }
-
-        let err = Database::open(&db_path).unwrap_err();
-        match &err {
-            crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
-                assert_eq!(*found, 99);
-                assert_eq!(*expected, SCHEMA_VERSION);
+        // A v1 database (pre-fingerprints) must be rejected with a hint to
+        // rebuild, as must any other unknown version.
+        for stale_version in [1i64, 99] {
+            drop(Database::open(&db_path).unwrap());
+            {
+                let conn = Connection::open(&db_path).unwrap();
+                conn.pragma_update(None, "user_version", stale_version)
+                    .unwrap();
             }
-            other => panic!("expected SchemaVersionMismatch, got: {}", other),
+
+            let err = Database::open(&db_path).unwrap_err();
+            match &err {
+                crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
+                    assert_eq!(*found, stale_version);
+                    assert_eq!(*expected, SCHEMA_VERSION);
+                }
+                other => panic!("expected SchemaVersionMismatch, got: {}", other),
+            }
+            assert!(err.to_string().contains("ctx index --force"));
+
+            // Restore the correct version so the next iteration can re-open.
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+                .unwrap();
         }
-        assert!(err.to_string().contains("ctx index --force"));
+    }
+
+    #[test]
+    fn test_fingerprint_batch_roundtrip_and_min_tokens_filter() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/a.rs".to_string(),
+                content_hash: "h1".to_string(),
+                size_bytes: 10,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::alpha", "alpha", "src/a.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::beta", "beta", "src/a.rs", 10))
+            .unwrap();
+
+        let fps = vec![
+            Fingerprint {
+                symbol_id: "src/a.rs::alpha".to_string(),
+                file_path: "src/a.rs".to_string(),
+                minhash: vec![1u8; 1024],
+                token_count: 80,
+            },
+            Fingerprint {
+                symbol_id: "src/a.rs::beta".to_string(),
+                file_path: "src/a.rs".to_string(),
+                minhash: vec![2u8; 1024],
+                token_count: 20,
+            },
+        ];
+        assert_eq!(db.insert_fingerprints_batch(&fps).unwrap(), 2);
+        assert_eq!(db.insert_fingerprints_batch(&[]).unwrap(), 0);
+
+        // No filter: both come back, ordered by symbol_id, bytes intact.
+        let all = db.get_fingerprints(0).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].symbol_id, "src/a.rs::alpha");
+        assert_eq!(all[0].minhash, vec![1u8; 1024]);
+        assert_eq!(all[1].token_count, 20);
+
+        // min_tokens filters out short symbols.
+        let filtered = db.get_fingerprints(50).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].symbol_id, "src/a.rs::alpha");
+
+        // Deleting the file's symbols cascades to fingerprints.
+        db.delete_symbols_for_file("src/a.rs").unwrap();
+        assert!(db.get_fingerprints(0).unwrap().is_empty());
     }
 
     #[test]

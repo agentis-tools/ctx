@@ -96,10 +96,21 @@ fn run(args: Args) -> Result<Outcome> {
             output,
         }) => commands::run_complexity(threshold, warnings_only, &output),
         Some(Command::Duplicates {
-            similarity,
-            min_lines,
-            output,
-        }) => commands::run_duplicates(similarity, min_lines, &output),
+            threshold,
+            min_tokens,
+            against,
+            fail_on_found,
+        }) => {
+            // Quality command: returns its own Outcome (Findings with
+            // --fail-on-found when pairs are reported).
+            return commands::run_duplicates(
+                threshold,
+                min_tokens,
+                against.as_deref(),
+                json,
+                fail_on_found,
+            );
+        }
         Some(Command::Graph {
             output,
             by_file,
@@ -188,7 +199,8 @@ fn run(args: Args) -> Result<Outcome> {
         None => commands::run_context(args),
     };
 
-    // No command reports findings yet; quality commands built on top of this
-    // convention will return Outcome::Findings to exit with code 1.
+    // Commands routed through this fallthrough never report findings;
+    // quality commands (e.g. `duplicates`) return early with their own
+    // Outcome above.
     result.map(|_| Outcome::Clean)
 }

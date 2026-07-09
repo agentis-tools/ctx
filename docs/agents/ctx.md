@@ -117,9 +117,9 @@ ctx source MyClass::processData       # Qualified symbol name
 ctx complexity                        # Analyze code complexity
 ctx complexity --threshold 15         # Custom fan-out threshold
 ctx complexity --warnings-only        # Only show high complexity
-ctx duplicates                        # Detect duplicate code
-ctx duplicates --similarity 90        # Require 90% similarity
-ctx duplicates --min-lines 10         # Min 10 lines per block
+ctx duplicates                        # Detect near-duplicate functions
+ctx duplicates --threshold 0.9        # Require 90% shingle overlap (Jaccard)
+ctx duplicates --min-tokens 80        # Ignore functions under 80 tokens
 
 # Dependency graph visualization
 ctx graph                             # Generate DOT graph
@@ -504,25 +504,29 @@ Severity levels:
 
 ### `ctx duplicates`
 
-Detect duplicate or similar code blocks:
+Detect structurally similar functions using MinHash fingerprints built during
+`ctx index`. Functions are compared by the Jaccard similarity of their
+normalized token shingles (identifiers -> `ID`, literals -> `LIT`, comments
+dropped), so renamed variables and changed literals still match. Solidity
+functions are skipped (no tree-sitter grammar). Note: the old line-based
+`--similarity` / `--min-lines` flags were removed; rebuild the index with
+`ctx index --force` after upgrading.
 
 ```bash
-ctx duplicates                        # Detect duplicates (80% similarity)
-ctx duplicates --similarity 90        # Require 90% similarity
-ctx duplicates --min-lines 10         # Minimum 10 lines per block (default: 5)
-ctx duplicates --output json          # JSON output
+ctx duplicates                        # Jaccard >= 0.85, functions >= 50 tokens
+ctx duplicates --threshold 0.9        # Require 90% shingle overlap (0.0-1.0)
+ctx duplicates --min-tokens 80        # Filter short/boilerplate functions
+ctx duplicates --against main         # Only pairs touching files changed vs main
+ctx duplicates --fail-on-found        # Exit 1 when any pair is found (CI)
+ctx duplicates --json                 # JSON envelope output
 
 # Example output:
-# Duplicate Code Detection (similarity: 80%, min lines: 5)
+# Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens)
 # ============================================================
-# 
-# Duplicate Group 1 (95% similar):
-#   src/handlers/user.ts:45-67 (22 lines)
-#   src/handlers/admin.ts:89-111 (22 lines)
-# 
-# Duplicate Group 2 (82% similar):
-#   src/utils/validate.ts:12-28 (16 lines)
-#   src/utils/sanitize.ts:34-49 (15 lines)
+#
+# 1. similarity 0.952
+#    src/handlers/user.ts:45 createUser (88 tokens)
+#    src/handlers/admin.ts:89 createAdmin (90 tokens)
 ```
 
 ### `ctx graph`
@@ -680,8 +684,8 @@ ctx index
 # 2. Find overly complex functions
 ctx complexity --warnings-only
 
-# 3. Detect duplicate code for refactoring
-ctx duplicates --similarity 80
+# 3. Detect near-duplicate functions for refactoring
+ctx duplicates --threshold 0.85
 
 # 4. Generate architecture diagram
 ctx graph --by-file --output mermaid > ARCHITECTURE.md
@@ -782,7 +786,7 @@ ctx embed [OPTIONS]            Generate embeddings for semantic search
 ctx source <SYMBOL>            Get source code for symbol
 ctx explain <SYMBOL>           Explain symbol with relationships
 ctx complexity [OPTIONS]       Analyze code complexity (fan-out/fan-in)
-ctx duplicates [OPTIONS]       Detect duplicate code blocks
+ctx duplicates [OPTIONS]       Detect structurally similar functions (MinHash)
 ctx graph [OPTIONS]            Generate dependency graph visualization
 
 Global Options:
@@ -826,9 +830,11 @@ Complexity Options:
       --output <FORMAT>        Output format (table, json)
 
 Duplicates Options:
-      --similarity <N>         Minimum similarity percentage (default: 80)
-      --min-lines <N>          Minimum lines per block (default: 5)
-      --output <FORMAT>        Output format (table, json)
+      --threshold <F>          Jaccard similarity threshold over normalized
+                               token shingles, 0.0-1.0 (default: 0.85)
+      --min-tokens <N>         Ignore functions with fewer tokens (default: 50)
+      --against <REF>          Only pairs touching files changed vs REF
+      --fail-on-found          Exit 1 when any pair is reported
 
 Graph Options:
       --output <FORMAT>        Output format (dot, mermaid, json)

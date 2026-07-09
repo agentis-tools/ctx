@@ -327,6 +327,30 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 
 `files` is the number of indexed files matching the layer's globs. `--list` always exits 0.
 
+### `duplicates`
+
+`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
+
+```json
+{
+  "threshold": 0.85,
+  "min_tokens": 50,
+  "against": null,
+  "skipped_languages": ["solidity"],
+  "pairs": [
+    {
+      "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
+      "b": { "name": "sum_invoices", "qualified_name": null, "kind": "function", "file": "src/invoices.rs", "line_start": 4, "line_end": 22 },
+      "similarity": 0.97,
+      "token_count_a": 64,
+      "token_count_b": 64
+    }
+  ]
+}
+```
+
+`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
+
 ## Legacy shapes
 
 `ctx complexity --output json`, `ctx graph --output json`, and `ctx audit --output json` still emit their old, ad-hoc JSON shapes. They will be migrated to the envelope in a future release. The old ad-hoc shapes of `search --output json` and `semantic --output json` have already been **replaced** by the envelope described above.
