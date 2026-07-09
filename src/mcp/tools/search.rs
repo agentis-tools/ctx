@@ -3,9 +3,7 @@
 use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{
-    invalid_params, parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams,
-};
+use super::{parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.

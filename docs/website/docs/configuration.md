@@ -1,3 +1,9 @@
+---
+id: configuration
+title: Configuration
+sidebar_position: 5
+---
+
 # Configuration
 
 ctx uses a minimal configuration approach based on ignore files. There are no complex config files to manage - just familiar gitignore-style patterns.
@@ -381,7 +387,7 @@ _site/
 
 ### Viewing the Full List
 
-See [src/default_ignores.rs](https://github.com/yourusername/ctx/blob/main/src/default_ignores.rs) for the complete list.
+See [src/default_ignores.rs](https://github.com/saldestechnology/ctx/blob/main/src/default_ignores.rs) for the complete list.
 
 ## Command-Line Configuration
 

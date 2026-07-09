@@ -9,14 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `ctx hotspots`: rank files (or symbols with `--by symbol`) by combined git churn and code complexity (`score = normalized_churn * normalized_complexity`), with `--since`, `--limit`, `--min-churn`, and `--against REF` filters and `--json` output including each file's top 3 most complex symbols; see `docs/json-output.md`
+- `ctx check`: architecture rules engine driven by `.ctx/rules.toml` -- declare layers as glob patterns over indexed files, then enforce `forbidden` layer dependencies, `allowed_dependents` whitelists, `limit` metric thresholds (fan-in / fan-out / complexity / file symbols), and `no_new_dependents` frozen paths; supports `--against REF` to scope violations to changed files, `--list` to inspect parsed rules, and `--json`; exits 1 when violations are found (see `ctx check --help` for a full example)
 - Global `--json` flag: `search`, `semantic`, `query find/callers/deps/graph/impact/stats/files`, and `explain` emit a single machine-readable JSON document wrapped in a stable envelope (`ctx_version`, `command`, `generated_at`, `data`); see `docs/json-output.md`
 - Index schema versioning via SQLite `PRAGMA user_version`; opening an index built with an incompatible schema now fails with a clear "run `ctx index --force`" message (pre-existing indexes are stamped silently)
 - Shared complexity metrics (fan-in / fan-out / complexity) available directly from the SQLite index, mirroring the DuckDB formula
 - `ctx index --force` now also removes stale SQLite `-wal`/`-shm` sidecar files
+- Library API documentation: crate-level rustdoc with integration examples, module docs, and a "Using ctx as a Library" README section
+- docs.rs builds with all features enabled
 
 ### Changed
 - **Breaking:** exit codes now follow a three-way convention: 0 = clean, 1 = findings, 2 = operational error (errors previously exited with code 1)
 - **Breaking:** `search --output json` and `semantic --output json` now emit the new envelope instead of the old ad-hoc JSON arrays; `query graph --output json` is an alias for `--json` (`complexity`/`graph`/`audit` keep their legacy shapes for now)
+
+### Fixed
+- `mcp` feature failed to compile the binary (`use crate::mcp` resolved against the binary crate instead of the library); CI now builds `--all-features` on Linux to prevent regressions
 
 ## [0.2.1] - 2026-06-17
 

@@ -9,6 +9,26 @@ const sidebars: SidebarsConfig = {
     'configuration',
     'language-support',
     'architecture',
+    {
+      type: 'category',
+      label: 'Commands',
+      items: [
+        'commands/audit',
+        'commands/diff',
+        'commands/smart',
+        'commands/shell',
+        'commands/serve',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Integrations',
+      items: [
+        'integrations/ci-cd',
+        'integrations/claude',
+        'integrations/vscode',
+      ],
+    },
   ],
 };
 

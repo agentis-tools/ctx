@@ -1,3 +1,14 @@
+//! File discovery with glob patterns and layered ignore rules.
+//!
+//! Walks a project tree and returns the files that should be part of the
+//! context or index, honoring (in order): hidden-file rules, `.gitignore`
+//! at all levels, `.ignore`, `.contextignore`, ctx's built-in ignore list
+//! (170+ patterns), and any custom include/ignore globs.
+//!
+//! The main entry point is [`discover_files`] with a [`WalkerConfig`];
+//! [`FileFilter`] offers the same rules as a reusable per-file check
+//! (used by watch mode).
+
 use std::io;
 use std::path::{Path, PathBuf};
 

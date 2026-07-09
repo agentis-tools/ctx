@@ -171,6 +171,14 @@ fn run(args: Args) -> Result<Outcome> {
             min_churn,
             against,
         }) => commands::run_hotspots(&since, limit, by, min_churn, against.as_deref(), json),
+        Some(Command::Check {
+            rules,
+            against,
+            list,
+        }) => {
+            // Quality command: returns Outcome natively (0 clean / 1 findings).
+            return commands::run_check(rules, against, list, json);
+        }
         Some(Command::Audit {
             output_format,
             min_score,
