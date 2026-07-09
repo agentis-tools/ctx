@@ -239,6 +239,9 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -
     let embedding_count = db.count_embeddings()?;
     if embedding_count == 0 {
         eprintln!("No embeddings found. Run 'ctx embed' first to generate embeddings.");
+        if output == "json" {
+            return ctx::json::emit("semantic", semantic_data(query, limit, &[], &db));
+        }
         return Ok(());
     }
 
@@ -287,48 +290,73 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -
     // Search for similar symbols
     let results = embeddings::semantic_search(&db, &query_embedding, limit)?;
 
+    if output == "json" {
+        return ctx::json::emit("semantic", semantic_data(query, limit, &results, &db));
+    }
+
     if results.is_empty() {
         eprintln!("No results found for '{}'", query);
         return Ok(());
     }
 
-    if output == "json" {
-        let json_results: Vec<_> = results
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "symbol_id": r.symbol_id,
-                    "name": r.name,
-                    "kind": r.kind,
-                    "file": r.file_path,
-                    "line": r.line,
-                    "score": format!("{:.4}", r.score),
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&json_results)?);
-    } else {
+    println!(
+        "Semantic search for '{}' ({} results):",
+        query,
+        results.len()
+    );
+    println!("{}", "-".repeat(80));
+    println!("{:<35} {:<10} {:<8} FILE", "SYMBOL", "KIND", "SCORE");
+    println!("{}", "-".repeat(80));
+
+    for result in &results {
+        let name = truncate_str(&result.name, 33);
+        let file = truncate_path(&result.file_path, 25);
+
+        let score_display = format!("{:.2}%", result.score * 100.0);
+
         println!(
-            "Semantic search for '{}' ({} results):",
-            query,
-            results.len()
+            "{:<35} {:<10} {:<8} {}:{}",
+            name, result.kind, score_display, file, result.line
         );
-        println!("{}", "-".repeat(80));
-        println!("{:<35} {:<10} {:<8} FILE", "SYMBOL", "KIND", "SCORE");
-        println!("{}", "-".repeat(80));
-
-        for result in &results {
-            let name = truncate_str(&result.name, 33);
-            let file = truncate_path(&result.file_path, 25);
-
-            let score_display = format!("{:.2}%", result.score * 100.0);
-
-            println!(
-                "{:<35} {:<10} {:<8} {}:{}",
-                name, result.kind, score_display, file, result.line
-            );
-        }
     }
 
     Ok(())
+}
+
+/// Build the `semantic` JSON payload.
+fn semantic_data(
+    query: &str,
+    limit: usize,
+    results: &[embeddings::SearchResult],
+    db: &ctx::db::Database,
+) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = results
+        .iter()
+        .map(|r| {
+            // Resolve the full symbol for a complete SymbolRef; fall back to
+            // the fields carried by the search result.
+            let symbol = match db.get_symbol(&r.symbol_id) {
+                Ok(Some(s)) => ctx::json::SymbolRef::from(&s).to_value(),
+                _ => serde_json::json!({
+                    "name": r.name,
+                    "qualified_name": serde_json::Value::Null,
+                    "kind": r.kind,
+                    "file": r.file_path,
+                    "line_start": r.line,
+                    "line_end": r.line,
+                }),
+            };
+            serde_json::json!({
+                "symbol": symbol,
+                "symbol_id": r.symbol_id,
+                "score": r.score,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "query": query,
+        "limit": limit,
+        "results": items,
+    })
 }

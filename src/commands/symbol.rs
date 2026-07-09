@@ -83,6 +83,7 @@ pub fn run_explain(
     symbol: &str,
     file_pattern: Option<&str>,
     kind_filter: Option<&str>,
+    json: bool,
 ) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
@@ -91,6 +92,9 @@ pub fn run_explain(
     let symbols = db.find_symbols_filtered(symbol, 100, file_pattern, kind_filter)?;
 
     if symbols.is_empty() {
+        if json {
+            return ctx::json::emit("explain", explain_not_found_data(&[]));
+        }
         eprintln!("Symbol '{}' not found", symbol);
         if file_pattern.is_some() || kind_filter.is_some() {
             eprintln!(
@@ -103,6 +107,9 @@ pub fn run_explain(
 
     // If multiple symbols match and no filters, show disambiguation help
     if symbols.len() > 1 && file_pattern.is_none() && kind_filter.is_none() {
+        if json {
+            return ctx::json::emit("explain", explain_not_found_data(&symbols));
+        }
         eprintln!(
             "Found {} symbols named '{}'. Use --file or --kind to disambiguate:\n",
             symbols.len(),
@@ -128,6 +135,12 @@ pub fn run_explain(
     }
 
     let sym = &symbols[0];
+
+    if json {
+        let callers = db.get_incoming_edges(&sym.name)?;
+        let deps = db.get_outgoing_edges(&sym.id)?;
+        return ctx::json::emit("explain", explain_data(sym, callers.len(), deps.len()));
+    }
 
     println!("Symbol: {}", sym.name);
     println!("{}", "=".repeat(60));
@@ -177,4 +190,85 @@ pub fn run_explain(
     }
 
     Ok(())
+}
+
+/// Build the `explain` JSON payload for a resolved symbol.
+fn explain_data(
+    sym: &ctx::db::Symbol,
+    callers_count: usize,
+    deps_count: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "symbol": ctx::json::SymbolRef::from(sym),
+        "visibility": sym.visibility.as_str(),
+        "signature": sym.signature,
+        "brief": sym.brief,
+        "docstring": sym.docstring,
+        "callers_count": callers_count,
+        "deps_count": deps_count,
+        "ambiguous": [],
+    })
+}
+
+/// Build the `explain` JSON payload when no unique symbol was resolved.
+///
+/// `ambiguous` is empty when the symbol was simply not found.
+fn explain_not_found_data(ambiguous: &[ctx::db::Symbol]) -> serde_json::Value {
+    serde_json::json!({
+        "symbol": serde_json::Value::Null,
+        "visibility": serde_json::Value::Null,
+        "signature": serde_json::Value::Null,
+        "brief": serde_json::Value::Null,
+        "docstring": serde_json::Value::Null,
+        "callers_count": 0,
+        "deps_count": 0,
+        "ambiguous": ambiguous
+            .iter()
+            .map(ctx::json::SymbolRef::from)
+            .collect::<Vec<_>>(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ctx::db::{Symbol, SymbolKind, Visibility};
+
+    #[test]
+    fn test_explain_data_payload() {
+        let sym = Symbol {
+            id: "src/a.rs::run".to_string(),
+            file_path: "src/a.rs".to_string(),
+            name: "run".to_string(),
+            qualified_name: Some("App::run".to_string()),
+            kind: SymbolKind::Method,
+            visibility: Visibility::Public,
+            signature: Some("fn run(&self) -> Result<()>".to_string()),
+            brief: Some("Run the app".to_string()),
+            docstring: None,
+            line_start: 7,
+            line_end: 30,
+            col_start: 0,
+            col_end: 1,
+            parent_id: None,
+            source: None,
+        };
+
+        let data = explain_data(&sym, 3, 5);
+        assert_eq!(data["symbol"]["name"], "run");
+        assert_eq!(data["symbol"]["qualified_name"], "App::run");
+        assert_eq!(data["symbol"]["kind"], "method");
+        assert_eq!(data["visibility"], "public");
+        assert_eq!(data["signature"], "fn run(&self) -> Result<()>");
+        assert_eq!(data["callers_count"], 3);
+        assert_eq!(data["deps_count"], 5);
+        assert_eq!(data["ambiguous"], serde_json::json!([]));
+
+        let not_found = explain_not_found_data(&[]);
+        assert!(not_found["symbol"].is_null());
+        assert_eq!(not_found["callers_count"], 0);
+
+        let ambiguous = explain_not_found_data(std::slice::from_ref(&sym));
+        assert_eq!(ambiguous["ambiguous"][0]["name"], "run");
+    }
 }

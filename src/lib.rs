@@ -133,7 +133,9 @@ pub mod analytics;
 pub mod db;
 pub mod embeddings;
 pub mod error;
+pub mod exit;
 pub mod index;
+pub mod json;
 pub mod parser;
 pub mod tokens;
 pub mod walker;
@@ -149,7 +151,13 @@ pub mod tree;
 
 // Utilities
 pub mod audit;
+pub mod gitutil;
 pub mod utils;
+
+// Test helpers (public so the bin crate's tests can use them; not part of the
+// supported API surface)
+#[doc(hidden)]
+pub mod testutil;
 
 // Internal modules (not part of public API)
 pub(crate) mod default_ignores;

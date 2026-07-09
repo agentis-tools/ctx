@@ -9,6 +9,7 @@ use ctx::analytics;
 use ctx::db;
 use ctx::error::Result;
 use ctx::index;
+use ctx::json::SymbolRef;
 use ctx::utils::{truncate_path, truncate_str};
 
 /// Handle 'query find' subcommand.
@@ -18,8 +19,16 @@ fn query_find(
     limit: i32,
     kind: Option<String>,
     file: Option<String>,
+    json: bool,
 ) -> Result<()> {
     let symbols = db.find_symbols_filtered(pattern, limit, file.as_deref(), kind.as_deref())?;
+
+    if json {
+        return ctx::json::emit(
+            "query.find",
+            find_data(pattern, kind.as_deref(), file.as_deref(), &symbols),
+        );
+    }
 
     if symbols.is_empty() {
         eprintln!("No symbols found matching '{}'", pattern);
@@ -47,46 +56,68 @@ fn query_find(
     Ok(())
 }
 
-/// Handle 'query callers' subcommand.
-fn query_callers(db: &db::Database, function: &str, file_pattern: Option<&str>) -> Result<()> {
+/// Build the `query.find` JSON payload.
+fn find_data(
+    pattern: &str,
+    kind: Option<&str>,
+    file: Option<&str>,
+    symbols: &[db::Symbol],
+) -> serde_json::Value {
+    serde_json::json!({
+        "pattern": pattern,
+        "filters": { "kind": kind, "file": file },
+        "symbols": symbols
+            .iter()
+            .map(|s| {
+                let mut value = SymbolRef::from(s).to_value();
+                if let serde_json::Value::Object(ref mut map) = value {
+                    map.insert(
+                        "visibility".to_string(),
+                        serde_json::json!(s.visibility.as_str()),
+                    );
+                }
+                value
+            })
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// A resolved caller of a symbol.
+struct CallerEntry {
+    symbol: db::Symbol,
+    line: Option<u32>,
+    context: Option<String>,
+}
+
+/// Result of looking up the callers of a symbol.
+enum CallersOutcome {
+    /// No symbol matched the query.
+    NotFound,
+    /// Multiple symbols matched and no filter was given to disambiguate.
+    Ambiguous(Vec<db::Symbol>),
+    /// A single symbol was selected; `callers` may be empty.
+    Found {
+        target: Box<db::Symbol>,
+        callers: Vec<CallerEntry>,
+    },
+}
+
+/// Look up the callers of `function`, without printing anything.
+fn collect_callers(
+    db: &db::Database,
+    function: &str,
+    file_pattern: Option<&str>,
+) -> Result<CallersOutcome> {
     // First, find the symbol(s) matching the function name with optional file filter
     let symbols = db.find_symbols_filtered(function, 100, file_pattern, None)?;
 
     if symbols.is_empty() {
-        eprintln!("Symbol '{}' not found", function);
-        if file_pattern.is_some() {
-            eprintln!(
-                "Try removing --file filter or use 'ctx query find {}' to see all matches",
-                function
-            );
-        }
-        return Ok(());
+        return Ok(CallersOutcome::NotFound);
     }
 
-    // If multiple symbols match and no file filter, show disambiguation help
+    // If multiple symbols match and no file filter, request disambiguation
     if symbols.len() > 1 && file_pattern.is_none() {
-        eprintln!(
-            "Found {} symbols named '{}'. Use --file to disambiguate:\n",
-            symbols.len(),
-            function
-        );
-        for s in symbols.iter().take(10) {
-            eprintln!(
-                "  {} ({}) - {}:{}",
-                s.name,
-                s.kind.as_str(),
-                s.file_path,
-                s.line_start
-            );
-        }
-        if symbols.len() > 10 {
-            eprintln!("  ... and {} more", symbols.len() - 10);
-        }
-        eprintln!(
-            "\nExample: ctx query callers {} --file \"{}\"",
-            function, symbols[0].file_path
-        );
-        return Ok(());
+        return Ok(CallersOutcome::Ambiguous(symbols));
     }
 
     let sym = &symbols[0];
@@ -136,28 +167,186 @@ fn query_callers(db: &db::Database, function: &str, file_pattern: Option<&str>) 
         }
     }
 
-    if edges.is_empty() {
-        eprintln!("No callers found for '{}' ({})", function, sym.file_path);
-        return Ok(());
-    }
-
-    println!("Functions that call '{}' ({}):", sym.name, sym.file_path);
-    println!("{}", "-".repeat(60));
-
+    let mut callers = Vec::new();
     for edge in edges {
         if let Some(s) = db.get_symbol(&edge.source_id)? {
-            println!(
-                "  {} ({}:{})",
-                s.name,
-                s.file_path,
-                edge.line.unwrap_or(s.line_start)
+            callers.push(CallerEntry {
+                symbol: s,
+                line: edge.line,
+                context: edge.context,
+            });
+        }
+    }
+
+    Ok(CallersOutcome::Found {
+        target: Box::new(symbols.into_iter().next().expect("checked non-empty")),
+        callers,
+    })
+}
+
+/// Build the `query.callers` JSON payload.
+fn callers_data(outcome: &CallersOutcome) -> serde_json::Value {
+    match outcome {
+        CallersOutcome::NotFound => serde_json::json!({
+            "target": serde_json::Value::Null,
+            "callers": [],
+            "ambiguous": [],
+        }),
+        CallersOutcome::Ambiguous(symbols) => serde_json::json!({
+            "target": serde_json::Value::Null,
+            "callers": [],
+            "ambiguous": symbols.iter().map(SymbolRef::from).collect::<Vec<_>>(),
+        }),
+        CallersOutcome::Found { target, callers } => serde_json::json!({
+            "target": SymbolRef::from(target.as_ref()),
+            "callers": callers
+                .iter()
+                .map(|c| serde_json::json!({
+                    "symbol": SymbolRef::from(&c.symbol),
+                    "line": c.line,
+                    "context": c.context,
+                }))
+                .collect::<Vec<_>>(),
+            "ambiguous": [],
+        }),
+    }
+}
+
+/// Handle 'query callers' subcommand.
+fn query_callers(
+    db: &db::Database,
+    function: &str,
+    file_pattern: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let outcome = collect_callers(db, function, file_pattern)?;
+
+    if json {
+        return ctx::json::emit("query.callers", callers_data(&outcome));
+    }
+
+    match outcome {
+        CallersOutcome::NotFound => {
+            eprintln!("Symbol '{}' not found", function);
+            if file_pattern.is_some() {
+                eprintln!(
+                    "Try removing --file filter or use 'ctx query find {}' to see all matches",
+                    function
+                );
+            }
+        }
+        CallersOutcome::Ambiguous(symbols) => {
+            print_disambiguation(
+                &symbols,
+                function,
+                "--file",
+                &format!(
+                    "ctx query callers {} --file \"{}\"",
+                    function, symbols[0].file_path
+                ),
             );
-            if let Some(ctx) = edge.context {
-                println!("    > {}", ctx);
+        }
+        CallersOutcome::Found { target, callers } => {
+            if callers.is_empty() {
+                eprintln!("No callers found for '{}' ({})", function, target.file_path);
+                return Ok(());
+            }
+
+            println!(
+                "Functions that call '{}' ({}):",
+                target.name, target.file_path
+            );
+            println!("{}", "-".repeat(60));
+
+            for entry in callers {
+                println!(
+                    "  {} ({}:{})",
+                    entry.symbol.name,
+                    entry.symbol.file_path,
+                    entry.line.unwrap_or(entry.symbol.line_start)
+                );
+                if let Some(ctx) = entry.context {
+                    println!("    > {}", ctx);
+                }
             }
         }
     }
     Ok(())
+}
+
+/// Result of looking up the dependencies of a symbol.
+enum DepsOutcome {
+    NotFound,
+    Ambiguous(Vec<db::Symbol>),
+    Found {
+        target: Box<db::Symbol>,
+        /// Outgoing edges with the resolved target symbol (if any).
+        deps: Vec<(db::Edge, Option<db::Symbol>)>,
+    },
+}
+
+/// Look up the dependencies of `symbol`, without printing anything.
+fn collect_deps(
+    db: &db::Database,
+    symbol: &str,
+    file_pattern: Option<&str>,
+    kind_filter: Option<&str>,
+) -> Result<DepsOutcome> {
+    let symbols = db.find_symbols_filtered(symbol, 100, file_pattern, kind_filter)?;
+
+    if symbols.is_empty() {
+        return Ok(DepsOutcome::NotFound);
+    }
+
+    if symbols.len() > 1 && file_pattern.is_none() && kind_filter.is_none() {
+        return Ok(DepsOutcome::Ambiguous(symbols));
+    }
+
+    let sym = symbols.into_iter().next().expect("checked non-empty");
+    let edges = db.get_outgoing_edges(&sym.id)?;
+
+    let mut deps = Vec::new();
+    for edge in edges {
+        let resolved = match &edge.target_id {
+            Some(id) => db.get_symbol(id)?,
+            None => None,
+        };
+        deps.push((edge, resolved));
+    }
+
+    Ok(DepsOutcome::Found {
+        target: Box::new(sym),
+        deps,
+    })
+}
+
+/// Build the `query.deps` JSON payload.
+fn deps_data(outcome: &DepsOutcome) -> serde_json::Value {
+    match outcome {
+        DepsOutcome::NotFound => serde_json::json!({
+            "target": serde_json::Value::Null,
+            "dependencies": [],
+            "ambiguous": [],
+        }),
+        DepsOutcome::Ambiguous(symbols) => serde_json::json!({
+            "target": serde_json::Value::Null,
+            "dependencies": [],
+            "ambiguous": symbols.iter().map(SymbolRef::from).collect::<Vec<_>>(),
+        }),
+        DepsOutcome::Found { target, deps } => serde_json::json!({
+            "target": SymbolRef::from(target.as_ref()),
+            "dependencies": deps
+                .iter()
+                .map(|(edge, resolved)| serde_json::json!({
+                    "kind": edge.kind.as_str(),
+                    "target_name": edge.target_name,
+                    "line": edge.line,
+                    "resolved": resolved.as_ref().map(SymbolRef::from),
+                }))
+                .collect::<Vec<_>>(),
+            "ambiguous": [],
+        }),
+    }
 }
 
 /// Handle 'query deps' subcommand.
@@ -166,70 +355,167 @@ fn query_deps(
     symbol: &str,
     file_pattern: Option<&str>,
     kind_filter: Option<&str>,
+    json: bool,
 ) -> Result<()> {
-    let symbols = db.find_symbols_filtered(symbol, 100, file_pattern, kind_filter)?;
+    let outcome = collect_deps(db, symbol, file_pattern, kind_filter)?;
 
-    if symbols.is_empty() {
-        eprintln!("Symbol '{}' not found", symbol);
-        if file_pattern.is_some() || kind_filter.is_some() {
-            eprintln!(
-                "Try removing filters or use 'ctx query find {}' to see all matches",
-                symbol
+    if json {
+        return ctx::json::emit("query.deps", deps_data(&outcome));
+    }
+
+    match outcome {
+        DepsOutcome::NotFound => {
+            eprintln!("Symbol '{}' not found", symbol);
+            if file_pattern.is_some() || kind_filter.is_some() {
+                eprintln!(
+                    "Try removing filters or use 'ctx query find {}' to see all matches",
+                    symbol
+                );
+            }
+        }
+        DepsOutcome::Ambiguous(symbols) => {
+            print_disambiguation(
+                &symbols,
+                symbol,
+                "--file or --kind",
+                &format!(
+                    "ctx query deps {} --file \"{}\"",
+                    symbol, symbols[0].file_path
+                ),
             );
         }
-        return Ok(());
-    }
+        DepsOutcome::Found { target, deps } => {
+            if deps.is_empty() {
+                eprintln!(
+                    "No dependencies found for '{}' ({})",
+                    symbol, target.file_path
+                );
+                return Ok(());
+            }
 
-    // If multiple symbols match and no filters, show disambiguation help
-    if symbols.len() > 1 && file_pattern.is_none() && kind_filter.is_none() {
-        eprintln!(
-            "Found {} symbols named '{}'. Use --file or --kind to disambiguate:\n",
-            symbols.len(),
-            symbol
-        );
-        for s in symbols.iter().take(10) {
-            eprintln!(
-                "  {} ({}) - {}:{}",
-                s.name,
-                s.kind.as_str(),
-                s.file_path,
-                s.line_start
-            );
+            println!("Dependencies of '{}' ({}):", target.name, target.file_path);
+            println!("{}", "-".repeat(60));
+
+            for (edge, _) in deps {
+                println!(
+                    "  {} {} (line {})",
+                    edge.kind.as_str(),
+                    edge.target_name,
+                    edge.line.unwrap_or(0)
+                );
+            }
         }
-        if symbols.len() > 10 {
-            eprintln!("  ... and {} more", symbols.len() - 10);
-        }
-        eprintln!(
-            "\nExample: ctx query deps {} --file \"{}\"",
-            symbol, symbols[0].file_path
-        );
-        return Ok(());
-    }
-
-    let sym = &symbols[0];
-    let edges = db.get_outgoing_edges(&sym.id)?;
-
-    if edges.is_empty() {
-        eprintln!("No dependencies found for '{}' ({})", symbol, sym.file_path);
-        return Ok(());
-    }
-
-    println!("Dependencies of '{}' ({}):", sym.name, sym.file_path);
-    println!("{}", "-".repeat(60));
-
-    for edge in edges {
-        println!(
-            "  {} {} (line {})",
-            edge.kind.as_str(),
-            edge.target_name,
-            edge.line.unwrap_or(0)
-        );
     }
     Ok(())
 }
 
+/// Print the shared "multiple symbols matched" disambiguation help to stderr.
+fn print_disambiguation(symbols: &[db::Symbol], name: &str, filters: &str, example: &str) {
+    eprintln!(
+        "Found {} symbols named '{}'. Use {} to disambiguate:\n",
+        symbols.len(),
+        name,
+        filters
+    );
+    for s in symbols.iter().take(10) {
+        eprintln!(
+            "  {} ({}) - {}:{}",
+            s.name,
+            s.kind.as_str(),
+            s.file_path,
+            s.line_start
+        );
+    }
+    if symbols.len() > 10 {
+        eprintln!("  ... and {} more", symbols.len() - 10);
+    }
+    eprintln!("\nExample: {}", example);
+}
+
+/// Build a SymbolRef-shaped value from a call-graph/impact node.
+///
+/// Graph traversal results don't carry line information, so `line_start` and
+/// `line_end` are 0.
+fn node_symbol(name: &str, file_path: &str, kind: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "qualified_name": serde_json::Value::Null,
+        "kind": kind,
+        "file": file_path,
+        "line_start": 0,
+        "line_end": 0,
+    })
+}
+
+/// Build the `query.graph` JSON payload.
+fn graph_data(root: &str, depth: i32, nodes: &[analytics::CallGraphNode]) -> serde_json::Value {
+    serde_json::json!({
+        "root": root,
+        "depth": depth,
+        "nodes": nodes
+            .iter()
+            .map(|n| serde_json::json!({
+                "symbol": node_symbol(&n.name, &n.file_path, &n.kind),
+                "depth": n.depth,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// Build the `query.impact` JSON payload.
+fn impact_data(target: &str, depth: i32, impacts: &[analytics::ImpactNode]) -> serde_json::Value {
+    serde_json::json!({
+        "target": target,
+        "depth": depth,
+        "impacted": impacts
+            .iter()
+            .map(|n| serde_json::json!({
+                "symbol": node_symbol(&n.name, &n.file_path, &n.kind),
+                "distance": n.distance,
+            }))
+            .collect::<Vec<_>>(),
+        "total": impacts.len(),
+    })
+}
+
+/// Build the `query.stats` JSON payload.
+fn stats_data(
+    stats: &db::CodebaseStats,
+    per_file: &[analytics::FileStats],
+    most_connected: &[(String, String, i64, i64)],
+) -> serde_json::Value {
+    serde_json::json!({
+        "files": stats.files,
+        "symbols": stats.symbols,
+        "functions": stats.functions,
+        "structs": stats.structs,
+        "enums": stats.enums,
+        "traits": stats.traits,
+        "edges": stats.edges,
+        "per_file": per_file
+            .iter()
+            .map(|fs| serde_json::json!({
+                "file": fs.file_path,
+                "symbols": fs.symbol_count,
+                "functions": fs.functions,
+                "public": fs.public_symbols,
+                "types": fs.structs + fs.enums,
+            }))
+            .collect::<Vec<_>>(),
+        "most_connected": most_connected
+            .iter()
+            .map(|(name, file, calls_out, called_by)| serde_json::json!({
+                "name": name,
+                "file": file,
+                "calls_out": calls_out,
+                "called_by": called_by,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
 /// Run query subcommands.
-pub fn run_query(query: QueryCommand) -> Result<()> {
+pub fn run_query(query: QueryCommand, json: bool) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -239,18 +525,18 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
             limit,
             kind,
             file,
-        } => query_find(&db, &pattern, limit, kind, file),
+        } => query_find(&db, &pattern, limit, kind, file, json),
         QueryCommand::Callers {
             function,
             depth: _,
             file,
-        } => query_callers(&db, &function, file.as_deref()),
+        } => query_callers(&db, &function, file.as_deref(), json),
         QueryCommand::Deps {
             symbol,
             depth: _,
             file,
             kind,
-        } => query_deps(&db, &symbol, file.as_deref(), kind.as_deref()),
+        } => query_deps(&db, &symbol, file.as_deref(), kind.as_deref(), json),
         QueryCommand::Graph {
             start,
             depth,
@@ -261,19 +547,9 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
 
             let nodes = analytics.call_graph(&start, depth)?;
 
-            if output == "json" {
-                let graph = serde_json::json!({
-                    "root": start,
-                    "nodes": nodes.iter().map(|n| {
-                        serde_json::json!({
-                            "name": n.name,
-                            "file": n.file_path,
-                            "kind": n.kind,
-                            "depth": n.depth,
-                        })
-                    }).collect::<Vec<_>>()
-                });
-                println!("{}", serde_json::to_string_pretty(&graph)?);
+            // `--output json` remains accepted as an alias for `--json`.
+            if json || output == "json" {
+                ctx::json::emit("query.graph", graph_data(&start, depth, &nodes))?;
             } else if output == "dot" {
                 // GraphViz DOT format
                 println!("digraph call_graph {{");
@@ -326,6 +602,10 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
 
             let impacts = analytics.impact_analysis(&symbol, depth)?;
 
+            if json {
+                return ctx::json::emit("query.impact", impact_data(&symbol, depth, &impacts));
+            }
+
             if impacts.is_empty() {
                 eprintln!("No impact detected for changes to '{}'", symbol);
                 return Ok(());
@@ -350,6 +630,20 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
 
         QueryCommand::Stats => {
             let stats = db.get_stats()?;
+
+            if json {
+                let (per_file, most_connected) = match analytics::Analytics::open(&root) {
+                    Ok(analytics) => (
+                        analytics.file_statistics().unwrap_or_default(),
+                        analytics.most_connected(10).unwrap_or_default(),
+                    ),
+                    Err(_) => (Vec::new(), Vec::new()),
+                };
+                return ctx::json::emit(
+                    "query.stats",
+                    stats_data(&stats, &per_file, &most_connected),
+                );
+            }
 
             println!("Codebase Statistics");
             println!("{}", "=".repeat(60));
@@ -404,6 +698,11 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
 
         QueryCommand::Files => {
             let files = db.get_indexed_files()?;
+
+            if json {
+                return ctx::json::emit("query.files", serde_json::json!({ "files": files }));
+            }
+
             println!("Indexed files ({}):", files.len());
             println!("{}", "-".repeat(60));
             for file in files {
@@ -411,5 +710,213 @@ pub fn run_query(query: QueryCommand) -> Result<()> {
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ctx::db::{Database, Edge, EdgeKind, FileRecord, Symbol, SymbolKind, Visibility};
+
+    fn make_symbol(id: &str, name: &str, file: &str, line: u32) -> Symbol {
+        Symbol {
+            id: id.to_string(),
+            file_path: file.to_string(),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: line,
+            line_end: line + 3,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        }
+    }
+
+    fn seeded_db() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/x.rs".to_string(),
+                content_hash: "h".to_string(),
+                size_bytes: 1,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&make_symbol(
+            "src/x.rs::targetfn",
+            "targetfn",
+            "src/x.rs",
+            1,
+        ))
+        .unwrap();
+        db.insert_symbol(&make_symbol(
+            "src/x.rs::callerfn",
+            "callerfn",
+            "src/x.rs",
+            10,
+        ))
+        .unwrap();
+        db.insert_edge(&Edge {
+            source_id: "src/x.rs::callerfn".to_string(),
+            target_id: Some("src/x.rs::targetfn".to_string()),
+            target_name: "targetfn".to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(12),
+            col: None,
+            context: Some("targetfn()".to_string()),
+        })
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn test_find_data_payload() {
+        let db = seeded_db();
+        let symbols = db
+            .find_symbols_filtered("targetfn", 10, None, None)
+            .unwrap();
+        let data = find_data("targetfn", Some("function"), None, &symbols);
+
+        assert_eq!(data["pattern"], "targetfn");
+        assert_eq!(data["filters"]["kind"], "function");
+        assert!(data["filters"]["file"].is_null());
+
+        let first = &data["symbols"][0];
+        assert_eq!(first["name"], "targetfn");
+        assert_eq!(first["kind"], "function");
+        assert_eq!(first["file"], "src/x.rs");
+        assert_eq!(first["visibility"], "public");
+        assert_eq!(first["line_start"], 1);
+    }
+
+    #[test]
+    fn test_find_data_empty() {
+        let data = find_data("nope", None, None, &[]);
+        assert_eq!(data["symbols"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_callers_data_found() {
+        let db = seeded_db();
+        let outcome = collect_callers(&db, "targetfn", None).unwrap();
+        let data = callers_data(&outcome);
+
+        assert_eq!(data["target"]["name"], "targetfn");
+        assert_eq!(data["ambiguous"], serde_json::json!([]));
+
+        let callers = data["callers"].as_array().unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0]["symbol"]["name"], "callerfn");
+        assert_eq!(callers[0]["line"], 12);
+        assert_eq!(callers[0]["context"], "targetfn()");
+    }
+
+    #[test]
+    fn test_callers_data_not_found() {
+        let db = seeded_db();
+        let outcome = collect_callers(&db, "missingfn", None).unwrap();
+        let data = callers_data(&outcome);
+
+        assert!(data["target"].is_null());
+        assert_eq!(data["callers"], serde_json::json!([]));
+        assert_eq!(data["ambiguous"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_callers_data_ambiguous() {
+        let db = seeded_db();
+        // Add a second file with a symbol of the same name.
+        db.upsert_file(
+            &FileRecord {
+                path: "src/y.rs".to_string(),
+                content_hash: "h2".to_string(),
+                size_bytes: 1,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&make_symbol(
+            "src/y.rs::targetfn",
+            "targetfn",
+            "src/y.rs",
+            5,
+        ))
+        .unwrap();
+
+        let outcome = collect_callers(&db, "targetfn", None).unwrap();
+        let data = callers_data(&outcome);
+
+        assert!(data["target"].is_null());
+        assert_eq!(data["callers"], serde_json::json!([]));
+        let ambiguous = data["ambiguous"].as_array().unwrap();
+        assert_eq!(ambiguous.len(), 2);
+        assert_eq!(ambiguous[0]["name"], "targetfn");
+    }
+
+    #[test]
+    fn test_deps_data_found() {
+        let db = seeded_db();
+        let outcome = collect_deps(&db, "callerfn", None, None).unwrap();
+        let data = deps_data(&outcome);
+
+        assert_eq!(data["target"]["name"], "callerfn");
+        let deps = data["dependencies"].as_array().unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0]["kind"], "calls");
+        assert_eq!(deps[0]["target_name"], "targetfn");
+        assert_eq!(deps[0]["line"], 12);
+        assert_eq!(deps[0]["resolved"]["name"], "targetfn");
+        assert_eq!(deps[0]["resolved"]["file"], "src/x.rs");
+    }
+
+    #[test]
+    fn test_graph_and_impact_data() {
+        let nodes = vec![analytics::CallGraphNode {
+            name: "helper".to_string(),
+            file_path: "src/x.rs".to_string(),
+            kind: "function".to_string(),
+            depth: 1,
+        }];
+        let data = graph_data("main", 3, &nodes);
+        assert_eq!(data["root"], "main");
+        assert_eq!(data["depth"], 3);
+        assert_eq!(data["nodes"][0]["symbol"]["name"], "helper");
+        assert_eq!(data["nodes"][0]["depth"], 1);
+
+        let impacts = vec![analytics::ImpactNode {
+            name: "caller".to_string(),
+            file_path: "src/x.rs".to_string(),
+            kind: "function".to_string(),
+            distance: 2,
+        }];
+        let data = impact_data("main", 5, &impacts);
+        assert_eq!(data["target"], "main");
+        assert_eq!(data["total"], 1);
+        assert_eq!(data["impacted"][0]["symbol"]["name"], "caller");
+        assert_eq!(data["impacted"][0]["distance"], 2);
+    }
+
+    #[test]
+    fn test_stats_data() {
+        let db = seeded_db();
+        let stats = db.get_stats().unwrap();
+        let data = stats_data(&stats, &[], &[]);
+        assert_eq!(data["files"], 1);
+        assert_eq!(data["symbols"], 2);
+        assert_eq!(data["functions"], 2);
+        assert_eq!(data["edges"], 1);
+        assert_eq!(data["per_file"], serde_json::json!([]));
+        assert_eq!(data["most_connected"], serde_json::json!([]));
     }
 }

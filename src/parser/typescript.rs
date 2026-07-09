@@ -985,7 +985,7 @@ class Document implements Printable, Serializable {
 
         // Document implements Printable and Serializable
         assert!(
-            implements_edges.len() >= 1,
+            !implements_edges.is_empty(),
             "Expected at least 1 implements edge"
         );
 

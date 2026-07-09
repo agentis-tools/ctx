@@ -77,6 +77,10 @@ pub struct Args {
     #[arg(long, global = true)]
     pub no_stream: bool,
 
+    /// Emit machine-readable JSON to stdout (see docs/json-output.md)
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// Print stats (file count, total size, time taken)
     #[arg(long, global = true)]
     pub stats: bool,
