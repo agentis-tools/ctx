@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
         'commands/similar',
         'commands/map',
         'commands/harness',
+        'commands/self-update',
         'commands/diff',
         'commands/smart',
         'commands/shell',

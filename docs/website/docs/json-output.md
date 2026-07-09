@@ -439,6 +439,34 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 
 `severity` is `error`, `warning`, or `info`; `hint` is omitted when there is none. `code` is a stable machine-readable identifier: `binary_version`, `harness_not_initialized`, `templates_stale`, `index_missing`, `index_schema`, `index_stale`, `rules_missing`, `rules_invalid`, `hooks_missing`, `hooks_modified`, `settings_not_wired`, `mcp_unavailable`, `mcp_not_wired`. Checks are independent (a missing index and an invalid rules file are both reported in one run). `healthy` is `true` when no check is an error or a warning; exit codes: 0 = healthy, 1 = problems, 2 = operational error.
 
+### `self_update`
+
+`ctx self-update [--version X.Y.Z] --json`
+
+```json
+{
+  "old_version": "0.2.1",
+  "new_version": "0.3.0",
+  "outcome": "updated"
+}
+```
+
+`outcome` is `updated` (the binary was replaced) or `up_to_date` (nothing to do). Failures (network error, checksum mismatch, install location not writable, unsupported platform) exit 2 without emitting an envelope. Note that `--json` also suppresses the passive update notice — in JSON mode nothing but the envelope is ever printed to stdout, and update notices only ever go to stderr.
+
+### `version.check`
+
+`ctx --version --check --json`
+
+```json
+{
+  "current_version": "0.2.1",
+  "latest_version": "0.3.0",
+  "update_available": true
+}
+```
+
+Explicit release comparison (never installs anything). Exits 0 whether or not an update exists; network failures exit 2.
+
 ## Legacy shapes
 
 `ctx complexity --output json`, `ctx graph --output json`, and `ctx audit --output json` still emit their old, ad-hoc JSON shapes. They will be migrated to the envelope in a future release. The old ad-hoc shapes of `search --output json` and `semantic --output json` have already been **replaced** by the envelope described above.
