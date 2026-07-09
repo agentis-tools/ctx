@@ -7,7 +7,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use cli::{Args, Command};
+use cli::{Args, Command, OutputFormat};
+use commands::MapFormat;
 use ctx::error::Result;
 use ctx::exit::Outcome;
 
@@ -100,6 +101,26 @@ fn run(args: Args) -> Result<Outcome> {
             min_lines,
             output,
         }) => commands::run_duplicates(similarity, min_lines, &output),
+        Some(Command::Map {
+            budget,
+            focus,
+            format,
+        }) => {
+            // The global --json flag forces JSON format for consistency.
+            let format = if json {
+                Ok(MapFormat::Json)
+            } else {
+                match format {
+                    OutputFormat::Text => Ok(MapFormat::Text),
+                    OutputFormat::Markdown | OutputFormat::Md => Ok(MapFormat::Markdown),
+                    OutputFormat::Json => Ok(MapFormat::Json),
+                    OutputFormat::Xml | OutputFormat::Plain => Err(ctx::error::CtxError::Other(
+                        "ctx map supports --format text, markdown, or json".to_string(),
+                    )),
+                }
+            };
+            format.and_then(|format| commands::run_map(budget, focus.as_deref(), format))
+        }
         Some(Command::Graph {
             output,
             by_file,

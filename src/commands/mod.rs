@@ -10,6 +10,7 @@ pub mod embed;
 pub mod graph;
 pub mod index;
 pub mod interactive;
+pub mod map;
 pub mod query;
 pub mod search;
 pub mod smart_cmd;
@@ -24,6 +25,7 @@ pub use index::{run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
 pub use interactive::run_shell;
+pub use map::{run_map, MapFormat};
 pub use query::run_query;
 pub use search::run_search;
 pub use smart_cmd::run_smart;

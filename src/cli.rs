@@ -9,6 +9,8 @@ pub enum OutputFormat {
     #[value(alias = "md")]
     Md,
     Plain,
+    /// Plain text (used by `ctx map`; alias for plain elsewhere)
+    Text,
     Json,
 }
 
@@ -18,7 +20,7 @@ impl OutputFormat {
         match self {
             OutputFormat::Xml => ctx::formatter::OutputFormat::Xml,
             OutputFormat::Markdown | OutputFormat::Md => ctx::formatter::OutputFormat::Markdown,
-            OutputFormat::Plain => ctx::formatter::OutputFormat::Plain,
+            OutputFormat::Plain | OutputFormat::Text => ctx::formatter::OutputFormat::Plain,
             OutputFormat::Json => ctx::formatter::OutputFormat::Json,
         }
     }
@@ -253,6 +255,30 @@ pub enum Command {
         /// Output format (table, json)
         #[arg(long, default_value = "table")]
         output: String,
+    },
+
+    /// Print a token-budgeted map of the repository's most important symbols
+    ///
+    /// Ranks symbols with PageRank over the resolved symbol graph (calls,
+    /// imports, extends, implements) and emits them (grouped by file,
+    /// preceded by a compact project tree) until the token budget is
+    /// exhausted. Tokens are estimated as ceil(chars / 4). Output is
+    /// deterministic for identical index state, which makes it well suited
+    /// for SessionStart hooks that prime an AI assistant with a stable
+    /// overview of the codebase.
+    Map {
+        /// Token budget for the map (tokens are estimated as ceil(chars / 4))
+        #[arg(long, default_value = "2000")]
+        budget: usize,
+
+        /// Focus on a file path/glob or symbol name: boosts the matching
+        /// symbols and their direct neighbors in the ranking
+        #[arg(long)]
+        focus: Option<String>,
+
+        /// Output format (text, markdown, json)
+        #[arg(short = 'f', long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
 
     /// Generate a dependency graph visualization
