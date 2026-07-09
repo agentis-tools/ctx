@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `mcp` feature failed to compile the binary (`use crate::mcp` resolved against the binary crate instead of the library); CI now builds `--all-features` on Linux to prevent regressions
+- Stack overflow in the compiled binary on Windows (`~1 MiB` default thread stack) under normal parsing/graph-walking call depth; `main()` and rayon's global pool now run with an explicit 16 MiB stack
+- CI's `test` job matrix silently collapsed to a single `windows-latest --no-default-features` job instead of the intended 3 (ubuntu `--all-features`, macos default, windows `--no-default-features`), because the redundant, unused `rust: [stable]` matrix axis caused later `include` entries to overwrite earlier ones; `ubuntu-latest`/`macos-latest` had never actually run in CI
 
 ## [0.2.1] - 2026-06-17
 
