@@ -8,6 +8,7 @@ pub mod context;
 pub mod diff_cmd;
 pub mod embed;
 pub mod graph;
+pub mod hotspots;
 pub mod index;
 pub mod interactive;
 pub mod query;
@@ -20,6 +21,7 @@ pub use context::run_context;
 pub use diff_cmd::{run_diff, run_review};
 pub use embed::{run_embed, run_embed_watch, run_semantic};
 pub use graph::run_graph;
+pub use hotspots::run_hotspots;
 pub use index::{run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
