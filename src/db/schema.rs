@@ -11,6 +11,14 @@ use sqlite_vec::sqlite3_vec_init;
 
 use super::models::*;
 
+/// Current index schema version, stamped into SQLite's `PRAGMA user_version`.
+///
+/// Bump this whenever the schema changes in a way that is incompatible with
+/// existing databases. Databases with `user_version = 0` are pre-versioning
+/// databases whose schema is identical to v1; they are silently stamped.
+/// Any other mismatch is reported as [`crate::error::CtxError::SchemaVersionMismatch`].
+pub const SCHEMA_VERSION: i64 = 1;
+
 /// Default embedding dimension for vector search.
 /// This matches OpenAI text-embedding-ada-002 (1536) and text-embedding-3-small (1536).
 /// For local embeddings with fastembed (384 dims), a separate table or dynamic dimension is needed.
@@ -54,32 +62,65 @@ pub fn is_vec_extension_available() -> bool {
 }
 
 /// SQLite database for code intelligence.
+#[derive(Debug)]
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
     /// Open or create a database at the given path.
-    pub fn open(path: &Path) -> Result<Self> {
+    ///
+    /// Verifies the schema version stored in `PRAGMA user_version`:
+    /// - `0` (fresh or pre-versioning database): the schema is initialized and
+    ///   the version is stamped to [`SCHEMA_VERSION`].
+    /// - [`SCHEMA_VERSION`]: opened normally.
+    /// - anything else: returns [`crate::error::CtxError::SchemaVersionMismatch`].
+    pub fn open(path: &Path) -> crate::error::Result<Self> {
         // Initialize sqlite-vec extension before opening connection
         init_vec_extension();
         let conn = Connection::open(path)?;
         Self::configure_connection(&conn)?;
         let db = Self { conn };
+        db.check_schema_version()?;
         db.init_schema()?;
         Ok(db)
     }
 
     /// Create an in-memory database (for testing).
     #[allow(dead_code)]
-    pub fn open_in_memory() -> Result<Self> {
+    pub fn open_in_memory() -> crate::error::Result<Self> {
         // Initialize sqlite-vec extension before opening connection
         init_vec_extension();
         let conn = Connection::open_in_memory()?;
         Self::configure_connection(&conn)?;
         let db = Self { conn };
+        db.check_schema_version()?;
         db.init_schema()?;
         Ok(db)
+    }
+
+    /// Validate `PRAGMA user_version` against [`SCHEMA_VERSION`].
+    ///
+    /// Version `0` means a fresh database or a pre-versioning (v0) database
+    /// whose schema is identical to v1; it is silently stamped to the current
+    /// version. Any other mismatch is an error.
+    fn check_schema_version(&self) -> crate::error::Result<()> {
+        let found: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        if found == 0 {
+            self.conn
+                .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            Ok(())
+        } else if found == SCHEMA_VERSION {
+            Ok(())
+        } else {
+            Err(crate::error::CtxError::SchemaVersionMismatch {
+                found,
+                expected: SCHEMA_VERSION,
+            })
+        }
     }
 
     /// Configure the SQLite connection for optimal performance and concurrency.
@@ -697,6 +738,146 @@ impl Database {
             enums,
             traits,
         })
+    }
+
+    // ========== Shared Complexity Metrics ==========
+    //
+    // These mirror the DuckDB `complexity_analysis` formula exactly:
+    // fan_out = COUNT(*) of 'calls' edges grouped by source_id,
+    // fan_in  = COUNT(*) of 'calls' edges grouped by target_id (resolved only),
+    // complexity = fan_out * 2 + fan_in.
+
+    /// Per-symbol fan-in/fan-out/complexity metrics for functions and methods.
+    ///
+    /// Results are ordered by complexity (highest first).
+    pub fn symbol_metrics(&self) -> Result<Vec<SymbolMetrics>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH fo AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls'
+                GROUP BY source_id
+            ),
+            fi AS (
+                SELECT target_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+                GROUP BY target_id
+            )
+            SELECT
+                s.id,
+                s.name,
+                s.qualified_name,
+                s.kind,
+                s.file_path,
+                s.line_start,
+                s.line_end,
+                COALESCE(fi.n, 0) AS fan_in,
+                COALESCE(fo.n, 0) AS fan_out,
+                (COALESCE(fo.n, 0) * 2 + COALESCE(fi.n, 0)) AS complexity
+            FROM symbols s
+            LEFT JOIN fo ON s.id = fo.id
+            LEFT JOIN fi ON s.id = fi.id
+            WHERE s.kind IN ('function', 'method')
+            ORDER BY complexity DESC, s.file_path, s.line_start
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(SymbolMetrics {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                qualified_name: row.get(2)?,
+                kind: row.get(3)?,
+                file_path: row.get(4)?,
+                line_start: row.get(5)?,
+                line_end: row.get(6)?,
+                fan_in: row.get(7)?,
+                fan_out: row.get(8)?,
+                complexity: row.get(9)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Per-file aggregated complexity (same formula as [`Self::symbol_metrics`],
+    /// summed over all symbols in the file).
+    ///
+    /// `symbol_count` counts all symbols in the file, not only functions.
+    /// Results are ordered by complexity (highest first).
+    pub fn file_complexity(&self) -> Result<Vec<FileComplexity>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH fo AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls'
+                GROUP BY source_id
+            ),
+            fi AS (
+                SELECT target_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+                GROUP BY target_id
+            )
+            SELECT
+                s.file_path,
+                SUM(COALESCE(fo.n, 0) * 2 + COALESCE(fi.n, 0)) AS complexity,
+                SUM(COALESCE(fo.n, 0)) AS fan_out,
+                COUNT(*) AS symbol_count
+            FROM symbols s
+            LEFT JOIN fo ON s.id = fo.id
+            LEFT JOIN fi ON s.id = fi.id
+            GROUP BY s.file_path
+            ORDER BY complexity DESC, s.file_path
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(FileComplexity {
+                file_path: row.get(0)?,
+                complexity: row.get(1)?,
+                fan_out: row.get(2)?,
+                symbol_count: row.get(3)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Count resolved incoming 'calls' edges for the given symbol IDs.
+    ///
+    /// Symbols with no incoming calls are absent from the returned map.
+    pub fn fan_in_counts(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let mut counts = std::collections::HashMap::new();
+        if ids.is_empty() {
+            return Ok(counts);
+        }
+
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT target_id, COUNT(*) FROM edges \
+             WHERE target_id IN ({}) AND kind = 'calls' \
+             GROUP BY target_id",
+            placeholders
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+
+        for row in rows {
+            let (id, n) = row?;
+            counts.insert(id, n);
+        }
+
+        Ok(counts)
     }
 
     /// Get all indexed file paths.
@@ -1583,6 +1764,30 @@ fn edge_from_row(row: &rusqlite::Row) -> Edge {
     }
 }
 
+/// Per-symbol complexity metrics (see [`Database::symbol_metrics`]).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SymbolMetrics {
+    pub id: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub fan_in: i64,
+    pub fan_out: i64,
+    pub complexity: i64,
+}
+
+/// Per-file aggregated complexity (see [`Database::file_complexity`]).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileComplexity {
+    pub file_path: String,
+    pub complexity: i64,
+    pub fan_out: i64,
+    pub symbol_count: i64,
+}
+
 /// Result of duplicate detection.
 #[derive(Debug, Clone)]
 pub struct DuplicateResult {
@@ -1622,6 +1827,66 @@ mod tests {
         let stats = db.get_stats().unwrap();
         assert_eq!(stats.files, 0);
         assert_eq!(stats.symbols, 0);
+    }
+
+    #[test]
+    fn test_fresh_database_is_stamped_with_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        let db = Database::open(&db_path).unwrap();
+        let version: i64 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(db);
+
+        // Re-opening a stamped database works.
+        assert!(Database::open(&db_path).is_ok());
+    }
+
+    #[test]
+    fn test_v0_database_is_silently_stamped() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        // Create a database, then reset it to the pre-versioning state (v0).
+        drop(Database::open(&db_path).unwrap());
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", 0).unwrap();
+        }
+
+        // Opening a v0 database succeeds and stamps the current version.
+        let db = Database::open(&db_path).unwrap();
+        let version: i64 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_schema_version_mismatch_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        drop(Database::open(&db_path).unwrap());
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", 99).unwrap();
+        }
+
+        let err = Database::open(&db_path).unwrap_err();
+        match &err {
+            crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
+                assert_eq!(*found, 99);
+                assert_eq!(*expected, SCHEMA_VERSION);
+            }
+            other => panic!("expected SchemaVersionMismatch, got: {}", other),
+        }
+        assert!(err.to_string().contains("ctx index --force"));
     }
 
     #[test]
@@ -1669,6 +1934,138 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM symbol_vectors", [], |row| row.get(0))
             .expect("symbol_vectors table should exist");
         assert_eq!(count, 0, "symbol_vectors should be empty initially");
+    }
+
+    /// Build a minimal function symbol for metrics tests.
+    fn make_fn_symbol(id: &str, name: &str, file: &str, line: u32) -> Symbol {
+        Symbol {
+            id: id.to_string(),
+            file_path: file.to_string(),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: line,
+            line_end: line + 5,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        }
+    }
+
+    /// Build a 'calls' edge for metrics tests.
+    fn make_call_edge(source_id: &str, target_id: Option<&str>, target_name: &str) -> Edge {
+        Edge {
+            source_id: source_id.to_string(),
+            target_id: target_id.map(|s| s.to_string()),
+            target_name: target_name.to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(1),
+            col: None,
+            context: None,
+        }
+    }
+
+    /// Set up a database with three functions and a small call graph:
+    /// alpha -> beta (resolved), alpha -> external (unresolved), beta -> alpha (resolved).
+    fn metrics_fixture() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/a.rs".to_string(),
+                content_hash: "h1".to_string(),
+                size_bytes: 10,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+
+        db.insert_symbol(&make_fn_symbol("src/a.rs::alpha", "alpha", "src/a.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::beta", "beta", "src/a.rs", 10))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::gamma", "gamma", "src/a.rs", 20))
+            .unwrap();
+
+        db.insert_edge(&make_call_edge("src/a.rs::alpha", Some("src/a.rs::beta"), "beta"))
+            .unwrap();
+        db.insert_edge(&make_call_edge("src/a.rs::alpha", None, "external"))
+            .unwrap();
+        db.insert_edge(&make_call_edge("src/a.rs::beta", Some("src/a.rs::alpha"), "alpha"))
+            .unwrap();
+
+        db
+    }
+
+    #[test]
+    fn test_symbol_metrics_mirrors_complexity_formula() {
+        let db = metrics_fixture();
+        let metrics = db.symbol_metrics().unwrap();
+        assert_eq!(metrics.len(), 3);
+
+        let get = |name: &str| metrics.iter().find(|m| m.name == name).unwrap();
+
+        // alpha: fan_out 2 (beta + unresolved external), fan_in 1 (from beta)
+        let alpha = get("alpha");
+        assert_eq!(alpha.fan_out, 2);
+        assert_eq!(alpha.fan_in, 1);
+        assert_eq!(alpha.complexity, 2 * 2 + 1);
+        assert_eq!(alpha.file_path, "src/a.rs");
+        assert_eq!(alpha.line_start, 1);
+
+        // beta: fan_out 1, fan_in 1
+        let beta = get("beta");
+        assert_eq!(beta.fan_out, 1);
+        assert_eq!(beta.fan_in, 1);
+        assert_eq!(beta.complexity, 1 * 2 + 1);
+
+        // gamma: no edges at all
+        let gamma = get("gamma");
+        assert_eq!(gamma.fan_out, 0);
+        assert_eq!(gamma.fan_in, 0);
+        assert_eq!(gamma.complexity, 0);
+
+        // Ordered by complexity, highest first
+        assert_eq!(metrics[0].name, "alpha");
+    }
+
+    #[test]
+    fn test_file_complexity_aggregates_per_file() {
+        let db = metrics_fixture();
+        let files = db.file_complexity().unwrap();
+        assert_eq!(files.len(), 1);
+
+        let f = &files[0];
+        assert_eq!(f.file_path, "src/a.rs");
+        assert_eq!(f.symbol_count, 3);
+        assert_eq!(f.fan_out, 3);
+        // alpha (5) + beta (3) + gamma (0)
+        assert_eq!(f.complexity, 8);
+    }
+
+    #[test]
+    fn test_fan_in_counts() {
+        let db = metrics_fixture();
+
+        let ids = vec![
+            "src/a.rs::alpha".to_string(),
+            "src/a.rs::beta".to_string(),
+            "src/a.rs::gamma".to_string(),
+        ];
+        let counts = db.fan_in_counts(&ids).unwrap();
+        assert_eq!(counts.get("src/a.rs::alpha"), Some(&1));
+        assert_eq!(counts.get("src/a.rs::beta"), Some(&1));
+        // gamma has no incoming resolved calls, so it is absent
+        assert!(!counts.contains_key("src/a.rs::gamma"));
+
+        // Empty input short-circuits
+        assert!(db.fan_in_counts(&[]).unwrap().is_empty());
     }
 
     #[test]
