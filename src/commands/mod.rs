@@ -16,6 +16,7 @@ pub mod interactive;
 pub mod query;
 pub mod score;
 pub mod search;
+pub mod self_update;
 pub mod smart_cmd;
 pub mod symbol;
 
@@ -34,6 +35,7 @@ pub use interactive::run_shell;
 pub use query::run_query;
 pub use score::run_score;
 pub use search::run_search;
+pub use self_update::{run_self_update, run_version};
 pub use smart_cmd::run_smart;
 pub use symbol::{run_explain, run_source};
 

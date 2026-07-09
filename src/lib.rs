@@ -161,6 +161,9 @@ pub mod score;
 // version compatibility guard, and integration diagnostics
 pub mod harness;
 
+// Release & update mechanism (ctx self-update, passive update notices)
+pub mod update;
+
 // Utilities
 pub mod audit;
 pub mod gitutil;

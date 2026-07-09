@@ -67,8 +67,13 @@ thiserror = "1.0"
 semver = "1"
 
 # HTTP client with retry support (replaces hand-rolled native-tls)
-reqwest = { version = "0.12", features = ["json"] }
+# `blocking` is used by `ctx self-update` and the passive update check
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+# Release archive extraction for `ctx self-update` (already in the
+# dependency graph transitively via hf-hub/libduckdb-sys)
+tar = "0.4"
 
 # Token counting for LLM context management
 tiktoken-rs = "0.9"
@@ -94,6 +99,11 @@ duckdb = { version = "1.0", features = ["bundled"], optional = true }
 notify = "6.1"
 notify-debouncer-mini = "0.4"
 dirs = "6.0.0"
+
+# Windows release artifacts are .zip (see .github/workflows/release.yml);
+# zip is already in the dependency graph transitively via libduckdb-sys
+[target.'cfg(windows)'.dependencies]
+zip = { version = "6", default-features = false, features = ["deflate"] }
 
 [package.metadata.docs.rs]
 all-features = true

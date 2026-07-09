@@ -34,6 +34,7 @@ dependencies = [
  "sha2",
  "solang-parser",
  "sqlite-vec",
+ "tar",
  "tempfile",
  "thiserror 1.0.69",
  "tiktoken-rs",
@@ -48,6 +49,7 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "zerocopy 0.7.35",
+ "zip",
 ]
 
 [[package]]
