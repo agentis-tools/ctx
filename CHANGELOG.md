@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-17
+
+### Added
+- Token count estimate in `--stats` output: `Generated context: N files, X KB, ~Yk tokens in Zms`
+- Token count shown automatically by `ctx smart` and `ctx diff`/`ctx review` after context generation
+
 ## [0.2.0] - 2026-06-06
 
 ### Added

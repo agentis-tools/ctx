@@ -5,6 +5,7 @@
 use std::env;
 
 use crate::cli::OutputFormat;
+use crate::commands::format_token_count;
 use ctx::analytics;
 use ctx::diff::{self, diff_context, format_pr_header, format_summary, get_pr_info, DiffConfig};
 use ctx::error::{CtxError, Result};
@@ -145,7 +146,13 @@ pub fn run_diff(
     }
 
     // Generate context output
-    output::stream_context(&root, &entries, format.to_lib(), !no_tree, show_sizes)?;
+    let output_result =
+        output::stream_context(&root, &entries, format.to_lib(), !no_tree, show_sizes)?;
+    eprintln!(
+        "Generated context: {} files, ~{} tokens",
+        output_result.file_count,
+        format_token_count(output_result.output_bytes.div_ceil(4))
+    );
 
     Ok(())
 }

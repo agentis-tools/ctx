@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::cli::Args;
+use crate::commands::format_token_count;
 use ctx::error::Result;
 use ctx::output::{generate_context, stream_context};
 use ctx::tokens;
@@ -87,10 +88,12 @@ pub fn run_context(args: Args) -> Result<()> {
     // Print stats to stderr (only if --stats flag is passed)
     if args.stats {
         let elapsed = start.elapsed();
+        let approx_tokens = result.output_bytes.div_ceil(4);
         eprintln!(
-            "Generated context: {} files, {} in {:.2?}",
+            "Generated context: {} files, {}, ~{} tokens in {:.2?}",
             result.file_count,
             walker::format_size(result.total_size),
+            format_token_count(approx_tokens),
             elapsed
         );
     }

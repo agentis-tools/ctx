@@ -19,20 +19,12 @@ impl Analytics {
     }
 
     /// Call graph: returns empty list.
-    pub fn call_graph(
-        &self,
-        _start_name: &str,
-        _max_depth: i32,
-    ) -> Result<Vec<CallGraphNode>> {
+    pub fn call_graph(&self, _start_name: &str, _max_depth: i32) -> Result<Vec<CallGraphNode>> {
         Ok(Vec::new())
     }
 
     /// Impact analysis: returns empty list.
-    pub fn impact_analysis(
-        &self,
-        _target_name: &str,
-        _max_depth: i32,
-    ) -> Result<Vec<ImpactNode>> {
+    pub fn impact_analysis(&self, _target_name: &str, _max_depth: i32) -> Result<Vec<ImpactNode>> {
         Ok(Vec::new())
     }
 
@@ -49,20 +41,12 @@ impl Analytics {
 
     /// Path existence check: always returns false.
     #[allow(dead_code)]
-    pub fn has_path(
-        &self,
-        _from_name: &str,
-        _to_name: &str,
-        _max_depth: i32,
-    ) -> Result<bool> {
+    pub fn has_path(&self, _from_name: &str, _to_name: &str, _max_depth: i32) -> Result<bool> {
         Ok(false)
     }
 
     /// Most connected symbols: returns empty list.
-    pub fn most_connected(
-        &self,
-        _limit: i32,
-    ) -> Result<Vec<(String, String, i64, i64)>> {
+    pub fn most_connected(&self, _limit: i32) -> Result<Vec<(String, String, i64, i64)>> {
         Ok(Vec::new())
     }
 
@@ -73,16 +57,12 @@ impl Analytics {
     }
 
     /// File dependencies: returns empty list.
-    pub fn file_dependencies(&self,
-    ) -> Result<Vec<(String, String, i64)>> {
+    pub fn file_dependencies(&self) -> Result<Vec<(String, String, i64)>> {
         Ok(Vec::new())
     }
 
     /// Complexity analysis: returns empty list.
-    pub fn complexity_analysis(
-        &self,
-        _threshold: i64,
-    ) -> Result<Vec<ComplexityResult>> {
+    pub fn complexity_analysis(&self, _threshold: i64) -> Result<Vec<ComplexityResult>> {
         Ok(Vec::new())
     }
 

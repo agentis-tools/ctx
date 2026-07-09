@@ -5,6 +5,7 @@
 use std::env;
 
 use crate::cli::OutputFormat;
+use crate::commands::format_token_count;
 use ctx::analytics;
 use ctx::embeddings::EmbeddingProvider;
 use ctx::error::Result;
@@ -149,7 +150,11 @@ pub fn run_smart(
         output::stream_context(&root, &entries, format.to_lib(), !no_tree, show_sizes)?
     };
 
-    eprintln!("Generated context: {} files", output_result.file_count);
+    eprintln!(
+        "Generated context: {} files, ~{} tokens",
+        output_result.file_count,
+        format_token_count(output_result.output_bytes.div_ceil(4))
+    );
 
     Ok(())
 }

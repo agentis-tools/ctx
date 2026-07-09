@@ -11,6 +11,8 @@ pub struct ContextResult {
     pub content: String,
     pub file_count: usize,
     pub total_size: u64,
+    /// Byte length of the generated output (used for token estimation).
+    pub output_bytes: usize,
 }
 
 /// Generate context output from file entries.
@@ -68,6 +70,7 @@ pub fn generate_context(
     let content = formatter.wrap(tree_block.as_deref(), &files_block);
 
     Ok(ContextResult {
+        output_bytes: content.len(),
         content,
         file_count: processed_count,
         total_size,
@@ -101,8 +104,10 @@ pub fn stream_context(
 
     // Print opening (skip if empty to avoid blank lines in NDJSON)
     let start = formatter.stream_start(tree_block.as_deref());
+    let mut output_bytes = 0usize;
     if !start.is_empty() {
         writeln!(stdout, "{}", start)?;
+        output_bytes += start.len() + 1;
     }
 
     // Stream file blocks
@@ -116,8 +121,10 @@ pub fn stream_context(
                 let block = formatter.format_file(entry, &content);
                 if i > 0 {
                     write!(stdout, "{}", separator)?;
+                    output_bytes += separator.len();
                 }
                 write!(stdout, "{}", block)?;
+                output_bytes += block.len();
                 stdout.flush()?;
                 total_size += entry.size;
                 processed_count += 1;
@@ -136,14 +143,17 @@ pub fn stream_context(
     let end = formatter.stream_end();
     if !end.is_empty() {
         writeln!(stdout, "\n{}", end)?;
+        output_bytes += end.len() + 2;
     } else {
         writeln!(stdout)?;
+        output_bytes += 1;
     }
 
     Ok(ContextResult {
         content: String::new(), // Not used in streaming mode
         file_count: processed_count,
         total_size,
+        output_bytes,
     })
 }
 

@@ -10,9 +10,7 @@ use std::path::Path;
 
 use duckdb::{params, Connection, Result};
 
-use super::{
-    CallGraphNode, ComplexityResult, FileStats, ImpactNode,
-};
+use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode};
 use crate::index::{CTX_DIR, DB_FILE};
 
 /// DuckDB analytics engine for code intelligence.

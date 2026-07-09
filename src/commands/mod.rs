@@ -28,3 +28,14 @@ pub use query::run_query;
 pub use search::run_search;
 pub use smart_cmd::run_smart;
 pub use symbol::{run_explain, run_source};
+
+/// Format a token count as a human-readable string (e.g. 241_502 → "241.5k").
+pub fn format_token_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
