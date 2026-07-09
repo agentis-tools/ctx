@@ -11,10 +11,10 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://ctx.dev',
-  baseUrl: '/',
+  url: 'https://saldestechnology.github.io',
+  baseUrl: '/ctx/',
 
-  organizationName: 'ctx-dev',
+  organizationName: 'saldestechnology',
   projectName: 'ctx',
 
   onBrokenLinks: 'throw',
@@ -36,7 +36,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/ctx-dev/ctx/tree/main/docs/website/',
+          editUrl: 'https://github.com/saldestechnology/ctx/tree/main/docs/website/',
         },
         blog: false,
         theme: {
@@ -47,7 +47,6 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: 'img/ctx-social-card.jpg',
     colorMode: {
       defaultMode: 'dark',
       respectPrefersColorScheme: true,
@@ -66,7 +65,7 @@ const config: Config = {
           label: 'Documentation',
         },
         {
-          href: 'https://github.com/ctx-dev/ctx',
+          href: 'https://github.com/saldestechnology/ctx',
           label: 'GitHub',
           position: 'right',
         },
@@ -97,7 +96,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/ctx-dev/ctx',
+              href: 'https://github.com/saldestechnology/ctx',
             },
           ],
         },
@@ -107,7 +106,7 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
-      additionalLanguages: ['bash', 'rust', 'typescript', 'python', 'solidity', 'sql', 'toml'],
+      additionalLanguages: ['bash', 'rust', 'typescript', 'python', 'go', 'solidity', 'sql', 'toml', 'yaml'],
     },
   } satisfies Preset.ThemeConfig,
 };

@@ -4,8 +4,11 @@
 [![CI](https://github.com/saldestechnology/ctx/actions/workflows/ci.yml/badge.svg)](https://github.com/saldestechnology/ctx/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](#license)
 [![Rust Version](https://img.shields.io/badge/rust-1.91%2B-orange)](https://www.rust-lang.org)
+[![Docs](https://img.shields.io/badge/docs-saldestechnology.github.io%2Fctx-blue)](https://saldestechnology.github.io/ctx/)
 
 A fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence for understanding symbol relationships.
+
+📖 **Documentation:** https://saldestechnology.github.io/ctx/
 
 ## Two Tools in One
 

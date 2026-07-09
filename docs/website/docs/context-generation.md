@@ -376,6 +376,38 @@ Stats go to stderr, so they don't interfere with piping:
 ctx --stats src/ | pbcopy  # Stats shown, only content copied
 ```
 
+The statistics line includes a token estimate alongside the file count, size, and elapsed time.
+
+### Token Counting
+
+Count the tokens a selection would produce without printing any file contents:
+
+```bash
+ctx --count-only src/
+```
+
+This is useful for checking whether a selection fits your model's context window before generating the full output.
+
+### Token Budgeting
+
+Fit context to a token budget. When `--max-tokens` is set, ctx omits whole files that would push the output over the budget. Files are dropped as a unit; they are never truncated:
+
+```bash
+# Keep the output under 8000 tokens
+ctx --max-tokens 8000 src/
+```
+
+### Tokenizer Encoding
+
+Token counts are computed with a tiktoken-compatible encoding. The default is `cl100k_base`; override it with `--encoding`:
+
+```bash
+# Use the o200k_base encoding (GPT-4o family)
+ctx --encoding o200k_base --count-only src/
+```
+
+Available encodings: `cl100k_base` (default), `o200k_base`, `p50k_base`.
+
 ## Common Workflows
 
 ### Quick Context for LLM
@@ -434,14 +466,15 @@ ctx src/ > after.xml
 diff before.xml after.xml
 ```
 
-### Count Tokens (Approximate)
+### Count Tokens
 
 ```bash
-# Word count as rough proxy
-ctx src/ | wc -w
+# Exact token count (no file contents printed)
+ctx --count-only src/
 
-# Character count
-ctx src/ | wc -c
+# Rough proxies without the tokenizer
+ctx src/ | wc -w   # word count
+ctx src/ | wc -c   # character count
 ```
 
 ### Pipe to Other Tools
@@ -481,7 +514,11 @@ Options:
       --show-sizes          Show file sizes in project tree
       --no-tree             Disable project tree in output
       --no-stream           Buffer all output before printing
-      --stats               Print stats (file count, size, time)
+      --stats               Print stats (file count, size, time, token estimate)
+      --count-only          Count tokens only; do not print file contents
+      --max-tokens <N>      Omit whole files to fit a token budget (never truncates a file)
+      --encoding <ENCODING> Tokenizer encoding [default: cl100k_base]
+                            Possible values: cl100k_base, o200k_base, p50k_base
   -h, --help                Print help
   -V, --version             Print version
 ```
