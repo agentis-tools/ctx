@@ -54,6 +54,9 @@ pub mod formatter;
 pub mod output;
 pub mod tree;
 
+// Architecture rules (ctx check)
+pub mod rules;
+
 // Utilities
 pub mod audit;
 pub mod gitutil;
