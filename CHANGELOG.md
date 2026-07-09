@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `ctx score`: quality scorecard for the changes between a git reference and the working tree -- reports `complexity_delta` and `fan_out_delta` (baseline parsed in memory at the reference with the same parser; fan-in approximated as same-file callers on both sides), `new_duplication` (near-duplicate pairs at Jaccard >= 0.85 / >= 50 tokens with at least one endpoint in a changed file that did not exist at the baseline), `check_violations` (via the `ctx check` engine, scoped to the same reference; 0 with a note when `.ctx/rules.toml` is missing), `symbols_added` / `symbols_removed`, and `files_changed`; `--against <REF>` (default `HEAD` scores uncommitted changes, use `main`/`master` to score a branch or PR), `--fail-on "metric OP value,..."` CI gates (`>=`, `<=`, `>`, `<`) that exit 1 when any condition is met, and the global `--json` envelope with flat `metrics` plus a `per_file` breakdown; refreshes the index incrementally before scoring
+- `ctx similar <description>`: find existing functions/methods similar to a natural-language description before writing a new one; reports similarity score, fan-in, and a one-line doc per hit, supports `--keyword` (FTS5 fallback that needs no embeddings), `--openai`, and `--json`, and exits with code 2 when embeddings are missing
+- `ctx hotspots`: rank files (or symbols with `--by symbol`) by combined git churn and code complexity (`score = normalized_churn * normalized_complexity`), with `--since`, `--limit`, `--min-churn`, and `--against REF` filters and `--json` output including each file's top 3 most complex symbols; see `docs/json-output.md`
 - `ctx check`: architecture rules engine driven by `.ctx/rules.toml` -- declare layers as glob patterns over indexed files, then enforce `forbidden` layer dependencies, `allowed_dependents` whitelists, `limit` metric thresholds (fan-in / fan-out / complexity / file symbols), and `no_new_dependents` frozen paths; supports `--against REF` to scope violations to changed files, `--list` to inspect parsed rules, and `--json`; exits 1 when violations are found (see `ctx check --help` for a full example)
 - Global `--json` flag: `search`, `semantic`, `query find/callers/deps/graph/impact/stats/files`, and `explain` emit a single machine-readable JSON document wrapped in a stable envelope (`ctx_version`, `command`, `generated_at`, `data`); see `docs/json-output.md`
 - Index schema versioning via SQLite `PRAGMA user_version`; opening an index built with an incompatible schema now fails with a clear "run `ctx index --force`" message
@@ -28,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `mcp` feature failed to compile the binary (`use crate::mcp` resolved against the binary crate instead of the library); CI now builds `--all-features` on Linux to prevent regressions
+- Stack overflow in the compiled binary on Windows (`~1 MiB` default thread stack) under normal parsing/graph-walking call depth; `main()` and rayon's global pool now run with an explicit 16 MiB stack
+- CI's `test` job matrix silently collapsed to a single `windows-latest --no-default-features` job instead of the intended 3 (ubuntu `--all-features`, macos default, windows `--no-default-features`), because the redundant, unused `rust: [stable]` matrix axis caused later `include` entries to overwrite earlier ones; `ubuntu-latest`/`macos-latest` had never actually run in CI
 
 ## [0.2.1] - 2026-06-17
 

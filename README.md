@@ -279,6 +279,17 @@ ctx semantic "error handling" --openai  # OpenAI embeddings
 ctx semantic "database queries" --limit 20
 ```
 
+### `ctx similar <description>`
+Find existing functions similar to a description — reuse before you write. Before writing a new function, run `ctx similar` with its intended purpose; if a strong match exists (high similarity and fan-in), extend or reuse it instead.
+
+```bash
+ctx similar "parse a config file into a struct"   # Embedding search (functions/methods only)
+ctx similar "retry with backoff" --keyword        # FTS5 fallback, no embeddings needed
+ctx similar "count tokens" --limit 5 --json       # Machine-readable output
+```
+
+Each hit shows the symbol, similarity score, fan-in (how many callers it already has), and a one-line doc. Requires `ctx embed` first (exits with code 2 otherwise); `--keyword` works without embeddings.
+
 ### `ctx embed`
 Generate embeddings for semantic search.
 

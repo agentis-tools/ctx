@@ -19,6 +19,7 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           # all-features covers the mcp feature (DuckDB compiles on Linux/macOS)
@@ -28,7 +29,6 @@ jobs:
             features: ""
           - os: windows-latest
             features: "--no-default-features"
-        rust: [stable]
 
     steps:
       - uses: actions/checkout@v4

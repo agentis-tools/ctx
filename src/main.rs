@@ -13,6 +13,24 @@ use ctx::exit::Outcome;
 
 /// Exit codes: 0 = clean, 1 = findings, 2 = operational error.
 fn main() -> ExitCode {
+    // The OS-provided main thread stack is too small on some platforms (notably
+    // Windows, which defaults to ~1 MiB) for this program's parsing/graph-walking
+    // call depth; run on a thread with a larger, explicit stack instead.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(run_main)
+        .expect("failed to spawn main worker thread")
+        .join()
+        .expect("main worker thread panicked")
+}
+
+fn run_main() -> ExitCode {
+    // Same rationale as the main thread above: give rayon's global pool (used by
+    // `ctx index --parallel`) an explicit stack size instead of the platform default.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .stack_size(16 * 1024 * 1024)
+        .build_global();
+
     let args = Args::parse();
 
     match run(args) {
@@ -89,6 +107,16 @@ fn run(args: Args) -> Result<Outcome> {
         }) => {
             let output = if json { "json".to_string() } else { output };
             commands::run_semantic(&query, limit, &output, openai)
+        }
+        Some(Command::Similar {
+            query,
+            limit,
+            keyword,
+            openai,
+        }) => {
+            // `similar` participates in the Outcome convention directly:
+            // Clean on success, Err (exit 2) when embeddings are missing.
+            return commands::run_similar(&query, limit, keyword, openai, json);
         }
         Some(Command::Complexity {
             threshold,
@@ -175,6 +203,13 @@ fn run(args: Args) -> Result<Outcome> {
             show_sizes,
             no_tree,
         ),
+        Some(Command::Hotspots {
+            since,
+            limit,
+            by,
+            min_churn,
+            against,
+        }) => commands::run_hotspots(&since, limit, by, min_churn, against.as_deref(), json),
         Some(Command::Check {
             rules,
             against,

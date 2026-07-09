@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::commands::hotspots::HotspotBy;
+
 /// CLI output format (with clap integration).
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
 pub enum OutputFormat {
@@ -225,6 +227,33 @@ pub enum Command {
         openai: bool,
     },
 
+    /// Find existing functions similar to a description (reuse before you write)
+    ///
+    /// Searches function and method symbols by embedding similarity and
+    /// reports a one-line doc, similarity score, and fan-in for each hit so
+    /// you can judge whether an established utility already covers the need.
+    ///
+    /// Exit codes: 0 = success (even with no matches); 2 = no embeddings
+    /// generated yet (run `ctx embed`, or use --keyword for FTS-based search
+    /// that needs no embeddings) or any other operational error.
+    Similar {
+        /// Natural language or signature-like description of the intended function
+        query: String,
+
+        /// Maximum number of results
+        #[arg(long, short, default_value = "10")]
+        limit: usize,
+
+        /// Use FTS5 keyword search instead of embeddings (works with zero
+        /// embeddings and no API key)
+        #[arg(long)]
+        keyword: bool,
+
+        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        #[arg(long)]
+        openai: bool,
+    },
+
     /// Analyze code complexity and flag high fan-out functions
     Complexity {
         /// Fan-out threshold (default: 10, flag > 50 as critical)
@@ -413,6 +442,50 @@ pub enum Command {
         /// Disable project tree in output
         #[arg(long)]
         no_tree: bool,
+    },
+
+    /// Rank files by combined git churn and code complexity (hotspots)
+    ///
+    /// A hotspot is code that is both structurally complex and frequently
+    /// changed -- usually the highest-leverage refactoring target. Requires a
+    /// git repository and a built index (run `ctx index` first).
+    #[command(after_help = r#"SCORING:
+    score = normalized_churn x normalized_complexity, where both factors are
+    min-max normalized to [0, 1] over the analyzed set (indexed files with at
+    least --min-churn commits since --since). If all values are equal, they
+    all normalize to 1.0. Raw commit and complexity counts are reported
+    alongside the score.
+
+APPROXIMATIONS (v1):
+    - With --by symbol, a symbol's churn is approximated by its FILE's commit
+      count; per-symbol git history is not tracked yet.
+    - Churn is collected with `git log --no-renames`, so renaming a file
+      resets its commit count.
+
+EXIT CODES:
+    0    success (informational command; hotspots never affect the exit code)
+    2    operational error (not a git repository, missing index, bad ref)
+"#)]
+    Hotspots {
+        /// How far back to count commits (git --since date spec)
+        #[arg(long, default_value = "6 months ago")]
+        since: String,
+
+        /// Maximum number of entries to show
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Rank by file or by symbol (symbol churn is approximated by its file's churn)
+        #[arg(long, value_enum, default_value_t = HotspotBy::File)]
+        by: HotspotBy,
+
+        /// Minimum number of commits for a file to be analyzed
+        #[arg(long, default_value = "2")]
+        min_churn: u32,
+
+        /// Only analyze files changed relative to this git ref (e.g. main)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
     },
 
     /// Generate code quality audit report

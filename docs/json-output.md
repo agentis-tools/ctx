@@ -111,6 +111,35 @@ Note: `query.graph` and `query.impact` nodes come from graph traversal, which do
 
 If no embeddings have been generated yet, `results` is empty and a hint is printed to stderr.
 
+### `similar`
+
+`ctx similar <QUERY> [--limit N] [--keyword] [--openai] --json`
+
+Finds function/method symbols similar to a natural-language (or signature-like) description, so you can reuse an existing utility instead of writing a new one.
+
+```json
+{
+  "query": "count tokens in a string",
+  "mode": "semantic",
+  "results": [
+    {
+      "symbol": { "name": "count_tokens", "qualified_name": null, "kind": "function", "file": "src/tokens.rs", "line_start": 41, "line_end": 60 },
+      "score": 0.83,
+      "fan_in": 12,
+      "brief": "Count tokens using the configured encoding."
+    }
+  ]
+}
+```
+
+- `mode` is `"semantic"` (embedding search, the default) or `"keyword"` (`--keyword`, FTS5-based, needs no embeddings or API key).
+- `score` depends on the mode. In `semantic` mode it is the embedding similarity in `0.0..=1.0` (cosine similarity, or `1/(1+d)` for L2 distance when sqlite-vec is used). In `keyword` mode it is the hybrid-search relevance score: `1.0` for an exact name match, `0.9` for a prefix match, `0.7` for a contains match, or a normalized FTS5 bm25 relevance (`|rank| / (1 + |rank|)`) in `0.0..=1.0`.
+- `fan_in` is the number of resolved incoming `calls` edges — a high value signals an established utility worth reusing.
+- `brief` is the symbol's one-line doc: the brief doc comment, falling back to the first sentence of the docstring, else `""`.
+- Only `function` and `method` symbols are returned.
+
+Exit codes: running without `--keyword` when no embeddings have been generated is an operational error (exit code 2, with a hint to run `ctx embed` or use `--keyword`). Zero matches is still a success (exit 0) with an empty `results` array.
+
 ### `query.find`
 
 `ctx query find <PATTERN> [--kind K] [--file F] --json`
@@ -262,6 +291,91 @@ Disambiguation: when several symbols match the name and no `--file` filter is gi
 
 When the symbol is not found, `symbol` is `null` and the counts are `0`; when several symbols match without filters, `ambiguous` lists the candidates.
 
+### `duplicates`
+
+`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
+
+```json
+{
+  "threshold": 0.85,
+  "min_tokens": 50,
+  "against": null,
+  "skipped_languages": ["solidity"],
+  "pairs": [
+    {
+      "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
+      "b": { "name": "sum_invoices", "qualified_name": null, "kind": "function", "file": "src/invoices.rs", "line_start": 4, "line_end": 22 },
+      "similarity": 0.97,
+      "token_count_a": 64,
+      "token_count_b": 64
+    }
+  ]
+}
+```
+
+`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
+
+### `hotspots`
+
+`ctx hotspots [--since S] [--limit N] [--by file|symbol] [--min-churn N] [--against REF] --json`
+
+Ranks indexed files (or symbols) by `score = normalized_churn * normalized_complexity`. Both factors are min-max normalized to `0.0..=1.0` over the analyzed set — the indexed files with at least `min_churn` commits since `since` (intersected with the files changed against `--against REF` when given). If all values in the set are equal, they all normalize to `1.0`. Raw commit counts and complexity are reported alongside the score. This is an informational command: it exits 0 on success regardless of what it finds.
+
+With `--by file` (the default), each entry carries the file's top 3 most complex symbols:
+
+```json
+{
+  "since": "6 months ago",
+  "min_churn": 2,
+  "by": "file",
+  "against": null,
+  "entries": [
+    {
+      "file": "src/index/mod.rs",
+      "commits": 24,
+      "complexity": 310,
+      "fan_out": 88,
+      "score": 1.0,
+      "symbols": [
+        {
+          "symbol": { "name": "parse_file", "qualified_name": "Indexer::parse_file", "kind": "function", "file": "src/index/mod.rs", "line_start": 120, "line_end": 158 },
+          "complexity": 42
+        }
+      ]
+    }
+  ]
+}
+```
+
+With `--by symbol`, each entry is a function or method and carries a `symbol` SymbolRef instead of `symbols`:
+
+```json
+{
+  "since": "6 months ago",
+  "min_churn": 2,
+  "by": "symbol",
+  "against": null,
+  "entries": [
+    {
+      "symbol": { "name": "parse_file", "qualified_name": "Indexer::parse_file", "kind": "function", "file": "src/index/mod.rs", "line_start": 120, "line_end": 158 },
+      "file": "src/index/mod.rs",
+      "commits": 24,
+      "complexity": 42,
+      "fan_out": 15,
+      "score": 1.0
+    }
+  ]
+}
+```
+
+Entries are ordered deterministically: score desc, raw commits desc, complexity desc, file path asc (with symbol id asc as the final `--by symbol` tiebreak).
+
+Known v1 approximations:
+
+- With `--by symbol`, a symbol's churn is approximated by its **file's** commit count; per-symbol git history is not tracked yet.
+- Churn is collected with `git log --no-renames`, so renaming a file resets its commit count.
+- Only files present in the index are reported; churned files that are not indexed (e.g. unsupported languages) never appear.
+
 ### `check`
 
 `ctx check [--rules PATH] [--against REF] --json`
@@ -326,30 +440,6 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 ```
 
 `files` is the number of indexed files matching the layer's globs. `--list` always exits 0.
-
-### `duplicates`
-
-`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
-
-```json
-{
-  "threshold": 0.85,
-  "min_tokens": 50,
-  "against": null,
-  "skipped_languages": ["solidity"],
-  "pairs": [
-    {
-      "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
-      "b": { "name": "sum_invoices", "qualified_name": null, "kind": "function", "file": "src/invoices.rs", "line_start": 4, "line_end": 22 },
-      "similarity": 0.97,
-      "token_count_a": 64,
-      "token_count_b": 64
-    }
-  ]
-}
-```
-
-`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
 
 ### `score`
 

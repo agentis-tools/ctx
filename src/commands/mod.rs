@@ -10,11 +10,13 @@ pub mod diff_cmd;
 pub mod duplicates;
 pub mod embed;
 pub mod graph;
+pub mod hotspots;
 pub mod index;
 pub mod interactive;
 pub mod query;
 pub mod score;
 pub mod search;
+pub mod similar;
 pub mod smart_cmd;
 pub mod symbol;
 
@@ -25,6 +27,7 @@ pub use diff_cmd::{run_diff, run_review};
 pub use duplicates::run_duplicates;
 pub use embed::{run_embed, run_embed_watch, run_semantic};
 pub use graph::run_graph;
+pub use hotspots::run_hotspots;
 pub use index::{run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
@@ -32,6 +35,7 @@ pub use interactive::run_shell;
 pub use query::run_query;
 pub use score::run_score;
 pub use search::run_search;
+pub use similar::run_similar;
 pub use smart_cmd::run_smart;
 pub use symbol::{run_explain, run_source};
 

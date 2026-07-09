@@ -50,6 +50,18 @@ impl GitRepo {
         self.commit_all(msg);
     }
 
+    /// Stage everything and commit with a fixed author/committer date.
+    ///
+    /// `date` is any format git accepts for `GIT_AUTHOR_DATE`, e.g.
+    /// `"2020-01-01T12:00:00 +0000"`. Useful for testing `--since` filters.
+    pub fn commit_all_with_date(&self, msg: &str, date: &str) {
+        self.git(&["add", "-A"]);
+        self.git_with_env(
+            &["commit", "-q", "--no-gpg-sign", "-m", msg],
+            &[("GIT_AUTHOR_DATE", date), ("GIT_COMMITTER_DATE", date)],
+        );
+    }
+
     /// Create and switch to a new branch.
     pub fn branch(&self, name: &str) {
         self.git(&["checkout", "-q", "-b", name]);
@@ -57,8 +69,14 @@ impl GitRepo {
 
     /// Run a git command in the repo root, panicking on failure.
     fn git(&self, args: &[&str]) {
+        self.git_with_env(args, &[]);
+    }
+
+    /// Run a git command with extra environment variables, panicking on failure.
+    fn git_with_env(&self, args: &[&str], envs: &[(&str, &str)]) {
         let output = Command::new("git")
             .args(args)
+            .envs(envs.iter().map(|(k, v)| (k.to_string(), v.to_string())))
             .current_dir(&self.root)
             .output()
             .expect("failed to spawn git");
