@@ -634,21 +634,18 @@ fn compress_source(content: &str) -> Vec<u8> {
 }
 
 /// Open the database for a project.
-pub fn open_database(root: &Path) -> io::Result<Database> {
+pub fn open_database(root: &Path) -> crate::error::Result<Database> {
     let ctx_dir = root.join(CTX_DIR);
     let db_path = ctx_dir.join(DB_FILE);
 
     if !db_path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "Database not found. Run 'ctx index' first.\nExpected: {}",
-                db_path.display()
-            ),
-        ));
+        return Err(crate::error::CtxError::IndexNotFound(format!(
+            "run 'ctx index' first (expected {})",
+            db_path.display()
+        )));
     }
 
-    Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))
+    Database::open(&db_path)
 }
 
 /// Watch mode for automatic reindexing.
