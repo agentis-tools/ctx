@@ -21,8 +21,9 @@ jobs:
     strategy:
       matrix:
         include:
+          # all-features covers the mcp feature (DuckDB compiles on Linux/macOS)
           - os: ubuntu-latest
-            features: ""
+            features: "--all-features"
           - os: macos-latest
             features: ""
           - os: windows-latest
