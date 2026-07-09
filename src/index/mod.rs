@@ -351,76 +351,20 @@ impl Indexer {
             })
             .collect();
 
-        // Store parsed files
+        // Store parsed files (single funnel shared with the serial path)
         for parsed in &parsed_files {
-            let file_record = FileRecord {
-                path: parsed.rel_path.clone(),
-                content_hash: parsed.hash.clone(),
-                size_bytes: parsed.content.len() as i64,
-                language: Some(parsed.parse_result.language.clone()),
-                last_indexed: 0,
-            };
-
-            // Store file and delete existing symbols
-            if let Err(e) = self.db.upsert_file(&file_record, Some(&parsed.compressed)) {
+            if let Err(e) = self.store_file_impl(
+                &parsed.rel_path,
+                &parsed.content,
+                &parsed.hash,
+                &parsed.compressed,
+                &parsed.parse_result,
+            ) {
                 if self.verbose {
-                    eprintln!("Warning: failed to store file {}: {}", parsed.rel_path, e);
+                    eprintln!("Warning: failed to store {}: {}", parsed.rel_path, e);
                 }
                 result.files_failed += 1;
                 continue;
-            }
-
-            if let Err(e) = self.db.delete_symbols_for_file(&parsed.rel_path) {
-                if self.verbose {
-                    eprintln!(
-                        "Warning: failed to clear symbols for {}: {}",
-                        parsed.rel_path, e
-                    );
-                }
-                result.files_failed += 1;
-                continue;
-            }
-
-            // Store symbols and build ID mapping
-            let id_map = match self.store_symbols(&parsed.rel_path, &parsed.parse_result.symbols) {
-                Ok(map) => map,
-                Err(e) => {
-                    if self.verbose {
-                        eprintln!(
-                            "Warning: failed to store symbols for {}: {}",
-                            parsed.rel_path, e
-                        );
-                    }
-                    result.files_failed += 1;
-                    continue;
-                }
-            };
-
-            // Store edges
-            if let Err(e) = self.store_edges(&parsed.rel_path, &parsed.parse_result.edges, &id_map)
-            {
-                if self.verbose {
-                    eprintln!(
-                        "Warning: failed to store edges for {}: {}",
-                        parsed.rel_path, e
-                    );
-                }
-                result.files_failed += 1;
-                continue;
-            }
-
-            // Store module info
-            if let Some(ref module) = parsed.parse_result.module {
-                let mut m = module.clone();
-                m.file_path = parsed.rel_path.clone();
-                if let Err(e) = self.db.upsert_module(&m) {
-                    if self.verbose {
-                        eprintln!(
-                            "Warning: failed to store module for {}: {}",
-                            parsed.rel_path, e
-                        );
-                    }
-                }
             }
 
             result.files_indexed += 1;
@@ -507,6 +451,22 @@ impl Indexer {
         parse_result: &crate::db::ParseResult,
     ) -> io::Result<()> {
         let compressed = compress_source(content);
+        self.store_file_impl(rel_path, content, hash, &compressed, parse_result)
+    }
+
+    /// Store a parsed file, reusing an already-compressed source blob.
+    ///
+    /// This is the single funnel for the serial, parallel, and watch
+    /// indexing paths, so per-file bookkeeping (symbols, edges, modules,
+    /// fingerprints) stays consistent between them.
+    fn store_file_impl(
+        &self,
+        rel_path: &str,
+        content: &str,
+        hash: &str,
+        compressed: &[u8],
+        parse_result: &crate::db::ParseResult,
+    ) -> io::Result<()> {
         let file_record = FileRecord {
             path: rel_path.to_string(),
             content_hash: hash.to_string(),
@@ -517,7 +477,7 @@ impl Indexer {
 
         // Store file FIRST (before symbols, due to foreign key constraint)
         self.db
-            .upsert_file(&file_record, Some(&compressed))
+            .upsert_file(&file_record, Some(compressed))
             .map_err(db_error)?;
         self.db
             .delete_symbols_for_file(rel_path)
@@ -534,6 +494,28 @@ impl Indexer {
             let mut m = module.clone();
             m.file_path = rel_path.to_string();
             self.db.upsert_module(&m).map_err(db_error)?;
+        }
+
+        // Compute and store MinHash fingerprints for this file's
+        // function/method symbols (incremental: only changed files reach
+        // store_file, and delete_symbols_for_file cascaded old rows away).
+        let lang = crate::parser::Language::from_path(Path::new(rel_path));
+        let fingerprints = crate::fingerprint::file_fingerprints(
+            lang,
+            content,
+            rel_path,
+            &parse_result.symbols,
+            &id_map,
+        );
+        self.db
+            .insert_fingerprints_batch(&fingerprints)
+            .map_err(db_error)?;
+        if self.verbose {
+            eprintln!(
+                "Fingerprinted {} functions in {}",
+                fingerprints.len(),
+                rel_path
+            );
         }
 
         Ok(())
@@ -859,5 +841,190 @@ fn helper() -> i32 {
         let stats = indexer.database().get_stats().unwrap();
         assert_eq!(stats.files, 1);
         assert!(stats.symbols >= 2);
+    }
+
+    /// A function with > 50 normalized tokens.
+    const DUPE_A: &str = r#"
+pub fn process_orders(items: &[i64]) -> i64 {
+    let mut total = 0;
+    for item in items {
+        if *item > 10 {
+            total += *item * 2;
+        } else {
+            total += *item + 1;
+        }
+    }
+    println!("processed the batch: {}", total);
+    total
+}
+"#;
+
+    /// A structural copy of [`DUPE_A`] with every identifier renamed and
+    /// every literal (numbers and the string) changed.
+    const DUPE_B: &str = r#"
+pub fn sum_invoices(entries: &[i64]) -> i64 {
+    let mut acc = 0;
+    for entry in entries {
+        if *entry > 99 {
+            acc += *entry * 7;
+        } else {
+            acc += *entry + 3;
+        }
+    }
+    println!("done with invoices: {}", acc);
+    acc
+}
+"#;
+
+    /// A structurally unrelated function, also > 50 tokens.
+    const UNRELATED: &str = r#"
+pub fn render_table(headers: &[String], widths: &[usize]) -> String {
+    let mut out = String::new();
+    for (header, width) in headers.iter().zip(widths.iter()) {
+        out.push('|');
+        out.push_str(header);
+        while out.len() < *width {
+            out.push(' ');
+        }
+    }
+    out.push('\n');
+    for width in widths {
+        out.push_str(&"-".repeat(*width));
+        out.push('+');
+    }
+    out
+}
+"#;
+
+    fn write_fixture(root: &std::path::Path) {
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.rs"), DUPE_A).unwrap();
+        fs::write(src.join("b.rs"), DUPE_B).unwrap();
+        fs::write(src.join("c.rs"), UNRELATED).unwrap();
+    }
+
+    #[test]
+    fn test_near_duplicates_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        write_fixture(temp.path());
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        indexer.index().unwrap();
+
+        // Renamed variables + different string literals are still detected
+        // at the default threshold; the unrelated function is not.
+        let pairs =
+            crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 50, None).unwrap();
+        assert_eq!(pairs.len(), 1, "expected exactly the renamed-copy pair");
+        let pair = &pairs[0];
+        let names = [pair.a.name.as_str(), pair.b.name.as_str()];
+        assert!(names.contains(&"process_orders"), "names: {:?}", names);
+        assert!(names.contains(&"sum_invoices"), "names: {:?}", names);
+        assert!(pair.similarity >= 0.85);
+        assert!(pair.token_count_a >= 50);
+        assert!(pair.token_count_b >= 50);
+        // Pairs are canonical: no self-pairs, endpoints ordered by id.
+        assert!(pair.a.id < pair.b.id);
+
+        // --against filter: pair survives when one endpoint changed...
+        let changed: std::collections::HashSet<String> =
+            std::iter::once("src/b.rs".to_string()).collect();
+        let filtered =
+            crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 50, Some(&changed))
+                .unwrap();
+        assert_eq!(filtered.len(), 1);
+
+        // ...and is dropped when neither endpoint changed.
+        let unrelated_change: std::collections::HashSet<String> =
+            std::iter::once("src/c.rs".to_string()).collect();
+        let filtered = crate::fingerprint::find_near_duplicates(
+            indexer.database(),
+            0.85,
+            50,
+            Some(&unrelated_change),
+        )
+        .unwrap();
+        assert!(filtered.is_empty());
+
+        // min-tokens above the fixture size filters everything out.
+        let none = crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 10_000, None)
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn test_parallel_indexing_also_fingerprints() {
+        let temp = TempDir::new().unwrap();
+        write_fixture(temp.path());
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        indexer.index_parallel().unwrap();
+
+        let fingerprints = indexer.database().get_fingerprints(0).unwrap();
+        assert_eq!(fingerprints.len(), 3, "one fingerprint per function");
+    }
+
+    #[test]
+    fn test_incremental_reindex_preserves_untouched_fingerprints() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_fixture(root);
+
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        indexer.index().unwrap();
+
+        let before = indexer.database().get_fingerprints(0).unwrap();
+        let b_before: Vec<_> = before
+            .iter()
+            .filter(|f| f.file_path == "src/b.rs")
+            .cloned()
+            .collect();
+        assert!(!b_before.is_empty());
+
+        // Modify only a.rs; the incremental pass must re-fingerprint just
+        // that file and leave b.rs's fingerprint BLOBs byte-identical.
+        fs::write(
+            root.join("src/a.rs"),
+            DUPE_A.replace("process_orders", "process_orders_v2"),
+        )
+        .unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_indexed, 1, "only the edited file re-indexes");
+
+        let after = indexer.database().get_fingerprints(0).unwrap();
+        let b_after: Vec<_> = after
+            .iter()
+            .filter(|f| f.file_path == "src/b.rs")
+            .cloned()
+            .collect();
+        assert_eq!(
+            b_before, b_after,
+            "untouched fingerprints must be byte-identical"
+        );
+        assert!(after
+            .iter()
+            .any(|f| f.symbol_id.contains("process_orders_v2")));
+        assert!(!after
+            .iter()
+            .any(|f| f.symbol_id.contains("process_orders@")));
+    }
+
+    #[test]
+    fn test_solidity_files_produce_no_fingerprints() {
+        let temp = TempDir::new().unwrap();
+        fs::write(
+            temp.path().join("Token.sol"),
+            "pragma solidity ^0.8.0;\ncontract Token {\n    function transfer(address to, uint256 amount) public returns (bool) {\n        return amount > 0;\n    }\n}\n",
+        )
+        .unwrap();
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_indexed, 1);
+
+        // Solidity has no tree-sitter grammar: indexed, but zero
+        // fingerprint rows and no error.
+        assert!(indexer.database().get_fingerprints(0).unwrap().is_empty());
     }
 }

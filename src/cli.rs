@@ -240,19 +240,37 @@ pub enum Command {
         output: String,
     },
 
-    /// Detect duplicate or similar code blocks
+    /// Detect structurally similar functions (MinHash near-duplicate search)
+    ///
+    /// Functions are compared by the Jaccard similarity of their normalized
+    /// token shingles (identifiers -> ID, literals -> LIT, comments dropped),
+    /// so renamed variables and changed literals still match. Fingerprints
+    /// are built during `ctx index`; reindex before running this command.
+    /// Solidity functions are skipped (no tree-sitter grammar).
+    ///
+    /// Breaking change: this replaces the old line-based detector and its
+    /// percent/line-count flags.
     Duplicates {
-        /// Minimum similarity percentage (0-100)
-        #[arg(long, default_value = "80")]
-        similarity: u32,
+        /// Jaccard similarity threshold (0.0-1.0) over normalized token
+        /// shingles. Breaking change from the old percent-based, line-oriented
+        /// threshold: 0.85 means 85% of 5-token shingles are shared, not that
+        /// 85% of lines match. Values below 0.5 are clamped to 0.5.
+        #[arg(long, default_value_t = 0.85)]
+        threshold: f64,
 
-        /// Minimum lines for a code block to be considered
-        #[arg(long, default_value = "5")]
-        min_lines: u32,
+        /// Ignore functions with fewer than N normalized tokens
+        #[arg(long, default_value_t = 50)]
+        min_tokens: i64,
 
-        /// Output format (table, json)
-        #[arg(long, default_value = "table")]
-        output: String,
+        /// Only report pairs where at least one function is in a file
+        /// changed relative to this git reference (e.g. `main`)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
+
+        /// Exit with code 1 when any near-duplicate pair is reported
+        /// (default: informational, exit 0)
+        #[arg(long)]
+        fail_on_found: bool,
     },
 
     /// Generate a dependency graph visualization

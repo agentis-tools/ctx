@@ -39,6 +39,7 @@ pub mod db;
 pub mod embeddings;
 pub mod error;
 pub mod exit;
+pub mod fingerprint;
 pub mod index;
 pub mod json;
 pub mod parser;

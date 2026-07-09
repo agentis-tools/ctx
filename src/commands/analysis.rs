@@ -1,6 +1,7 @@
 //! Code analysis commands.
 //!
-//! Handles complexity analysis, duplicate detection, and code audits.
+//! Handles complexity analysis and code audits. Near-duplicate detection
+//! lives in [`crate::commands::duplicates`].
 
 use std::env;
 
@@ -92,68 +93,6 @@ pub fn run_complexity(threshold: i64, warnings_only: bool, output: &str) -> Resu
                 critical, high
             );
         }
-    }
-
-    Ok(())
-}
-
-/// Detect duplicate or similar code blocks.
-pub fn run_duplicates(similarity_threshold: u32, min_lines: u32, output: &str) -> Result<()> {
-    let root = env::current_dir()?;
-    let db = index::open_database(&root)?;
-
-    let duplicates = db.find_duplicates(similarity_threshold, min_lines)?;
-
-    if duplicates.is_empty() {
-        println!(
-            "No duplicate code blocks found (threshold: {}%, min lines: {}).",
-            similarity_threshold, min_lines
-        );
-        return Ok(());
-    }
-
-    if output == "json" {
-        let json_results: Vec<_> = duplicates
-            .iter()
-            .map(|d| {
-                serde_json::json!({
-                    "symbol1": {
-                        "name": d.name1,
-                        "file": d.file1,
-                        "line": d.line1,
-                    },
-                    "symbol2": {
-                        "name": d.name2,
-                        "file": d.file2,
-                        "line": d.line2,
-                    },
-                    "similarity": d.similarity,
-                    "lines": d.lines,
-                    "hash": d.hash,
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&json_results)?);
-    } else {
-        println!(
-            "Duplicate Code Detection (similarity >= {}%, min {} lines)",
-            similarity_threshold, min_lines
-        );
-        println!("{}", "=".repeat(100));
-
-        for (i, dup) in duplicates.iter().enumerate() {
-            println!(
-                "\n{}. Similarity: {:.1}% ({} lines)",
-                i + 1,
-                dup.similarity,
-                dup.lines
-            );
-            println!("   {} ({}:{})", dup.name1, dup.file1, dup.line1);
-            println!("   {} ({}:{})", dup.name2, dup.file2, dup.line2);
-        }
-
-        println!("{}", "-".repeat(100));
-        println!("Found {} duplicate pairs", duplicates.len());
     }
 
     Ok(())
