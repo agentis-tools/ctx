@@ -111,6 +111,35 @@ Note: `query.graph` and `query.impact` nodes come from graph traversal, which do
 
 If no embeddings have been generated yet, `results` is empty and a hint is printed to stderr.
 
+### `similar`
+
+`ctx similar <QUERY> [--limit N] [--keyword] [--openai] --json`
+
+Finds function/method symbols similar to a natural-language (or signature-like) description, so you can reuse an existing utility instead of writing a new one.
+
+```json
+{
+  "query": "count tokens in a string",
+  "mode": "semantic",
+  "results": [
+    {
+      "symbol": { "name": "count_tokens", "qualified_name": null, "kind": "function", "file": "src/tokens.rs", "line_start": 41, "line_end": 60 },
+      "score": 0.83,
+      "fan_in": 12,
+      "brief": "Count tokens using the configured encoding."
+    }
+  ]
+}
+```
+
+- `mode` is `"semantic"` (embedding search, the default) or `"keyword"` (`--keyword`, FTS5-based, needs no embeddings or API key).
+- `score` depends on the mode. In `semantic` mode it is the embedding similarity in `0.0..=1.0` (cosine similarity, or `1/(1+d)` for L2 distance when sqlite-vec is used). In `keyword` mode it is the hybrid-search relevance score: `1.0` for an exact name match, `0.9` for a prefix match, `0.7` for a contains match, or a normalized FTS5 bm25 relevance (`|rank| / (1 + |rank|)`) in `0.0..=1.0`.
+- `fan_in` is the number of resolved incoming `calls` edges — a high value signals an established utility worth reusing.
+- `brief` is the symbol's one-line doc: the brief doc comment, falling back to the first sentence of the docstring, else `""`.
+- Only `function` and `method` symbols are returned.
+
+Exit codes: running without `--keyword` when no embeddings have been generated is an operational error (exit code 2, with a hint to run `ctx embed` or use `--keyword`). Zero matches is still a success (exit 0) with an empty `results` array.
+
 ### `query.find`
 
 `ctx query find <PATTERN> [--kind K] [--file F] --json`
