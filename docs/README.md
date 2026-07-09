@@ -90,7 +90,7 @@ ctx query impact validateInput
 
 # Code quality analysis
 ctx complexity --warnings-only   # Find high fan-out functions
-ctx duplicates                   # Find duplicate code
+ctx duplicates                   # Find near-duplicate functions
 ctx graph --by-file              # Visualize file dependencies
 
 # Watch for changes and auto-reindex
@@ -139,7 +139,7 @@ Options:
 | `ctx review` | Generate context for PR review (GitHub) |
 | `ctx audit` | Run code quality analysis |
 | `ctx complexity` | Analyze code complexity and fan-out |
-| `ctx duplicates` | Detect duplicate or similar code |
+| `ctx duplicates` | Detect structurally similar functions (MinHash) |
 | `ctx graph` | Generate dependency graph visualization |
 | `ctx shell` | Interactive codebase explorer |
 | `ctx serve` | Start MCP server (requires `--features mcp`) |
@@ -218,10 +218,18 @@ Options:
 ctx duplicates [OPTIONS]
 
 Options:
-      --similarity <N>  Minimum similarity percentage [default: 80]
-      --min-lines <N>   Minimum lines for comparison [default: 5]
-      --output <FMT>    Output format: table, json [default: table]
+      --threshold <F>    Jaccard similarity threshold over normalized token
+                         shingles, 0.0-1.0 [default: 0.85]
+      --min-tokens <N>   Ignore functions with fewer normalized tokens
+                         [default: 50]
+      --against <REF>    Only report pairs touching files changed vs REF
+      --fail-on-found    Exit 1 when any near-duplicate pair is reported
 ```
+
+Functions are matched structurally (identifiers -> `ID`, literals -> `LIT`,
+comments dropped), so renamed variables and changed literals still count as
+duplicates. Solidity functions are skipped. Use the global `--json` flag for
+machine-readable output.
 
 ### Graph Visualization Options
 
@@ -373,8 +381,8 @@ ctx semantic "user authentication and login"
 # "Find functions that do too much"
 ctx complexity --warnings-only
 
-# "Find copy-pasted code"
-ctx duplicates --similarity 75
+# "Find copy-pasted code" (even with renamed variables)
+ctx duplicates --threshold 0.9
 
 # "Visualize module dependencies"
 ctx graph --by-file --output mermaid
