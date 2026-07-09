@@ -146,6 +146,50 @@ pub enum Command {
         query: QueryCommand,
     },
 
+    /// Run read-only SQL against the code index (via the stable `v1.*` views)
+    #[command(after_help = r#"EXAMPLES:
+    ctx sql "SELECT name, file, complexity FROM v1.symbols ORDER BY complexity DESC LIMIT 10"
+    ctx sql --json "SELECT kind, COUNT(*) n FROM v1.symbols GROUP BY kind"
+    ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
+    ctx sql --schema        # print the v1 schema reference and exit
+
+The query surface is the versioned `v1` schema; anything outside `v1.*` is
+internal and unstable. Access is read-only and engine-hardened.
+"#)]
+    Sql {
+        /// SQL text. If "-" or omitted while stdin is piped, read from stdin.
+        query: Option<String>,
+
+        /// Read the query from a file (mutually exclusive with the QUERY arg)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+
+        /// Output format: table, csv, or json (the global -f/--format does not
+        /// apply here; use this or --json)
+        #[arg(long = "output", default_value = "table")]
+        output: String,
+
+        /// Alias for --output json
+        #[arg(long)]
+        json: bool,
+
+        /// Cap returned rows (0 = unlimited)
+        #[arg(long, default_value = "1000")]
+        max_rows: usize,
+
+        /// Abort the query after N seconds
+        #[arg(long, default_value = "10")]
+        timeout: u64,
+
+        /// Exit 1 if the query returns >= 1 row (for gate usage)
+        #[arg(long)]
+        fail_on_rows: bool,
+
+        /// Print the public schema reference and exit
+        #[arg(long)]
+        schema: bool,
+    },
+
     /// Search for symbols using semantic or text search
     Search {
         /// Search query (symbol name or natural language)

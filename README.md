@@ -328,6 +328,37 @@ ctx query stats
 ctx query files
 ```
 
+### `ctx sql`
+Run read-only SQL against the code intelligence index through DuckDB, over a
+stable `v1` view layer (`v1.symbols`, `v1.edges`, `v1.files`, `v1.meta`). Reach
+for `ctx sql` instead of the canned `ctx query` subcommands whenever you need an
+aggregation, a join, or a custom `WHERE` condition. Query `v1.*` only — anything
+else (e.g. `code.*`) is internal and unstable. For agents and scripts, use
+`--json` with `--max-rows`. Run `ctx sql --schema` for the full column reference.
+
+```bash
+# Ten most complex symbols
+ctx sql "SELECT name, file, complexity FROM v1.symbols ORDER BY complexity DESC LIMIT 10;"
+
+# Symbol counts by kind
+ctx sql "SELECT kind, COUNT(*) AS n FROM v1.symbols GROUP BY kind ORDER BY n DESC;"
+
+# Public functions that nothing calls (dead-code candidates)
+ctx sql "SELECT name, file FROM v1.symbols WHERE kind IN ('function', 'method') AND is_public AND fan_in = 0 ORDER BY file, name;"
+```
+
+Use `--fail-on-rows` to turn a query into a gate: any returned row is a
+violation, and the command exits `1`.
+
+```bash
+# Fails (exit 1) if the query returns any row
+ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
+```
+
+Access is read-only and engine-hardened (filesystem access, extension loading,
+and file-based `ATTACH` are disabled; the index cannot be modified), so
+`Bash(ctx sql *)` is safe to add to a Claude Code allow-list.
+
 ### `ctx explain <symbol>`
 Get detailed information about a symbol including its relationships.
 
@@ -597,6 +628,7 @@ USAGE:
 COMMANDS:
     index       Build or update the code intelligence index
     query       Query the code intelligence database
+    sql         Run read-only SQL against the index (v1 schema)
     search      Search for symbols using keyword matching
     semantic    Search using embeddings (natural language)
     embed       Generate embeddings for semantic search

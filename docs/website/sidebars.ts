@@ -9,6 +9,7 @@ const sidebars: SidebarsConfig = {
     'configuration',
     'language-support',
     'architecture',
+    'sql-schema',
     {
       type: 'category',
       label: 'Commands',
@@ -16,6 +17,7 @@ const sidebars: SidebarsConfig = {
         'commands/audit',
         'commands/diff',
         'commands/smart',
+        'commands/sql',
         'commands/shell',
         'commands/serve',
       ],

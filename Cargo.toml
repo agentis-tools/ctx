@@ -92,6 +92,9 @@ notify = "6.1"
 notify-debouncer-mini = "0.4"
 dirs = "6.0.0"
 
+# Timestamps for `ctx sql` JSON envelope (generated_at, ISO-8601 UTC)
+chrono = { version = "0.4", features = ["clock"] }
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -103,6 +106,8 @@ mcp = ["rmcp", "schemars", "async-trait"]
 [dev-dependencies]
 tempfile = "3"
 tokio-test = "0.4"
+assert_cmd = "2"
+predicates = "3"
 
 [profile.release]
 lto = true
