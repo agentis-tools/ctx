@@ -884,6 +884,95 @@ impl Database {
         rows.collect()
     }
 
+    /// All resolved relationship edges whose endpoints live in different files.
+    ///
+    /// Used by `ctx check` to build the file-level dependency graph. Only
+    /// `calls`/`implements`/`extends`/`uses` edges are included (`imports`
+    /// edges are file-level and handled separately; `contains` and friends
+    /// are structural, not dependencies).
+    pub fn get_cross_file_edges(&self) -> Result<Vec<CrossFileEdge>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                s1.name, s1.qualified_name, s1.kind, s1.file_path, s1.line_start, s1.line_end,
+                s2.name, s2.qualified_name, s2.kind, s2.file_path, s2.line_start, s2.line_end,
+                e.kind, e.line
+            FROM edges e
+            JOIN symbols s1 ON e.source_id = s1.id
+            JOIN symbols s2 ON e.target_id = s2.id
+            WHERE e.target_id IS NOT NULL
+              AND s1.file_path <> s2.file_path
+              AND e.kind IN ('calls', 'implements', 'extends', 'uses')
+            ORDER BY s1.file_path, e.line, s2.file_path
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CrossFileEdge {
+                source: EdgeSymbol {
+                    name: row.get(0)?,
+                    qualified_name: row.get(1)?,
+                    kind: row.get(2)?,
+                    file_path: row.get(3)?,
+                    line_start: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    line_end: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                },
+                target: EdgeSymbol {
+                    name: row.get(6)?,
+                    qualified_name: row.get(7)?,
+                    kind: row.get(8)?,
+                    file_path: row.get(9)?,
+                    line_start: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+                    line_end: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
+                },
+                kind: row.get(12)?,
+                line: row.get(13)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Per-file imports recorded in the `modules` table.
+    ///
+    /// The `imports` column stores a JSON array of [`ImportInfo`]; rows whose
+    /// JSON fails to parse are skipped.
+    pub fn get_file_imports(&self) -> Result<Vec<(String, Vec<ImportInfo>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, imports FROM modules \
+             WHERE imports IS NOT NULL AND imports <> '' \
+             ORDER BY file_path",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let (file_path, json) = row?;
+            if let Ok(imports) = serde_json::from_str::<Vec<ImportInfo>>(&json) {
+                if !imports.is_empty() {
+                    result.push((file_path, imports));
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// File-level `imports` edges from the `edges` table.
+    ///
+    /// Some parsers (Go) record imports as edges whose `source_id` is the
+    /// importing *file path* and whose `target_name` is the import path.
+    /// Returns `(source, target_name, line)` tuples.
+    pub fn get_import_edges(&self) -> Result<Vec<(String, String, Option<i64>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source_id, target_name, line FROM edges \
+             WHERE kind = 'imports' ORDER BY source_id, line",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        rows.collect()
+    }
+
     /// Normalize an FTS5 bm25 score into a 0-1 relevance value.
     fn bm25_relevance(rank: f64) -> f64 {
         if rank.is_finite() {
@@ -1774,6 +1863,29 @@ pub struct SymbolMetrics {
     pub fan_in: i64,
     pub fan_out: i64,
     pub complexity: i64,
+}
+
+/// A resolved relationship edge whose endpoints live in different files
+/// (see [`Database::get_cross_file_edges`]).
+#[derive(Debug, Clone)]
+pub struct CrossFileEdge {
+    pub source: EdgeSymbol,
+    pub target: EdgeSymbol,
+    /// Edge kind (`calls`, `implements`, `extends`, `uses`).
+    pub kind: String,
+    /// Line in the source file where the reference occurs.
+    pub line: Option<i64>,
+}
+
+/// Lightweight symbol info attached to a [`CrossFileEdge`].
+#[derive(Debug, Clone)]
+pub struct EdgeSymbol {
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
 }
 
 /// Per-file aggregated complexity (see [`Database::file_complexity`]).

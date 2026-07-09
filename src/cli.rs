@@ -416,6 +416,59 @@ pub enum Command {
         incremental: bool,
     },
 
+    /// Check architecture rules from .ctx/rules.toml against the index
+    ///
+    /// Exit codes: 0 = no violations, 1 = at least one violation,
+    /// 2 = operational error (missing/invalid rules file, unknown or
+    /// overlapping layers, missing index, bad git ref).
+    #[command(after_help = r#"RULES FILE (.ctx/rules.toml):
+    version = 1
+
+    [layers]                                   # layer name -> globs over indexed files
+    domain         = ["src/domain/**"]
+    application    = ["src/app/**"]
+    infrastructure = ["src/infra/**", "src/db/**"]
+
+    [[rules.forbidden]]                        # `from` must not depend on `to`
+    from   = "domain"
+    to     = "infrastructure"
+    reason = "Domain layer must stay persistence-agnostic"
+
+    [[rules.allowed_dependents]]               # only `only` may depend on `layer`
+    layer = "infrastructure"                   # (files in no layer are exempt)
+    only  = ["application"]
+
+    [[rules.limit]]                            # metric thresholds
+    metric  = "fan_in"                         # fan_in | fan_out | complexity | file_symbols
+    scope   = "symbol"                         # symbol | file
+    max     = 25
+    exclude = ["src/core/**"]
+
+    [[rules.no_new_dependents]]                # frozen paths
+    paths  = ["src/legacy/**"]
+    reason = "Legacy module is frozen; do not add new callers"
+
+EXAMPLES:
+    ctx check                        # check all rules
+    ctx check --against main         # only violations touching files changed since main
+    ctx check --list                 # show parsed rules and layer sizes
+    ctx check --json                 # machine-readable output (see docs/json-output.md)
+"#)]
+    Check {
+        /// Path to the rules file (default: .ctx/rules.toml)
+        #[arg(long)]
+        rules: Option<std::path::PathBuf>,
+
+        /// Only report violations where at least one endpoint's file changed
+        /// since REF (for no_new_dependents: where the new dependent changed)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
+
+        /// Print the parsed rules and layer membership counts, then exit 0
+        #[arg(long)]
+        list: bool,
+    },
+
     /// Interactive shell for exploring codebase
     Shell {
         /// History file location

@@ -71,7 +71,9 @@ fn repo_prefix_in(dir: &Path) -> Result<String> {
     Ok(stdout.trim_end_matches(['\n', '\r']).to_string())
 }
 
-fn changed_files_against_in(dir: &Path, reference: &str) -> Result<HashSet<String>> {
+/// Dir-explicit variant of [`changed_files_against`], for commands and tests
+/// that operate on an explicit project root instead of the process cwd.
+pub fn changed_files_against_in(dir: &Path, reference: &str) -> Result<HashSet<String>> {
     if !is_git_repo_in(dir) {
         return Err(CtxError::NotGitRepo);
     }

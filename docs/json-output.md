@@ -262,6 +262,71 @@ Disambiguation: when several symbols match the name and no `--file` filter is gi
 
 When the symbol is not found, `symbol` is `null` and the counts are `0`; when several symbols match without filters, `ambiguous` lists the candidates.
 
+### `check`
+
+`ctx check [--rules PATH] [--against REF] --json`
+
+```json
+{
+  "rules_path": ".ctx/rules.toml",
+  "against": "main",
+  "summary": { "violations": 2, "rules_violated": 2 },
+  "violations": [
+    {
+      "rule": "forbidden",
+      "rule_id": "forbidden: domain -> infrastructure",
+      "reason": "Domain layer must stay persistence-agnostic",
+      "message": "src/domain/order.ts:2 -> src/infra/db.ts [calls query]",
+      "file": "src/domain/order.ts",
+      "line": 2,
+      "from": { "name": "order", "qualified_name": null, "kind": "function", "file": "src/domain/order.ts", "line_start": 2, "line_end": 2 },
+      "to": { "name": "query", "qualified_name": null, "kind": "function", "file": "src/infra/db.ts", "line_start": 1, "line_end": 1 }
+    },
+    {
+      "rule": "limit",
+      "rule_id": "limit: fan_in <= 25 (symbol)",
+      "reason": "fan_in 30 exceeds max 25",
+      "message": "src/app/hub.ts:10 (handle): fan_in 30 exceeds max 25",
+      "file": "src/app/hub.ts",
+      "line": 10,
+      "subject": { "name": "handle", "qualified_name": null, "kind": "function", "file": "src/app/hub.ts", "line_start": 10, "line_end": 42 },
+      "metric": "fan_in",
+      "scope": "symbol",
+      "value": 30,
+      "max": 25
+    }
+  ]
+}
+```
+
+One entry per violation. `rule` is one of `forbidden`, `allowed_dependents`, `limit`, or `no_new_dependents`; `rule_id` identifies the specific rule instance (violations with the same `rule_id` belong to the same rule).
+
+Dependency violations (`forbidden`, `allowed_dependents`, `no_new_dependents`) carry `from`/`to` endpoints. Symbol-level endpoints (resolved call/implements/extends/uses edges) are full SymbolRefs; file-level endpoints (resolved imports) are `{"file": ...}` objects. `limit` violations carry a `subject` endpoint plus `metric`, `scope`, `value`, and `max`. Absent optional fields (`line`, `from`, `to`, `subject`, the metric fields) are omitted rather than `null`. `against` is `null` when `--against` was not given.
+
+Exit codes follow the suite convention: 0 = no violations, 1 = at least one violation, 2 = operational error (missing/invalid rules file, unknown or overlapping layers, missing index, bad git ref).
+
+### `check.list`
+
+`ctx check --list --json`
+
+```json
+{
+  "rules_path": ".ctx/rules.toml",
+  "version": 1,
+  "layers": [
+    { "name": "domain", "patterns": ["src/domain/**"], "files": 12 }
+  ],
+  "rules": {
+    "forbidden": [ { "from": "domain", "to": "infrastructure", "reason": "Domain layer must stay persistence-agnostic" } ],
+    "allowed_dependents": [ { "layer": "infrastructure", "only": ["application"], "reason": null } ],
+    "limit": [ { "metric": "fan_in", "scope": "symbol", "max": 25, "exclude": ["src/core/**"] } ],
+    "no_new_dependents": [ { "paths": ["src/legacy/**"], "reason": "Legacy module is frozen; do not add new callers" } ]
+  }
+}
+```
+
+`files` is the number of indexed files matching the layer's globs. `--list` always exits 0.
+
 ## Legacy shapes
 
 `ctx complexity --output json`, `ctx graph --output json`, and `ctx audit --output json` still emit their old, ad-hoc JSON shapes. They will be migrated to the envelope in a future release. The old ad-hoc shapes of `search --output json` and `semantic --output json` have already been **replaced** by the envelope described above.

@@ -4,6 +4,7 @@
 //! extracted from main.rs for better organization.
 
 pub mod analysis;
+pub mod check;
 pub mod context;
 pub mod diff_cmd;
 pub mod embed;
@@ -16,6 +17,7 @@ pub mod smart_cmd;
 pub mod symbol;
 
 pub use analysis::{run_audit, run_complexity, run_duplicates};
+pub use check::run_check;
 pub use context::run_context;
 pub use diff_cmd::{run_diff, run_review};
 pub use embed::{run_embed, run_embed_watch, run_semantic};
