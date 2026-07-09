@@ -13,10 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Index schema versioning via SQLite `PRAGMA user_version`; opening an index built with an incompatible schema now fails with a clear "run `ctx index --force`" message (pre-existing indexes are stamped silently)
 - Shared complexity metrics (fan-in / fan-out / complexity) available directly from the SQLite index, mirroring the DuckDB formula
 - `ctx index --force` now also removes stale SQLite `-wal`/`-shm` sidecar files
+- Library API documentation: crate-level rustdoc with integration examples, module docs, and a "Using ctx as a Library" README section
+- docs.rs builds with all features enabled
 
 ### Changed
 - **Breaking:** exit codes now follow a three-way convention: 0 = clean, 1 = findings, 2 = operational error (errors previously exited with code 1)
 - **Breaking:** `search --output json` and `semantic --output json` now emit the new envelope instead of the old ad-hoc JSON arrays; `query graph --output json` is an alias for `--json` (`complexity`/`graph`/`audit` keep their legacy shapes for now)
+
+### Fixed
+- `mcp` feature failed to compile the binary (`use crate::mcp` resolved against the binary crate instead of the library); CI now builds `--all-features` on Linux to prevent regressions
 
 ## [0.2.1] - 2026-06-17
 

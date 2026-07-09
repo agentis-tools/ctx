@@ -116,7 +116,11 @@ Options:
       --show-sizes          Show file sizes in project tree
       --no-tree             Disable project tree in output
       --no-stream           Buffer output instead of streaming
-      --stats               Print statistics after completion
+      --stats               Print statistics (file count, size, time, token estimate)
+      --count-only          Count tokens only; do not print file contents
+      --max-tokens <N>      Omit whole files to fit a token budget (never truncates a file)
+      --encoding <ENCODING> Tokenizer encoding [default: cl100k_base]
+                            Values: cl100k_base, o200k_base, p50k_base
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -142,9 +146,14 @@ Options:
 ctx index [OPTIONS]
 
 Options:
-  -w, --watch    Watch for changes and reindex automatically
-  -v, --verbose  Show verbose output (files being indexed)
-  -f, --force    Force full reindex (clears existing database)
+  -w, --watch                Watch for changes and reindex automatically
+  -v, --verbose              Show verbose output (files being indexed)
+      --force                Force full reindex (clears existing database)
+  -j, --parallel <N>         Number of parallel indexing threads
+  -p, --pattern <PATTERN>    Only index files matching these patterns (repeatable)
+  -i, --ignore <PATTERN>     Additional ignore patterns (repeatable)
+      --no-gitignore         Disable .gitignore pattern matching
+      --no-default-ignores   Disable built-in ignore patterns
 ```
 
 ### Query Subcommands
@@ -231,7 +240,7 @@ Options:
 
 - **Fast** - Written in Rust, indexes thousands of files in seconds
 - **Smart filtering** - Respects .gitignore, excludes binaries and 170+ patterns
-- **Multi-language** - Rust, TypeScript, JavaScript, Python, Solidity
+- **Multi-language** - Rust, TypeScript, JavaScript, JSX/TSX, Python, Go, Solidity, YAML
 - **Single file database** - Everything in one portable SQLite file
 - **Incremental updates** - Only reindex what changed
 - **Watch mode** - Auto-reindex on file changes

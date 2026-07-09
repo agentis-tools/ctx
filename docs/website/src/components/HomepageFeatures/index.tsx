@@ -45,7 +45,7 @@ const FeatureList: FeatureItem[] = [
     icon: '🌐',
     description: (
       <>
-        Full support for Rust, TypeScript, JavaScript, Python, and Solidity.
+        Full support for Rust, TypeScript, JavaScript, JSX/TSX, Python, Go, Solidity, and YAML.
         Tree-sitter parsing for accurate symbol extraction and relationship tracking.
       </>
     ),

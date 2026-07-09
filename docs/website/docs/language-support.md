@@ -18,9 +18,9 @@ ctx uses tree-sitter for parsing, providing accurate symbol extraction across mu
 | JavaScript | `.js`, `.mjs`, `.cjs` | Full | Calls, Extends, Imports | Full |
 | JSX | `.jsx` | Full | Calls, Extends, Imports | Full |
 | Python | `.py`, `.pyi` | Full | Calls, Extends, Imports | Full |
+| Go | `.go` | Full | Calls, Imports | Full |
 | Solidity | `.sol` | Full | Calls | Full |
 | YAML | `.yaml`, `.yml` | File tracking only | N/A | Partial |
-| Go | `.go` | Planned | Planned | Not yet |
 
 ## Rust
 
@@ -298,6 +298,64 @@ Python docstrings (triple-quoted strings) are extracted:
 - First line -> `brief`
 - Full content -> `docstring`
 
+## Go
+
+### Extracted Symbols
+
+| Kind | Example | Notes |
+|------|---------|-------|
+| Function | `func Handle()` | Top-level functions |
+| Method | `func (s *Server) Start()` | Methods with receivers |
+| Struct | `type User struct {}` | Struct type definitions |
+| Interface | `type Reader interface {}` | Interface type definitions |
+| Const | `const MaxRetries = 3` | Constants |
+
+### Visibility Detection
+
+- Exported identifiers (capitalized first letter) -> public
+- Unexported identifiers (lowercase first letter) -> private
+
+### Example
+
+```go
+package auth
+
+// User represents an account in the system.
+type User struct {
+    ID   uint64
+    Name string
+}
+
+// Authenticator verifies credentials.
+type Authenticator interface {
+    Verify(token string) (*User, error)
+}
+
+// NewUser creates a user with a generated ID.
+func NewUser(name string) *User {
+    return &User{ID: generateID(), Name: name}
+}
+
+func (u *User) validate() bool {
+    return len(u.Name) > 0
+}
+```
+
+**Extracted symbols:**
+- `User` (struct, public)
+- `Authenticator` (interface, public)
+- `NewUser` (function, public)
+- `User.validate` (method, private)
+
+**Extracted edges:**
+- `NewUser` calls `generateID`
+
+### Documentation Extraction
+
+Go doc comments (`//` immediately preceding a declaration) are extracted:
+- First line becomes the `brief` field
+- Full comment becomes `docstring`
+
 ## Solidity
 
 ### Extracted Symbols
@@ -512,7 +570,7 @@ match extension {
     "py" | "pyi" => Python,
     "sol" => Solidity,
     "yaml" | "yml" => Yaml,
-    "go" => Go,  // Planned
+    "go" => Go,
     _ => Unknown,
 }
 ```

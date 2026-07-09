@@ -1,13 +1,38 @@
+---
+id: getting-started
+title: Getting Started
+sidebar_position: 2
+---
+
 # Getting Started
 
 This guide walks you through installing ctx and using it to generate context for LLMs and build a searchable code intelligence index.
 
 ## Installation
 
-### From Source (Recommended)
+### Using Cargo Install (Recommended)
+
+The crate is published as `agentis-ctx`, but it installs a binary named `ctx`:
 
 ```bash
-git clone https://github.com/yourusername/ctx
+# From crates.io (installs the `ctx` binary)
+cargo install agentis-ctx
+
+# Or from a local checkout
+cargo install --path .
+```
+
+On Windows without the MSVC C++ build tools, disable the default DuckDB analytics
+feature (call graphs, impact analysis, and complexity then return empty results):
+
+```bash
+cargo install agentis-ctx --no-default-features
+```
+
+### From Source
+
+```bash
+git clone https://github.com/saldestechnology/ctx
 cd ctx
 cargo build --release
 
@@ -17,21 +42,17 @@ cp target/release/ctx /usr/local/bin/
 export PATH="$PATH:$(pwd)/target/release"
 ```
 
-### Using Cargo Install
+To build with the MCP server (`ctx serve --mcp`) enabled:
 
 ```bash
-# From crates.io (installs the ctx binary)
-cargo install agentis-ctx
-
-# Or from a local checkout
-cargo install --path .
+cargo build --release --features mcp
 ```
 
 ### Verify Installation
 
 ```bash
 ctx --version
-# ctx 0.2.0
+# ctx 0.2.1
 ```
 
 ## Part 1: Context Generation
@@ -94,14 +115,37 @@ ctx --format md src/       # alias
 
 # Plain text - minimal formatting
 ctx --format plain src/
+
+# JSON - structured output for tooling
+ctx --format json src/
 ```
 
 ### View Statistics
 
 ```bash
 ctx --stats src/
-# Generated context: 42 files, 156.3 KB in 23ms
+# Generated context: 42 files, 156.3 KB, ~38,900 tokens in 23ms
 ```
+
+`--stats` reports the file count, total size, elapsed time, and a token estimate.
+
+### Count Tokens and Budget Context
+
+New in the 0.2.x line, ctx can count tokens and fit context to a budget:
+
+```bash
+# Count tokens only, without printing file contents
+ctx --count-only src/
+
+# Omit whole files to stay within a token budget
+# (files are dropped as a unit; they are never truncated)
+ctx --max-tokens 8000 src/
+
+# Choose the tokenizer encoding (default: cl100k_base)
+ctx --encoding o200k_base --count-only src/
+```
+
+Available encodings are `cl100k_base` (default), `o200k_base`, and `p50k_base`.
 
 ## Part 2: Code Intelligence
 
@@ -133,6 +177,14 @@ Codebase statistics:
   Enums:     11
   Traits:    3
   Edges:     2664
+```
+
+The indexer accepts include patterns (`-p/--pattern`), ignore patterns
+(`-i/--ignore`), and a parallelism setting (`-j/--parallel`):
+
+```bash
+# Only index TypeScript sources, using 8 threads
+ctx index -p "src/**/*.ts" -j 8
 ```
 
 ### Search Your Code
@@ -221,6 +273,8 @@ dot -Tpng graph.dot -o graph.png
 # JSON format (for programmatic use)
 ctx query graph main --depth 3 --output json
 ```
+
+`ctx query graph` accepts `--output <text|json|dot>` and defaults to a depth of 5.
 
 ### Get Detailed Symbol Information
 
@@ -404,6 +458,118 @@ ctx automatically excludes:
 ctx -i "*.test.ts" -i "fixtures/" src/
 ```
 
+## Part 6: Smart Context Selection
+
+Let ctx intelligently select files based on your task:
+
+```bash
+# Describe what you're working on
+ctx smart "add user authentication" --max-tokens 8000
+
+# Preview what would be selected
+ctx smart "fix login bug" --dry-run
+
+# See why each file was selected
+ctx smart "refactor parser" --explain
+```
+
+Smart selection requires an index (`ctx index`) and embeddings (`ctx embed`).
+
+## Part 7: Diff-Aware Context
+
+Generate context focused on code changes:
+
+```bash
+# Changes since the previous commit (default revision: HEAD~1)
+ctx diff
+
+# Changes vs main branch
+ctx diff main
+
+# Only staged changes
+ctx diff --staged
+
+# Include change summary
+ctx diff --summary
+```
+
+## Part 8: PR Review Context
+
+Generate context for GitHub pull request review:
+
+```bash
+# Review PR #123
+ctx review 123
+
+# Include PR comments
+ctx review 123 --include-comments
+
+# With change summary
+ctx review 123 --summary
+```
+
+**Note:** Requires GitHub CLI (`gh`) to be installed and authenticated.
+
+## Part 9: Code Quality Audit
+
+Run automated quality analysis:
+
+```bash
+# Full quality report
+ctx audit
+
+# Quality gate for CI
+ctx audit --min-score 7.0
+
+# JSON output for automation
+ctx audit --output json
+```
+
+## Part 10: Interactive Shell
+
+Explore your codebase interactively:
+
+```bash
+ctx shell
+```
+
+Shell commands:
+- `find <pattern>` - Find symbols
+- `search <query>` - Hybrid search
+- `callers <fn>` - Show callers
+- `callees <fn>` - Show callees
+- `source <symbol>` - Show source
+- `explain <symbol>` - Explain symbol
+- `impact <symbol>` - Impact analysis
+- `stats` - Codebase statistics
+- `help` - Show all commands
+
+## Part 11: MCP Server (Claude Desktop)
+
+Integrate ctx with Claude Desktop. The MCP server is only available when ctx is
+built with the `mcp` feature:
+
+```bash
+# Build with MCP support
+cargo build --release --features mcp
+
+# Run MCP server
+ctx serve --mcp
+```
+
+Configure Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "ctx",
+      "args": ["serve", "--mcp"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
 ## Common Workflows
 
 ### Workflow 1: Quick LLM Context
@@ -457,6 +623,39 @@ ctx duplicates --similarity 75
 # Understand file dependencies
 ctx graph --by-file --output mermaid
 ```
+
+### Workflow 5: Smart Context for Tasks
+
+```bash
+# Let ctx select relevant files for your task
+ctx smart "add caching to the database layer" --max-tokens 10000 | pbcopy
+
+# Preview selection first
+ctx smart "fix authentication bug" --dry-run --explain
+```
+
+### Workflow 6: PR Review
+
+```bash
+# Get context for reviewing a PR
+ctx review 42 --summary --include-comments
+
+# Focus on just the changed files
+ctx review 42 --changes-only
+```
+
+### Workflow 7: CI/CD Integration
+
+```bash
+# Quality gate in CI pipeline
+ctx audit --min-score 7.0 --output json > quality-report.json
+
+# Pre-commit hook
+ctx audit --min-score 7.0 || exit 1
+```
+
+> **Note:** `ctx audit --incremental` (auditing only changed files) is not yet
+> implemented; the audit always analyzes the full indexed codebase.
 
 ## Next Steps
 
