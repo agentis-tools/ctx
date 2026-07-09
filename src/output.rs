@@ -1,3 +1,11 @@
+//! Context generation from discovered files.
+//!
+//! Turns a set of [`FileEntry`] values (from [`crate::walker`]) into final
+//! formatted output: [`generate_context`] builds the full result in memory
+//! and returns a [`ContextResult`] with size/count stats, while
+//! [`stream_context`] writes files to a writer as they are read, for
+//! pipe-friendly streaming.
+
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;

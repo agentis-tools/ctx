@@ -73,6 +73,8 @@ src/
 │   ├── rust.rs       # Rust parser (tree-sitter-rust)
 │   ├── typescript.rs # TS/JS parser (tree-sitter-typescript)
 │   ├── python.rs     # Python parser (tree-sitter-python)
+│   ├── go.rs         # Go parser (tree-sitter-go)
+│   ├── yaml.rs       # YAML parser (tree-sitter-yaml)
 │   └── solidity.rs   # Solidity parser (tree-sitter-solidity)
 ├── db/
 │   ├── mod.rs        # Database module exports
@@ -272,6 +274,8 @@ for match_ in cursor.matches(&query, tree.root_node(), source.as_bytes()) {
 | TypeScript | `tree-sitter-typescript` | Official |
 | JavaScript | `tree-sitter-javascript` | Official |
 | Python | `tree-sitter-python` | Official |
+| Go | `tree-sitter-go` | Official |
+| YAML | `tree-sitter-yaml` | Community |
 | Solidity | `tree-sitter-solidity` | Community |
 
 ## File Walking

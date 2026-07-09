@@ -16,11 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ctx duplicates --against <REF>` limits results to pairs where at least one function is in a file changed relative to a git reference
 - `ctx duplicates --fail-on-found` exits with code 1 when any near-duplicate pair is reported (default remains informational, exit 0)
 - `ctx duplicates` supports the global `--json` envelope (`data.pairs` with SymbolRefs, similarity, token counts, plus `skipped_languages`)
+- Library API documentation: crate-level rustdoc with integration examples, module docs, and a "Using ctx as a Library" README section
+- docs.rs builds with all features enabled
 
 ### Changed
 - **Breaking:** exit codes now follow a three-way convention: 0 = clean, 1 = findings, 2 = operational error (errors previously exited with code 1)
 - **Breaking:** `search --output json` and `semantic --output json` now emit the new envelope instead of the old ad-hoc JSON arrays; `query graph --output json` is an alias for `--json` (`complexity`/`graph`/`audit` keep their legacy shapes for now)
 - **Breaking:** `ctx duplicates` is now a MinHash-based structural near-duplicate detector. The old line-based `--similarity <PERCENT>`, `--min-lines <N>`, and `--output` flags are removed. The new `--threshold <F>` (default 0.85) is a Jaccard similarity from 0.0 to 1.0 over normalized 5-token shingles -- 0.85 means 85% of shingles are shared, not that 85% of lines match -- and `--min-tokens <N>` (default 50) filters short functions. Renamed variables and changed literals no longer hide duplicates; idiomatic boilerplate may appear (raise `--min-tokens` to filter it). Solidity functions are skipped (no tree-sitter grammar). Existing indexes lack fingerprints and must be rebuilt: run `ctx index --force` (index schema is now v2)
+
+### Fixed
+- `mcp` feature failed to compile the binary (`use crate::mcp` resolved against the binary crate instead of the library); CI now builds `--all-features` on Linux to prevent regressions
 
 ## [0.2.1] - 2026-06-17
 

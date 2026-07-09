@@ -4,8 +4,11 @@
 [![CI](https://github.com/saldestechnology/ctx/actions/workflows/ci.yml/badge.svg)](https://github.com/saldestechnology/ctx/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](#license)
 [![Rust Version](https://img.shields.io/badge/rust-1.91%2B-orange)](https://www.rust-lang.org)
+[![Docs](https://img.shields.io/badge/docs-saldestechnology.github.io%2Fctx-blue)](https://saldestechnology.github.io/ctx/)
 
 A fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence for understanding symbol relationships.
+
+📖 **Documentation:** https://saldestechnology.github.io/ctx/
 
 ## Two Tools in One
 
@@ -82,6 +85,47 @@ cargo build --release
 ```bash
 cargo build --release --features mcp
 ```
+
+## Using ctx as a Library
+
+Everything the CLI does is available as a Rust library, so you can embed
+indexing, search, and context generation in your own tools. The package is
+`agentis-ctx`, but the library target is named `ctx`:
+
+```toml
+[dependencies]
+agentis-ctx = "0.2"
+
+# On Windows (or to skip DuckDB analytics):
+# agentis-ctx = { version = "0.2", default-features = false }
+```
+
+```rust
+use ctx::prelude::*;
+use std::path::Path;
+
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let root = Path::new("./my-project");
+
+    // Build (or incrementally update) the index at .ctx/codebase.sqlite
+    let mut indexer = Indexer::with_config(root, false, WalkerConfig::default())?;
+    let result = indexer.index()?;
+    println!("{} symbols extracted", result.symbols_extracted);
+
+    // Keyword search over the indexed symbols
+    let db = open_database(root)?;
+    for symbol in db.find_symbols("authenticate", 10)? {
+        println!("{} ({}:{})", symbol.name, symbol.file_path, symbol.line_start);
+    }
+    Ok(())
+}
+```
+
+The [API documentation](https://docs.rs/agentis-ctx) covers the full surface:
+smart context selection (`smart`), diff-aware context (`diff`), semantic
+search via local or OpenAI embeddings (`embeddings`), call-graph analytics
+(`analytics`), token counting (`tokens`), and output formatting
+(`formatter`/`output`).
 
 ## Quick Start
 

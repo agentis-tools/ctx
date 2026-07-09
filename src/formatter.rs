@@ -1,3 +1,10 @@
+//! Output formatters for generated context.
+//!
+//! Renders discovered files into one of four formats, selected via
+//! [`OutputFormat`]: XML (default, best for most LLMs), Markdown, JSON,
+//! or plain text. Use [`get_formatter`] to obtain the right
+//! [`Formatter`] implementation for a format.
+
 use std::path::Path;
 
 use crate::walker::FileEntry;

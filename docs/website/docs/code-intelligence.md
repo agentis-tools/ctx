@@ -1,3 +1,9 @@
+---
+id: code-intelligence
+title: Code Intelligence
+sidebar_position: 4
+---
+
 # Code Intelligence
 
 ctx includes a powerful code intelligence system that indexes your codebase, extracts symbols and relationships, and enables sophisticated queries for understanding code structure and dependencies.
@@ -139,6 +145,7 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files (can be repeated)
+  -j, --parallel <N>             Number of parallel indexing threads
 ```
 
 ## Searching
@@ -706,15 +713,16 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files
+  -j, --parallel <N>             Number of parallel indexing threads
 ```
 
 ### Query
 ```
-ctx query find <PATTERN> [--limit N] [--kind KIND]
-ctx query callers <FUNCTION> [--depth N]
-ctx query deps <SYMBOL> [--depth N]
-ctx query graph <START> [--depth N] [--output FORMAT]
-ctx query impact <SYMBOL> [--depth N]
+ctx query find <PATTERN> [-l, --limit N=20] [-k, --kind KIND] [-f, --file FILE]
+ctx query callers <FUNCTION> [-d, --depth N=3] [-f, --file FILE]
+ctx query deps <SYMBOL> [-d, --depth N=3] [-f, --file FILE] [-k, --kind KIND]
+ctx query graph <START> [-d, --depth N=5] [--output <text|json|dot>]
+ctx query impact <SYMBOL> [-d, --depth N=5]
 ctx query stats
 ctx query files
 ```
