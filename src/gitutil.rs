@@ -56,7 +56,9 @@ pub fn show_file(reference: &str, path: &str) -> Result<Option<String>> {
 // Directory-explicit implementations (used directly by tests)
 // ============================================================================
 
-fn is_git_repo_in(dir: &Path) -> bool {
+/// Dir-explicit variant of [`is_git_repo`], for commands and tests that
+/// operate on an explicit project root instead of the process cwd.
+pub fn is_git_repo_in(dir: &Path) -> bool {
     Command::new("git")
         .args(["rev-parse", "--git-dir"])
         .current_dir(dir)
@@ -133,7 +135,9 @@ fn churn_since_in(dir: &Path, since: &str) -> Result<HashMap<String, u32>> {
     Ok(churn)
 }
 
-fn show_file_in(dir: &Path, reference: &str, path: &str) -> Result<Option<String>> {
+/// Dir-explicit variant of [`show_file`], for commands and tests that
+/// operate on an explicit project root instead of the process cwd.
+pub fn show_file_in(dir: &Path, reference: &str, path: &str) -> Result<Option<String>> {
     if !is_git_repo_in(dir) {
         return Err(CtxError::NotGitRepo);
     }

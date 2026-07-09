@@ -586,6 +586,53 @@ EXAMPLES:
         list: bool,
     },
 
+    /// Score the quality delta of your changes against a git reference
+    ///
+    /// Compares the working tree (plus commits since the merge base with
+    /// REF) against REF and prints a scorecard: complexity and fan-out
+    /// deltas, newly introduced near-duplicate functions, architecture-rule
+    /// violations, and symbols added/removed. The index is refreshed
+    /// incrementally before scoring.
+    ///
+    /// Exit codes: 0 = clean (or no --fail-on given), 1 = at least one
+    /// --fail-on condition was met, 2 = operational error (not a git repo,
+    /// bad reference, malformed --fail-on, invalid rules file).
+    #[command(after_help = r#"METRICS (for --fail-on and JSON output):
+    complexity_delta    sum over changed files of per-function
+                        2*fan_out + same-file fan_in, current - baseline
+    fan_out_delta       calls sourced in changed files, current - baseline
+    new_duplication     near-duplicate pairs (Jaccard >= 0.85, >= 50 tokens,
+                        >= 1 endpoint in a changed file) absent at REF
+    check_violations    `ctx check --against REF` violations
+                        (0 with a note when .ctx/rules.toml is missing)
+    symbols_added       symbols present now but not at REF
+    symbols_removed     symbols present at REF but not now
+    files_changed       changed source files that were scored
+
+NOTES:
+    Baseline metrics come from parsing each changed file's content at REF in
+    memory with the same parser; fan-in is approximated as same-file callers
+    on both sides so the deltas compare like with like.
+
+EXAMPLES:
+    ctx score                        # score uncommitted changes (vs HEAD)
+    ctx score --against main         # score the whole branch / PR vs main
+    ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+    ctx score --fail-on "complexity_delta>=20" --json
+"#)]
+    Score {
+        /// Git reference to compare against. The default (HEAD) scores
+        /// uncommitted changes; use your default branch (main/master) to
+        /// score a whole branch or PR
+        #[arg(long, value_name = "REF", default_value = "HEAD")]
+        against: String,
+
+        /// Fail (exit 1) when any comma-separated condition `metric OP value`
+        /// holds; OP is one of >=, <=, >, < (e.g. "new_duplication>0")
+        #[arg(long, value_name = "EXPR")]
+        fail_on: Option<String>,
+    },
+
     /// Interactive shell for exploring codebase
     Shell {
         /// History file location

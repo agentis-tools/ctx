@@ -468,7 +468,9 @@ pub fn find_near_duplicates(
 /// The language is detected from the file extension. Tree-sitter is
 /// error-tolerant, so tokenizing the snippet in isolation yields the same
 /// normalized token stream as slicing a whole-file parse (verified by test).
-fn symbol_shingles(symbol: &Symbol) -> Option<HashSet<u64>> {
+/// Also used by `ctx score` to derive baseline shingles for symbols in
+/// unchanged files.
+pub fn symbol_shingles(symbol: &Symbol) -> Option<HashSet<u64>> {
     let source = symbol.source.as_ref()?;
     let lang = Language::from_path(Path::new(&symbol.file_path));
     let tokens = tokenize(lang, source)?;

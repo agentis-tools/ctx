@@ -50,6 +50,7 @@ ctx query callers handleLogin  # Who calls this function?
 - **Diff-aware context** - Generate context focused on git changes
 - **PR review context** - GitHub integration for pull request analysis
 - **Code quality audit** - Automated quality analysis with CI integration
+- **Quality gates** - Architecture rules (`ctx check`) and change scoring (`ctx score`) with a 0/1/2 exit-code convention for CI and AI agents
 - **Interactive shell** - REPL for codebase exploration
 - **MCP server** - Claude Desktop integration via Model Context Protocol
 
@@ -395,6 +396,39 @@ ctx review 123 --changes-only       # Only changed files
 
 **Requirements:** GitHub CLI (`gh`) must be installed and authenticated.
 
+## Quality Gates
+
+A suite of quality commands designed to be composed into CI pipelines and AI
+agent hooks: `ctx check` (architecture rules from `.ctx/rules.toml`),
+`ctx score` (quality delta of your changes vs. a git reference),
+`ctx duplicates` (MinHash near-duplicate detection), `ctx hotspots`
+(churn x complexity refactoring targets), `ctx similar` (find existing
+functions before writing new ones), and `ctx map` (token-budgeted codebase
+overview for LLM sessions).
+
+All of them share a three-way exit-code convention -- that convention is the
+integration API:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success, nothing to report |
+| 1 | Ran successfully but produced findings |
+| 2 | Operational error (bad arguments, missing index, git failure, ...) |
+
+```bash
+# Enforce architecture rules; --against reports only new violations
+ctx check --against main
+
+# Score your changes: complexity/fan-out deltas, new duplication,
+# rule violations, symbol churn -- with CI gate conditions
+ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+```
+
+See the [Quality Gates guide](https://saldestechnology.github.io/ctx/docs/integrations/quality-gates)
+for the full suite, CI recipes, and the reference Claude Code hook
+configuration, and [`docs/json-output.md`](docs/json-output.md) for the
+machine-readable `--json` contract.
+
 ## Code Quality Audit
 
 Automated quality analysis with CI integration:
@@ -447,6 +481,26 @@ ctx duplicates --json              # Machine-readable JSON envelope
 > `--min-lines <N>` flags are gone. `--threshold` is a 0.0-1.0 Jaccard
 > similarity over 5-token shingles, not a percentage of matching lines.
 > Rebuild the index once with `ctx index --force` after upgrading.
+
+## Change Scoring
+
+Score the quality delta of your working tree (or branch) against a git
+reference. Baselines are parsed in memory at the reference with the same
+parser, so the deltas compare like with like:
+
+```bash
+ctx score                          # Score uncommitted changes (vs HEAD)
+ctx score --against main           # Score the whole branch / PR
+ctx score --fail-on "new_duplication>0,complexity_delta>=25"   # CI gate
+ctx score --against main --json    # Machine-readable JSON envelope
+```
+
+**Metrics** (usable in `--fail-on` as `metric OP value` with `>=`, `<=`, `>`, `<`):
+`complexity_delta`, `fan_out_delta`, `new_duplication`, `check_violations`,
+`symbols_added`, `symbols_removed`, `files_changed`.
+
+The index is refreshed incrementally before scoring; exit codes are 0 (clean),
+1 (a `--fail-on` condition was met), 2 (operational error).
 
 ## Dependency Graph
 
@@ -606,6 +660,8 @@ COMMANDS:
     diff        Generate context for changed files
     review      Generate context for PR review (GitHub)
     audit       Run code quality analysis
+    check       Check architecture rules from .ctx/rules.toml
+    score       Score the quality delta of changes vs a git reference
     complexity  Analyze code complexity
     duplicates  Detect structurally similar functions (MinHash)
     graph       Generate dependency graph

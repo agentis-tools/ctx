@@ -239,6 +239,11 @@ fn run(args: Args) -> Result<Outcome> {
             // Quality command: returns Outcome natively (0 clean / 1 findings).
             return commands::run_check(rules, against, list, json);
         }
+        Some(Command::Score { against, fail_on }) => {
+            // Quality command: returns Outcome natively (0 clean / 1 when a
+            // --fail-on condition is met).
+            return commands::run_score(&against, fail_on.as_deref(), json);
+        }
         Some(Command::Audit {
             output_format,
             min_score,

@@ -9,11 +9,18 @@ const sidebars: SidebarsConfig = {
     'configuration',
     'language-support',
     'architecture',
+    'json-output',
     {
       type: 'category',
       label: 'Commands',
       items: [
         'commands/audit',
+        'commands/check',
+        'commands/score',
+        'commands/duplicates',
+        'commands/hotspots',
+        'commands/similar',
+        'commands/map',
         'commands/diff',
         'commands/smart',
         'commands/shell',
@@ -25,6 +32,7 @@ const sidebars: SidebarsConfig = {
       label: 'Integrations',
       items: [
         'integrations/ci-cd',
+        'integrations/quality-gates',
         'integrations/claude',
         'integrations/vscode',
       ],
