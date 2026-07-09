@@ -14,6 +14,7 @@ pub mod harness;
 pub mod hotspots;
 pub mod index;
 pub mod interactive;
+pub mod map;
 pub mod query;
 pub mod score;
 pub mod search;
@@ -35,6 +36,7 @@ pub use index::{run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
 pub use interactive::run_shell;
+pub use map::{run_map, MapFormat};
 pub use query::run_query;
 pub use score::run_score;
 pub use search::run_search;

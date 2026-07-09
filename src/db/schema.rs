@@ -217,6 +217,15 @@ impl Database {
                 FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
             );
 
+            -- Cached PageRank scores for `ctx map`.
+            -- Lazily rebuilt: cleared whenever the index changes and
+            -- recomputed on the next `ctx map` invocation, so pre-existing
+            -- databases self-heal without a schema version bump.
+            CREATE TABLE IF NOT EXISTS symbol_rank (
+                symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+                rank REAL NOT NULL
+            );
+
             -- Indexes for fast lookups
             CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
             CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
@@ -934,6 +943,128 @@ impl Database {
     pub fn get_indexed_files(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare("SELECT path FROM files ORDER BY path")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    // ========== Symbol Rank Cache (ctx map) ==========
+    //
+    // The `symbol_rank` table caches PageRank scores computed by
+    // `crate::rank`. It is cleared by the indexer whenever the index
+    // changes and lazily repopulated by `ctx map`.
+
+    /// Get all symbol IDs, sorted ascending (stable order for rank computation).
+    pub fn get_all_symbol_ids(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM symbols ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get deduplicated resolved edges of the kinds used for ranking
+    /// (calls, imports, extends, implements), ordered for determinism.
+    pub fn get_rank_edges(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT DISTINCT source_id, target_id
+            FROM edges
+            WHERE target_id IS NOT NULL
+              AND kind IN ('calls', 'imports', 'extends', 'implements')
+            ORDER BY source_id, target_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Delete all cached PageRank scores (called when the index changes).
+    pub fn clear_symbol_rank(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM symbol_rank", [])?;
+        Ok(())
+    }
+
+    /// Bulk-store PageRank scores in a single transaction, replacing any
+    /// existing cache.
+    pub fn store_symbol_ranks(&self, ranks: &[(String, f64)]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM symbol_rank", [])?;
+        {
+            let mut stmt = tx.prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
+            for (id, rank) in ranks {
+                stmt.execute(params![id, rank])?;
+            }
+        }
+        tx.commit()
+    }
+
+    /// Load all cached PageRank scores.
+    pub fn load_symbol_ranks(&self) -> Result<Vec<(String, f64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT symbol_id, rank FROM symbol_rank ORDER BY symbol_id")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Count rows in the symbols table.
+    pub fn count_symbols(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
+    }
+
+    /// Count rows in the symbol_rank cache.
+    pub fn count_symbol_ranks(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbol_rank", [], |row| row.get(0))
+    }
+
+    /// Get all indexed files with their sizes, ordered by path.
+    pub fn get_files_with_sizes(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, COALESCE(size_bytes, 0) FROM files ORDER BY path")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Get the IDs of all symbols defined in a file.
+    pub fn get_symbol_ids_in_file(&self, file_path: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE file_path = ? ORDER BY id")?;
+        let rows = stmt.query_map([file_path], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get the IDs of all symbols whose name or qualified name matches exactly.
+    pub fn get_symbol_ids_by_name(&self, name: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE name = ?1 OR qualified_name = ?1 ORDER BY id")?;
+        let rows = stmt.query_map([name], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get the lightweight symbol rows shown by `ctx map` (declaration-level
+    /// kinds only), in a stable base order.
+    pub fn get_map_symbols(&self) -> Result<Vec<MapSymbolRow>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, file_path, name, qualified_name, kind, signature, line_start
+            FROM symbols
+            WHERE kind IN ('function', 'method', 'struct', 'class', 'enum', 'trait', 'interface')
+            ORDER BY id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(MapSymbolRow {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                name: row.get(2)?,
+                qualified_name: row.get(3)?,
+                kind: row.get(4)?,
+                signature: row.get(5)?,
+                line_start: row.get::<_, Option<u32>>(6)?.unwrap_or(0),
+            })
+        })?;
         rows.collect()
     }
 
@@ -1770,6 +1901,19 @@ fn edge_from_row(row: &rusqlite::Row) -> Edge {
         col: row.get(5).ok(),
         context: row.get(6).ok(),
     }
+}
+
+/// A lightweight symbol row for the `ctx map` command
+/// (see [`Database::get_map_symbols`]).
+#[derive(Debug, Clone)]
+pub struct MapSymbolRow {
+    pub id: String,
+    pub file_path: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub line_start: u32,
 }
 
 /// Per-symbol complexity metrics (see [`Database::symbol_metrics`]).

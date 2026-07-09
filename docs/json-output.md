@@ -291,6 +291,38 @@ Disambiguation: when several symbols match the name and no `--file` filter is gi
 
 When the symbol is not found, `symbol` is `null` and the counts are `0`; when several symbols match without filters, `ambiguous` lists the candidates.
 
+### `map`
+
+`ctx map [--budget N] [--focus F] --json` (also `--format json`; the global `--json` flag forces JSON regardless of `--format`)
+
+```json
+{
+  "budget": 2000,
+  "token_estimate": 1043,
+  "focus": null,
+  "tree": "project/\nsrc/\n├── main.rs\n└── db/\n    └── … (3 files)\n",
+  "entries": [
+    {
+      "file": "src/index/mod.rs",
+      "line": 637,
+      "kind": "function",
+      "signature": "pub fn open_database(root: &Path) -> crate::error::Result<Database>",
+      "rank": 0.0192
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `budget` | The requested token budget |
+| `token_estimate` | Estimated tokens of the equivalent text rendering, `ceil(chars / 4)` |
+| `focus` | The `--focus` argument as given, or `null` |
+| `tree` | The compact project tree (possibly truncated to ~10% of the budget) |
+| `entries` | Selected symbols in emit order (PageRank descending) |
+
+Entry selection and `token_estimate` are computed from the text rendering, so JSON output selects exactly the same entries as `--format text` at the same budget (the JSON envelope itself is not counted against the budget). `rank` is the symbol's PageRank score (all ranks sum to 1 across the index). Output is deterministic for identical index state, except for the envelope's `generated_at` timestamp.
+
 ### `duplicates`
 
 `ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`

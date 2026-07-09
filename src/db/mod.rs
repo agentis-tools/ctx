@@ -11,5 +11,6 @@ pub mod schema;
 
 pub use models::*;
 pub use schema::{
-    CrossFileEdge, Database, EdgeSymbol, FileComplexity, SymbolMetrics, SCHEMA_VERSION,
+    CrossFileEdge, Database, EdgeSymbol, FileComplexity, MapSymbolRow, SymbolMetrics,
+    SCHEMA_VERSION,
 };

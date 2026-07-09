@@ -242,6 +242,16 @@ impl Indexer {
             }
         }
 
+        // The graph changed: invalidate the cached PageRank scores
+        // (`ctx map` recomputes them lazily).
+        if result.files_indexed > 0 {
+            if let Err(e) = self.db.clear_symbol_rank() {
+                if self.verbose {
+                    eprintln!("Warning: failed to clear rank cache: {}", e);
+                }
+            }
+        }
+
         result.elapsed_ms = start.elapsed().as_millis();
         Ok(result)
     }
@@ -393,6 +403,16 @@ impl Indexer {
             }
         }
 
+        // The graph changed: invalidate the cached PageRank scores
+        // (`ctx map` recomputes them lazily).
+        if result.files_indexed > 0 {
+            if let Err(e) = self.db.clear_symbol_rank() {
+                if self.verbose {
+                    eprintln!("Warning: failed to clear rank cache: {}", e);
+                }
+            }
+        }
+
         result.elapsed_ms = start.elapsed().as_millis();
         Ok(result)
     }
@@ -438,6 +458,10 @@ impl Indexer {
 
         // Store
         self.store_file(&rel_path, &content, &hash, &parse_result)?;
+
+        // The graph changed: invalidate the cached PageRank scores
+        // (`ctx map` recomputes them lazily).
+        self.db.clear_symbol_rank().map_err(db_error)?;
 
         Ok(true)
     }
@@ -578,6 +602,7 @@ impl Indexer {
             .get_indexed_files()
             .map_err(|e| io::Error::other(e.to_string()))?;
 
+        let mut deleted_any = false;
         for file in indexed_files {
             if !seen_files.contains(&file) {
                 if self.verbose {
@@ -586,7 +611,14 @@ impl Indexer {
                 self.db
                     .delete_file(&file)
                     .map_err(|e| io::Error::other(e.to_string()))?;
+                deleted_any = true;
             }
+        }
+
+        // Deleting files changes the graph: invalidate the cached PageRank
+        // scores (`ctx map` recomputes them lazily).
+        if deleted_any {
+            self.db.clear_symbol_rank().map_err(db_error)?;
         }
 
         Ok(())
@@ -721,9 +753,12 @@ pub mod watch {
                                     eprintln!("Removed: {}", rel_path);
                                 }
 
-                                // Delete from database
+                                // Delete from database and invalidate the
+                                // cached PageRank scores
                                 if let Err(e) = indexer.db.delete_file(&rel_path) {
                                     eprintln!("Warning: failed to remove {}: {}", rel_path, e);
+                                } else if let Err(e) = indexer.db.clear_symbol_rank() {
+                                    eprintln!("Warning: failed to clear rank cache: {}", e);
                                 }
                                 continue;
                             }
