@@ -315,10 +315,7 @@ fn multi_statement_semantics() {
         .stdout(predicate::str::contains("42"));
 
     // Two result-producing statements -> error (only the final may return rows).
-    sql(temp.path())
-        .arg("SELECT 1; SELECT 2")
-        .assert()
-        .code(2);
+    sql(temp.path()).arg("SELECT 1; SELECT 2").assert().code(2);
 }
 
 #[test]

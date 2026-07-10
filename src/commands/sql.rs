@@ -393,7 +393,11 @@ mod engine {
         }
 
         let mut out = String::new();
-        push_row(&mut out, &headers.iter().map(|h| h.to_string()).collect::<Vec<_>>(), &widths);
+        push_row(
+            &mut out,
+            &headers.iter().map(|h| h.to_string()).collect::<Vec<_>>(),
+            &widths,
+        );
         push_separator(&mut out, &widths);
         for row in &rendered {
             push_row(&mut out, row, &widths);
@@ -433,11 +437,7 @@ mod engine {
 
     fn render_csv(result: &SqlResult) {
         let mut out = String::new();
-        let headers: Vec<String> = result
-            .columns
-            .iter()
-            .map(|c| csv_field(&c.name))
-            .collect();
+        let headers: Vec<String> = result.columns.iter().map(|c| csv_field(&c.name)).collect();
         out.push_str(&headers.join(","));
         out.push_str("\r\n");
 
@@ -513,8 +513,7 @@ mod tests {
     #[test]
     fn schema_reference_matches_docs_page() {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        let doc_path =
-            std::path::Path::new(manifest).join("docs/website/docs/sql-schema.md");
+        let doc_path = std::path::Path::new(manifest).join("docs/website/docs/sql-schema.md");
         let doc = std::fs::read_to_string(&doc_path)
             .unwrap_or_else(|e| panic!("read {}: {}", doc_path.display(), e));
 

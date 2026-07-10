@@ -711,9 +711,7 @@ impl Analytics {
 
         // Column metadata is only available after the statement has executed.
         let columns: Vec<SqlColumn> = {
-            let executed = rows
-                .as_ref()
-                .expect("statement is available after query()");
+            let executed = rows.as_ref().expect("statement is available after query()");
             let col_count = executed.column_count();
             let names = executed.column_names();
             (0..col_count)
