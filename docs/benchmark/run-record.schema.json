@@ -126,12 +126,117 @@
           "minimum": 0,
           "description": "Number of gate evaluations performed during the run."
         },
+        "gate_blocks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional: number of gate evaluations that blocked the agent during the run."
+        },
+        "gate_block_recovered": {
+          "type": "boolean",
+          "description": "Optional: whether the agent recovered (eventually passed the gate) after at least one gate block."
+        },
         "wall_clock_seconds": {
           "type": "number",
           "minimum": 0,
           "description": "Total wall-clock duration of the run in seconds."
         }
       }
+    },
+    "agent": {
+      "type": "object",
+      "description": "Optional agent-side accounting reported by the agent harness (e.g. `claude -p` result payload).",
+      "additionalProperties": false,
+      "required": ["session_id", "total_cost_usd", "total_tokens"],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "Agent session identifier, used for exact joins against gate logs and transcripts."
+        },
+        "total_cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total model cost of the run in USD."
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total tokens (input + output) consumed by the run."
+        },
+        "num_turns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of agent turns. Optional within `agent`: not guaranteed to be reported by `claude -p`."
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "description": "Optional result of the task's acceptance command -- the ctx-independent functional endpoint of the run (did the change actually work).",
+      "additionalProperties": false,
+      "required": ["command", "exit_code", "passed", "duration_seconds"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Acceptance command that was executed (e.g. the task's test command)."
+        },
+        "exit_code": {
+          "type": "integer",
+          "description": "Exit code of the acceptance command."
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether the acceptance command succeeded."
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall-clock duration of the acceptance command in seconds."
+        }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "description": "Optional diff-size normalization data: the denominator for per-line deltas when comparing runs of different sizes.",
+      "additionalProperties": false,
+      "required": ["lines_added", "lines_removed", "lines_changed"],
+      "properties": {
+        "lines_added": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lines added by the run's final diff."
+        },
+        "lines_removed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lines removed by the run's final diff."
+        },
+        "lines_changed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total lines changed (added + removed) by the run's final diff."
+        }
+      }
+    },
+    "study_id": {
+      "type": "string",
+      "description": "Optional identifier of the study this run belongs to, so multiple studies can share one record store."
+    },
+    "task_seed": {
+      "type": "integer",
+      "description": "Optional seed used by the task generator to produce this run's task instance."
+    },
+    "generator_version": {
+      "type": "string",
+      "description": "Optional version of the task generator that produced the task instance."
+    },
+    "scorer_ctx_version": {
+      "type": "string",
+      "description": "Optional version of the ctx build used by the offline scorer. The existing `ctx_version` remains the harness build installed during the run."
+    },
+    "retry_attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional zero-based retry attempt number when a run was retried after an infrastructure error."
     },
     "notes": {
       "type": "string",

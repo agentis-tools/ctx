@@ -29,7 +29,28 @@ against [`run-record.schema.json`](./run-record.schema.json)
 | `metrics` | object | yes | Quantitative outcomes; see below. |
 | `metrics.score` | object | yes | Final `ctx score` metrics for the run's diff. Exactly the seven keys `complexity_delta`, `fan_out_delta`, `new_duplication`, `check_violations`, `symbols_added`, `symbols_removed`, `files_changed`, all numbers. |
 | `metrics.gate_evaluations` | integer >= 0 | yes | Number of gate evaluations performed during the run. |
+| `metrics.gate_blocks` | integer >= 0 | no | Number of gate evaluations that blocked the agent. |
+| `metrics.gate_block_recovered` | boolean | no | Whether the agent recovered (eventually passed the gate) after at least one block. |
 | `metrics.wall_clock_seconds` | number >= 0 | yes | Total wall-clock duration of the run in seconds. |
+| `agent` | object | no | Agent-side accounting reported by the agent harness (e.g. `claude -p`); see below. |
+| `agent.session_id` | string | yes (within `agent`) | Agent session identifier, for exact joins against gate logs and transcripts. |
+| `agent.total_cost_usd` | number >= 0 | yes (within `agent`) | Total model cost of the run in USD. |
+| `agent.total_tokens` | integer >= 0 | yes (within `agent`) | Total tokens (input + output) consumed by the run. |
+| `agent.num_turns` | integer >= 0 | no | Number of agent turns; not guaranteed to be reported by `claude -p`. |
+| `acceptance` | object | no | Result of the task's acceptance command -- the ctx-independent functional endpoint of the run; see below. |
+| `acceptance.command` | string | yes (within `acceptance`) | Acceptance command that was executed. |
+| `acceptance.exit_code` | integer | yes (within `acceptance`) | Exit code of the acceptance command. |
+| `acceptance.passed` | boolean | yes (within `acceptance`) | Whether the acceptance command succeeded. |
+| `acceptance.duration_seconds` | number >= 0 | yes (within `acceptance`) | Wall-clock duration of the acceptance command in seconds. |
+| `normalization` | object | no | Diff-size data: the denominator for per-line deltas; see below. |
+| `normalization.lines_added` | integer >= 0 | yes (within `normalization`) | Lines added by the run's final diff. |
+| `normalization.lines_removed` | integer >= 0 | yes (within `normalization`) | Lines removed by the run's final diff. |
+| `normalization.lines_changed` | integer >= 0 | yes (within `normalization`) | Total lines changed (added + removed) by the run's final diff. |
+| `study_id` | string | no | Identifier of the study the run belongs to, so multiple studies can share one record store. |
+| `task_seed` | integer | no | Seed used by the task generator to produce this run's task instance. |
+| `generator_version` | string | no | Version of the task generator that produced the task instance. |
+| `scorer_ctx_version` | string | no | Version of the ctx build used by the offline scorer; `ctx_version` remains the harness build. |
+| `retry_attempt` | integer >= 0 | no | Zero-based retry attempt number when a run was retried after an infrastructure error. |
 | `notes` | string | no | Free-form operator notes. |
 
 The top-level object rejects unknown keys (`additionalProperties: false`).
@@ -46,6 +67,12 @@ The top-level object rejects unknown keys (`additionalProperties: false`).
   and publish under a new `$id`
   (`https://docs.agentis.tools/schemas/run-record-v2.json`, ...). Old records
   are never rewritten; analysis code dispatches on `schema_version`.
+
+The optional `agent`, `acceptance`, and `normalization` objects and the
+`study_id`, `task_seed`, `generator_version`, `scorer_ctx_version`,
+`retry_attempt`, `metrics.gate_blocks`, and `metrics.gate_block_recovered`
+fields arrived additively (per the policy above) for the ctx-bench pilot
+runner; `schema_version` remains `1`.
 
 ## Example record
 
@@ -79,8 +106,32 @@ The top-level object rejects unknown keys (`additionalProperties: false`).
       "files_changed": 3
     },
     "gate_evaluations": 12,
+    "gate_blocks": 1,
+    "gate_block_recovered": true,
     "wall_clock_seconds": 2323.4
   },
+  "agent": {
+    "session_id": "8b2f4a1c-0d3e-4f6a-b7c8-9e0d1f2a3b4c",
+    "total_cost_usd": 1.87,
+    "total_tokens": 412034,
+    "num_turns": 41
+  },
+  "acceptance": {
+    "command": "cargo test --workspace",
+    "exit_code": 0,
+    "passed": true,
+    "duration_seconds": 148.2
+  },
+  "normalization": {
+    "lines_added": 96,
+    "lines_removed": 42,
+    "lines_changed": 138
+  },
+  "study_id": "pilot-2026-07",
+  "task_seed": 1337,
+  "generator_version": "0.1.0",
+  "scorer_ctx_version": "0.9.2",
+  "retry_attempt": 0,
   "notes": "One gate evaluation flagged a transient duplication warning."
 }
 ```
