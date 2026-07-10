@@ -55,12 +55,20 @@ impl IndexConfig {
 pub fn run_index(config: IndexConfig) -> Result<()> {
     let root = env::current_dir()?;
 
-    // Handle force reindex by removing existing database
+    // Handle force reindex by removing existing database (including the
+    // SQLite WAL/SHM sidecar files, which would otherwise be stale)
     if config.force {
-        let db_path = root.join(index::CTX_DIR).join(index::DB_FILE);
+        let ctx_dir = root.join(index::CTX_DIR);
+        let db_path = ctx_dir.join(index::DB_FILE);
         if db_path.exists() {
             eprintln!("Removing existing database for full reindex...");
             std::fs::remove_file(&db_path)?;
+        }
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = ctx_dir.join(format!("{}{}", index::DB_FILE, suffix));
+            if sidecar.exists() {
+                std::fs::remove_file(&sidecar)?;
+            }
         }
     }
 

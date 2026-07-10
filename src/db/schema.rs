@@ -11,6 +11,20 @@ use sqlite_vec::sqlite3_vec_init;
 
 use super::models::*;
 
+/// Current index schema version, stamped into SQLite's `PRAGMA user_version`.
+///
+/// Bump this whenever the schema changes in a way that is incompatible with
+/// existing databases. Fresh databases (no tables yet) are initialized and
+/// stamped with the current version; any existing database with a different
+/// version -- including pre-versioning (v0) databases, which lack the
+/// `symbol_fingerprints` table -- is reported as
+/// [`crate::error::CtxError::SchemaVersionMismatch`].
+///
+/// History:
+/// - v1: initial versioned schema
+/// - v2: adds `symbol_fingerprints` (MinHash near-duplicate detection)
+pub const SCHEMA_VERSION: i64 = 2;
+
 /// Default embedding dimension for vector search.
 /// This matches OpenAI text-embedding-ada-002 (1536) and text-embedding-3-small (1536).
 /// For local embeddings with fastembed (384 dims), a separate table or dynamic dimension is needed.
@@ -54,32 +68,79 @@ pub fn is_vec_extension_available() -> bool {
 }
 
 /// SQLite database for code intelligence.
+#[derive(Debug)]
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
     /// Open or create a database at the given path.
-    pub fn open(path: &Path) -> Result<Self> {
+    ///
+    /// Verifies the schema version stored in `PRAGMA user_version`:
+    /// - `0` (fresh or pre-versioning database): the schema is initialized and
+    ///   the version is stamped to [`SCHEMA_VERSION`].
+    /// - [`SCHEMA_VERSION`]: opened normally.
+    /// - anything else: returns [`crate::error::CtxError::SchemaVersionMismatch`].
+    pub fn open(path: &Path) -> crate::error::Result<Self> {
         // Initialize sqlite-vec extension before opening connection
         init_vec_extension();
         let conn = Connection::open(path)?;
         Self::configure_connection(&conn)?;
         let db = Self { conn };
+        db.check_schema_version()?;
         db.init_schema()?;
         Ok(db)
     }
 
     /// Create an in-memory database (for testing).
     #[allow(dead_code)]
-    pub fn open_in_memory() -> Result<Self> {
+    pub fn open_in_memory() -> crate::error::Result<Self> {
         // Initialize sqlite-vec extension before opening connection
         init_vec_extension();
         let conn = Connection::open_in_memory()?;
         Self::configure_connection(&conn)?;
         let db = Self { conn };
+        db.check_schema_version()?;
         db.init_schema()?;
         Ok(db)
+    }
+
+    /// Validate `PRAGMA user_version` against [`SCHEMA_VERSION`].
+    ///
+    /// A fresh database (version `0` and no tables yet) is silently stamped
+    /// to the current version. A pre-versioning (v0) database that already
+    /// has tables lacks the `symbol_fingerprints` table, so it is rejected
+    /// like any other version mismatch.
+    fn check_schema_version(&self) -> crate::error::Result<()> {
+        let found: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        if found == SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        if found == 0 {
+            let has_tables: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'",
+                    [],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !has_tables {
+                self.conn
+                    .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                return Ok(());
+            }
+        }
+
+        Err(crate::error::CtxError::SchemaVersionMismatch {
+            found,
+            expected: SCHEMA_VERSION,
+        })
     }
 
     /// Configure the SQLite connection for optimal performance and concurrency.
@@ -156,6 +217,15 @@ impl Database {
                 FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
             );
 
+            -- Cached PageRank scores for `ctx map`.
+            -- Lazily rebuilt: cleared whenever the index changes and
+            -- recomputed on the next `ctx map` invocation, so pre-existing
+            -- databases self-heal without a schema version bump.
+            CREATE TABLE IF NOT EXISTS symbol_rank (
+                symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+                rank REAL NOT NULL
+            );
+
             -- Indexes for fast lookups
             CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
             CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
@@ -178,6 +248,18 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(provider);
+
+            -- MinHash fingerprints for near-duplicate function detection
+            -- (see src/fingerprint.rs). Rows are cascade-deleted with their
+            -- symbols when a file is re-indexed or removed.
+            CREATE TABLE IF NOT EXISTS symbol_fingerprints (
+                symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                minhash BLOB NOT NULL,
+                token_count INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_fingerprints_file ON symbol_fingerprints(file_path);
 
             -- Full-text search index for semantic search
             CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
@@ -699,10 +781,379 @@ impl Database {
         })
     }
 
+    // ========== Shared Complexity Metrics ==========
+    //
+    // These mirror the DuckDB `complexity_analysis` formula exactly:
+    // fan_out = COUNT(*) of 'calls' edges grouped by source_id,
+    // fan_in  = COUNT(*) of 'calls' edges grouped by target_id (resolved only),
+    // complexity = fan_out * 2 + fan_in.
+
+    /// Per-symbol fan-in/fan-out/complexity metrics for functions and methods.
+    ///
+    /// Results are ordered by complexity (highest first).
+    pub fn symbol_metrics(&self) -> Result<Vec<SymbolMetrics>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH fo AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls'
+                GROUP BY source_id
+            ),
+            fi AS (
+                SELECT target_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+                GROUP BY target_id
+            )
+            SELECT
+                s.id,
+                s.name,
+                s.qualified_name,
+                s.kind,
+                s.file_path,
+                s.line_start,
+                s.line_end,
+                COALESCE(fi.n, 0) AS fan_in,
+                COALESCE(fo.n, 0) AS fan_out,
+                (COALESCE(fo.n, 0) * 2 + COALESCE(fi.n, 0)) AS complexity
+            FROM symbols s
+            LEFT JOIN fo ON s.id = fo.id
+            LEFT JOIN fi ON s.id = fi.id
+            WHERE s.kind IN ('function', 'method')
+            ORDER BY complexity DESC, s.file_path, s.line_start
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(SymbolMetrics {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                qualified_name: row.get(2)?,
+                kind: row.get(3)?,
+                file_path: row.get(4)?,
+                line_start: row.get(5)?,
+                line_end: row.get(6)?,
+                fan_in: row.get(7)?,
+                fan_out: row.get(8)?,
+                complexity: row.get(9)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Per-file aggregated complexity (same formula as [`Self::symbol_metrics`],
+    /// summed over all symbols in the file).
+    ///
+    /// `symbol_count` counts all symbols in the file, not only functions.
+    /// Results are ordered by complexity (highest first).
+    pub fn file_complexity(&self) -> Result<Vec<FileComplexity>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH fo AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls'
+                GROUP BY source_id
+            ),
+            fi AS (
+                SELECT target_id AS id, COUNT(*) AS n
+                FROM edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+                GROUP BY target_id
+            )
+            SELECT
+                s.file_path,
+                SUM(COALESCE(fo.n, 0) * 2 + COALESCE(fi.n, 0)) AS complexity,
+                SUM(COALESCE(fo.n, 0)) AS fan_out,
+                COUNT(*) AS symbol_count
+            FROM symbols s
+            LEFT JOIN fo ON s.id = fo.id
+            LEFT JOIN fi ON s.id = fi.id
+            GROUP BY s.file_path
+            ORDER BY complexity DESC, s.file_path
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(FileComplexity {
+                file_path: row.get(0)?,
+                complexity: row.get(1)?,
+                fan_out: row.get(2)?,
+                symbol_count: row.get(3)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// All `calls` edges sourced from symbols in `file_path`, as
+    /// `(source_symbol_id, target_name)` pairs.
+    ///
+    /// Used by `ctx score` to compute per-file complexity restricted to
+    /// changed files (per-changed-file queries keep scoring fast on large
+    /// indexes).
+    pub fn file_call_edges(&self, file_path: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.source_id, e.target_name
+            FROM edges e
+            JOIN symbols s ON s.id = e.source_id
+            WHERE s.file_path = ?1 AND e.kind = 'calls'
+            ORDER BY e.id
+            "#,
+        )?;
+
+        let rows = stmt.query_map([file_path], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Count resolved incoming 'calls' edges for the given symbol IDs.
+    ///
+    /// Symbols with no incoming calls are absent from the returned map.
+    pub fn fan_in_counts(&self, ids: &[String]) -> Result<std::collections::HashMap<String, i64>> {
+        let mut counts = std::collections::HashMap::new();
+        if ids.is_empty() {
+            return Ok(counts);
+        }
+
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT target_id, COUNT(*) FROM edges \
+             WHERE target_id IN ({}) AND kind = 'calls' \
+             GROUP BY target_id",
+            placeholders
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+
+        for row in rows {
+            let (id, n) = row?;
+            counts.insert(id, n);
+        }
+
+        Ok(counts)
+    }
+
     /// Get all indexed file paths.
     pub fn get_indexed_files(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare("SELECT path FROM files ORDER BY path")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    // ========== Symbol Rank Cache (ctx map) ==========
+    //
+    // The `symbol_rank` table caches PageRank scores computed by
+    // `crate::rank`. It is cleared by the indexer whenever the index
+    // changes and lazily repopulated by `ctx map`.
+
+    /// Get all symbol IDs, sorted ascending (stable order for rank computation).
+    pub fn get_all_symbol_ids(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM symbols ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get deduplicated resolved edges of the kinds used for ranking
+    /// (calls, imports, extends, implements), ordered for determinism.
+    pub fn get_rank_edges(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT DISTINCT source_id, target_id
+            FROM edges
+            WHERE target_id IS NOT NULL
+              AND kind IN ('calls', 'imports', 'extends', 'implements')
+            ORDER BY source_id, target_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Delete all cached PageRank scores (called when the index changes).
+    pub fn clear_symbol_rank(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM symbol_rank", [])?;
+        Ok(())
+    }
+
+    /// Bulk-store PageRank scores in a single transaction, replacing any
+    /// existing cache.
+    pub fn store_symbol_ranks(&self, ranks: &[(String, f64)]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM symbol_rank", [])?;
+        {
+            let mut stmt = tx.prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
+            for (id, rank) in ranks {
+                stmt.execute(params![id, rank])?;
+            }
+        }
+        tx.commit()
+    }
+
+    /// Load all cached PageRank scores.
+    pub fn load_symbol_ranks(&self) -> Result<Vec<(String, f64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT symbol_id, rank FROM symbol_rank ORDER BY symbol_id")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Count rows in the symbols table.
+    pub fn count_symbols(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
+    }
+
+    /// Count rows in the symbol_rank cache.
+    pub fn count_symbol_ranks(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbol_rank", [], |row| row.get(0))
+    }
+
+    /// Get all indexed files with their sizes, ordered by path.
+    pub fn get_files_with_sizes(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, COALESCE(size_bytes, 0) FROM files ORDER BY path")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Get the IDs of all symbols defined in a file.
+    pub fn get_symbol_ids_in_file(&self, file_path: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE file_path = ? ORDER BY id")?;
+        let rows = stmt.query_map([file_path], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get the IDs of all symbols whose name or qualified name matches exactly.
+    pub fn get_symbol_ids_by_name(&self, name: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE name = ?1 OR qualified_name = ?1 ORDER BY id")?;
+        let rows = stmt.query_map([name], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Get the lightweight symbol rows shown by `ctx map` (declaration-level
+    /// kinds only), in a stable base order.
+    pub fn get_map_symbols(&self) -> Result<Vec<MapSymbolRow>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, file_path, name, qualified_name, kind, signature, line_start
+            FROM symbols
+            WHERE kind IN ('function', 'method', 'struct', 'class', 'enum', 'trait', 'interface')
+            ORDER BY id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(MapSymbolRow {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                name: row.get(2)?,
+                qualified_name: row.get(3)?,
+                kind: row.get(4)?,
+                signature: row.get(5)?,
+                line_start: row.get::<_, Option<u32>>(6)?.unwrap_or(0),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// All resolved relationship edges whose endpoints live in different files.
+    ///
+    /// Used by `ctx check` to build the file-level dependency graph. Only
+    /// `calls`/`implements`/`extends`/`uses` edges are included (`imports`
+    /// edges are file-level and handled separately; `contains` and friends
+    /// are structural, not dependencies).
+    pub fn get_cross_file_edges(&self) -> Result<Vec<CrossFileEdge>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                s1.name, s1.qualified_name, s1.kind, s1.file_path, s1.line_start, s1.line_end,
+                s2.name, s2.qualified_name, s2.kind, s2.file_path, s2.line_start, s2.line_end,
+                e.kind, e.line
+            FROM edges e
+            JOIN symbols s1 ON e.source_id = s1.id
+            JOIN symbols s2 ON e.target_id = s2.id
+            WHERE e.target_id IS NOT NULL
+              AND s1.file_path <> s2.file_path
+              AND e.kind IN ('calls', 'implements', 'extends', 'uses')
+            ORDER BY s1.file_path, e.line, s2.file_path
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CrossFileEdge {
+                source: EdgeSymbol {
+                    name: row.get(0)?,
+                    qualified_name: row.get(1)?,
+                    kind: row.get(2)?,
+                    file_path: row.get(3)?,
+                    line_start: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    line_end: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                },
+                target: EdgeSymbol {
+                    name: row.get(6)?,
+                    qualified_name: row.get(7)?,
+                    kind: row.get(8)?,
+                    file_path: row.get(9)?,
+                    line_start: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+                    line_end: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
+                },
+                kind: row.get(12)?,
+                line: row.get(13)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Per-file imports recorded in the `modules` table.
+    ///
+    /// The `imports` column stores a JSON array of [`ImportInfo`]; rows whose
+    /// JSON fails to parse are skipped.
+    pub fn get_file_imports(&self) -> Result<Vec<(String, Vec<ImportInfo>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, imports FROM modules \
+             WHERE imports IS NOT NULL AND imports <> '' \
+             ORDER BY file_path",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let (file_path, json) = row?;
+            if let Ok(imports) = serde_json::from_str::<Vec<ImportInfo>>(&json) {
+                if !imports.is_empty() {
+                    result.push((file_path, imports));
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// File-level `imports` edges from the `edges` table.
+    ///
+    /// Some parsers (Go) record imports as edges whose `source_id` is the
+    /// importing *file path* and whose `target_name` is the import path.
+    /// Returns `(source, target_name, line)` tuples.
+    pub fn get_import_edges(&self) -> Result<Vec<(String, String, Option<i64>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source_id, target_name, line FROM edges \
+             WHERE kind = 'imports' ORDER BY source_id, line",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect()
     }
 
@@ -1261,111 +1712,52 @@ impl Database {
         Ok(context_resolved + unique_resolved + same_file_unique)
     }
 
-    /// Find duplicate code blocks using content hashing and similarity.
-    pub fn find_duplicates(
-        &self,
-        similarity_threshold: u32,
-        min_lines: u32,
-    ) -> Result<Vec<DuplicateResult>> {
-        // Get all function/method symbols with their source code
-        // Use DISTINCT and unique id to avoid duplicate rows
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT DISTINCT id, name, file_path, line_start, line_end, source
-            FROM symbols
-            WHERE kind IN ('function', 'method')
-              AND source IS NOT NULL
-              AND (line_end - line_start) >= ?
-            ORDER BY id
-            "#,
-        )?;
-
-        let symbols: Vec<(String, String, String, u32, u32, String)> = stmt
-            .query_map([min_lines], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut duplicates = Vec::new();
-        let threshold = similarity_threshold as f64 / 100.0;
-
-        // Track seen pairs to avoid duplicates
-        let mut seen_pairs: std::collections::HashSet<(String, String)> =
-            std::collections::HashSet::new();
-
-        // Compare each pair of symbols
-        for i in 0..symbols.len() {
-            for j in (i + 1)..symbols.len() {
-                let (id1, name1, file1, line1, end1, source1) = &symbols[i];
-                let (id2, name2, file2, line2, end2, source2) = &symbols[j];
-
-                // Skip if same symbol (by id or by file+line)
-                if id1 == id2 || (file1 == file2 && line1 == line2) {
-                    continue;
-                }
-
-                // Create canonical pair key (smaller id first) to avoid duplicates
-                let pair_key = if id1 < id2 {
-                    (id1.clone(), id2.clone())
-                } else {
-                    (id2.clone(), id1.clone())
-                };
-
-                // Skip if we've already seen this pair
-                if seen_pairs.contains(&pair_key) {
-                    continue;
-                }
-
-                // Normalize and compare source code
-                let norm1 = normalize_code(source1);
-                let norm2 = normalize_code(source2);
-
-                let similarity = calculate_similarity(&norm1, &norm2);
-
-                if similarity >= threshold {
-                    // Mark this pair as seen
-                    seen_pairs.insert(pair_key);
-
-                    // Create a content hash for grouping
-                    let hash = format!("{:x}", md5_hash(&norm1));
-
-                    duplicates.push(DuplicateResult {
-                        name1: name1.clone(),
-                        file1: file1.clone(),
-                        line1: *line1,
-                        name2: name2.clone(),
-                        file2: file2.clone(),
-                        line2: *line2,
-                        similarity: similarity * 100.0,
-                        lines: ((end1 - line1) + (end2 - line2)) / 2,
-                        hash,
-                    });
-                }
+    /// Insert (or replace) a batch of MinHash fingerprints in one transaction.
+    pub fn insert_fingerprints_batch(&self, fingerprints: &[Fingerprint]) -> Result<usize> {
+        if fingerprints.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT OR REPLACE INTO symbol_fingerprints (symbol_id, file_path, minhash, token_count)
+                VALUES (?, ?, ?, ?)
+                "#,
+            )?;
+            for fp in fingerprints {
+                stmt.execute(params![
+                    fp.symbol_id,
+                    fp.file_path,
+                    fp.minhash,
+                    fp.token_count
+                ])?;
             }
         }
+        tx.commit()?;
+        Ok(fingerprints.len())
+    }
 
-        // Sort by similarity (highest first), guarding against NaN/Inf
-        duplicates.sort_by(
-            |a, b| match (a.similarity.is_finite(), b.similarity.is_finite()) {
-                (true, true) => b
-                    .similarity
-                    .partial_cmp(&a.similarity)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                (false, false) => std::cmp::Ordering::Equal,
-            },
-        );
-
-        Ok(duplicates)
+    /// Load all fingerprints with at least `min_tokens` tokens, ordered by
+    /// symbol id (so callers get a stable, canonical order).
+    pub fn get_fingerprints(&self, min_tokens: i64) -> Result<Vec<Fingerprint>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT symbol_id, file_path, minhash, token_count
+            FROM symbol_fingerprints
+            WHERE token_count >= ?
+            ORDER BY symbol_id
+            "#,
+        )?;
+        let rows = stmt.query_map([min_tokens], |row| {
+            Ok(Fingerprint {
+                symbol_id: row.get(0)?,
+                file_path: row.get(1)?,
+                minhash: row.get(2)?,
+                token_count: row.get(3)?,
+            })
+        })?;
+        rows.collect()
     }
 }
 
@@ -1441,78 +1833,6 @@ fn glob_to_like_pattern(pattern: &str) -> String {
     result
 }
 
-/// Normalize code for comparison (remove whitespace, comments, variable names).
-fn normalize_code(code: &str) -> String {
-    code.lines()
-        .map(|line| {
-            // Remove leading/trailing whitespace
-            let trimmed = line.trim();
-            // Remove single-line comments
-            let without_comment = if let Some(idx) = trimmed.find("//") {
-                &trimmed[..idx]
-            } else if let Some(idx) = trimmed.find('#') {
-                &trimmed[..idx]
-            } else {
-                trimmed
-            };
-            without_comment.trim()
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Calculate similarity between two strings using Jaccard similarity on tokens.
-fn calculate_similarity(s1: &str, s2: &str) -> f64 {
-    let tokens1: std::collections::HashSet<&str> = s1
-        .split(|c: char| {
-            c.is_whitespace()
-                || c == '('
-                || c == ')'
-                || c == '{'
-                || c == '}'
-                || c == ';'
-                || c == ','
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-
-    let tokens2: std::collections::HashSet<&str> = s2
-        .split(|c: char| {
-            c.is_whitespace()
-                || c == '('
-                || c == ')'
-                || c == '{'
-                || c == '}'
-                || c == ';'
-                || c == ','
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-
-    if tokens1.is_empty() && tokens2.is_empty() {
-        return 1.0;
-    }
-    if tokens1.is_empty() || tokens2.is_empty() {
-        return 0.0;
-    }
-
-    let intersection = tokens1.intersection(&tokens2).count();
-    let union = tokens1.union(&tokens2).count();
-
-    intersection as f64 / union as f64
-}
-
-/// Simple MD5-like hash for grouping duplicates (not cryptographically secure).
-fn md5_hash(s: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    hasher.finish()
-}
-
 /// Preprocess a search query into keywords.
 fn preprocess_search_query(query: &str) -> Vec<String> {
     // Common words to filter out
@@ -1583,18 +1903,64 @@ fn edge_from_row(row: &rusqlite::Row) -> Edge {
     }
 }
 
-/// Result of duplicate detection.
+/// A lightweight symbol row for the `ctx map` command
+/// (see [`Database::get_map_symbols`]).
 #[derive(Debug, Clone)]
-pub struct DuplicateResult {
-    pub name1: String,
-    pub file1: String,
-    pub line1: u32,
-    pub name2: String,
-    pub file2: String,
-    pub line2: u32,
-    pub similarity: f64,
-    pub lines: u32,
-    pub hash: String,
+pub struct MapSymbolRow {
+    pub id: String,
+    pub file_path: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub line_start: u32,
+}
+
+/// Per-symbol complexity metrics (see [`Database::symbol_metrics`]).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SymbolMetrics {
+    pub id: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub fan_in: i64,
+    pub fan_out: i64,
+    pub complexity: i64,
+}
+
+/// A resolved relationship edge whose endpoints live in different files
+/// (see [`Database::get_cross_file_edges`]).
+#[derive(Debug, Clone)]
+pub struct CrossFileEdge {
+    pub source: EdgeSymbol,
+    pub target: EdgeSymbol,
+    /// Edge kind (`calls`, `implements`, `extends`, `uses`).
+    pub kind: String,
+    /// Line in the source file where the reference occurs.
+    pub line: Option<i64>,
+}
+
+/// Lightweight symbol info attached to a [`CrossFileEdge`].
+#[derive(Debug, Clone)]
+pub struct EdgeSymbol {
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+}
+
+/// Per-file aggregated complexity (see [`Database::file_complexity`]).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileComplexity {
+    pub file_path: String,
+    pub complexity: i64,
+    pub fan_out: i64,
+    pub symbol_count: i64,
 }
 
 /// Extension trait for optional query results.
@@ -1622,6 +1988,133 @@ mod tests {
         let stats = db.get_stats().unwrap();
         assert_eq!(stats.files, 0);
         assert_eq!(stats.symbols, 0);
+    }
+
+    #[test]
+    fn test_fresh_database_is_stamped_with_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        let db = Database::open(&db_path).unwrap();
+        let version: i64 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(db);
+
+        // Re-opening a stamped database works.
+        assert!(Database::open(&db_path).is_ok());
+    }
+
+    #[test]
+    fn test_legacy_v0_database_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        // Create a database, then reset it to the pre-versioning state (v0
+        // with existing tables). Pre-versioning databases lack the
+        // symbol_fingerprints table, so they must be rebuilt.
+        drop(Database::open(&db_path).unwrap());
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", 0).unwrap();
+        }
+
+        let err = Database::open(&db_path).unwrap_err();
+        match &err {
+            crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
+                assert_eq!(*found, 0);
+                assert_eq!(*expected, SCHEMA_VERSION);
+            }
+            other => panic!("expected SchemaVersionMismatch, got: {}", other),
+        }
+        assert!(err.to_string().contains("ctx index --force"));
+    }
+
+    #[test]
+    fn test_schema_version_mismatch_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("codebase.sqlite");
+
+        // A v1 database (pre-fingerprints) must be rejected with a hint to
+        // rebuild, as must any other unknown version.
+        for stale_version in [1i64, 99] {
+            drop(Database::open(&db_path).unwrap());
+            {
+                let conn = Connection::open(&db_path).unwrap();
+                conn.pragma_update(None, "user_version", stale_version)
+                    .unwrap();
+            }
+
+            let err = Database::open(&db_path).unwrap_err();
+            match &err {
+                crate::error::CtxError::SchemaVersionMismatch { found, expected } => {
+                    assert_eq!(*found, stale_version);
+                    assert_eq!(*expected, SCHEMA_VERSION);
+                }
+                other => panic!("expected SchemaVersionMismatch, got: {}", other),
+            }
+            assert!(err.to_string().contains("ctx index --force"));
+
+            // Restore the correct version so the next iteration can re-open.
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn test_fingerprint_batch_roundtrip_and_min_tokens_filter() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/a.rs".to_string(),
+                content_hash: "h1".to_string(),
+                size_bytes: 10,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::alpha", "alpha", "src/a.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::beta", "beta", "src/a.rs", 10))
+            .unwrap();
+
+        let fps = vec![
+            Fingerprint {
+                symbol_id: "src/a.rs::alpha".to_string(),
+                file_path: "src/a.rs".to_string(),
+                minhash: vec![1u8; 1024],
+                token_count: 80,
+            },
+            Fingerprint {
+                symbol_id: "src/a.rs::beta".to_string(),
+                file_path: "src/a.rs".to_string(),
+                minhash: vec![2u8; 1024],
+                token_count: 20,
+            },
+        ];
+        assert_eq!(db.insert_fingerprints_batch(&fps).unwrap(), 2);
+        assert_eq!(db.insert_fingerprints_batch(&[]).unwrap(), 0);
+
+        // No filter: both come back, ordered by symbol_id, bytes intact.
+        let all = db.get_fingerprints(0).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].symbol_id, "src/a.rs::alpha");
+        assert_eq!(all[0].minhash, vec![1u8; 1024]);
+        assert_eq!(all[1].token_count, 20);
+
+        // min_tokens filters out short symbols.
+        let filtered = db.get_fingerprints(50).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].symbol_id, "src/a.rs::alpha");
+
+        // Deleting the file's symbols cascades to fingerprints.
+        db.delete_symbols_for_file("src/a.rs").unwrap();
+        assert!(db.get_fingerprints(0).unwrap().is_empty());
     }
 
     #[test]
@@ -1669,6 +2162,146 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM symbol_vectors", [], |row| row.get(0))
             .expect("symbol_vectors table should exist");
         assert_eq!(count, 0, "symbol_vectors should be empty initially");
+    }
+
+    /// Build a minimal function symbol for metrics tests.
+    fn make_fn_symbol(id: &str, name: &str, file: &str, line: u32) -> Symbol {
+        Symbol {
+            id: id.to_string(),
+            file_path: file.to_string(),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: line,
+            line_end: line + 5,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        }
+    }
+
+    /// Build a 'calls' edge for metrics tests.
+    fn make_call_edge(source_id: &str, target_id: Option<&str>, target_name: &str) -> Edge {
+        Edge {
+            source_id: source_id.to_string(),
+            target_id: target_id.map(|s| s.to_string()),
+            target_name: target_name.to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(1),
+            col: None,
+            context: None,
+        }
+    }
+
+    /// Set up a database with three functions and a small call graph:
+    /// alpha -> beta (resolved), alpha -> external (unresolved), beta -> alpha (resolved).
+    fn metrics_fixture() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/a.rs".to_string(),
+                content_hash: "h1".to_string(),
+                size_bytes: 10,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+
+        db.insert_symbol(&make_fn_symbol("src/a.rs::alpha", "alpha", "src/a.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::beta", "beta", "src/a.rs", 10))
+            .unwrap();
+        db.insert_symbol(&make_fn_symbol("src/a.rs::gamma", "gamma", "src/a.rs", 20))
+            .unwrap();
+
+        db.insert_edge(&make_call_edge(
+            "src/a.rs::alpha",
+            Some("src/a.rs::beta"),
+            "beta",
+        ))
+        .unwrap();
+        db.insert_edge(&make_call_edge("src/a.rs::alpha", None, "external"))
+            .unwrap();
+        db.insert_edge(&make_call_edge(
+            "src/a.rs::beta",
+            Some("src/a.rs::alpha"),
+            "alpha",
+        ))
+        .unwrap();
+
+        db
+    }
+
+    #[test]
+    fn test_symbol_metrics_mirrors_complexity_formula() {
+        let db = metrics_fixture();
+        let metrics = db.symbol_metrics().unwrap();
+        assert_eq!(metrics.len(), 3);
+
+        let get = |name: &str| metrics.iter().find(|m| m.name == name).unwrap();
+
+        // alpha: fan_out 2 (beta + unresolved external), fan_in 1 (from beta)
+        let alpha = get("alpha");
+        assert_eq!(alpha.fan_out, 2);
+        assert_eq!(alpha.fan_in, 1);
+        assert_eq!(alpha.complexity, 2 * 2 + 1);
+        assert_eq!(alpha.file_path, "src/a.rs");
+        assert_eq!(alpha.line_start, 1);
+
+        // beta: fan_out 1, fan_in 1
+        let beta = get("beta");
+        assert_eq!(beta.fan_out, 1);
+        assert_eq!(beta.fan_in, 1);
+        assert_eq!(beta.complexity, 3); // fan_out(1) * 2 + fan_in(1)
+
+        // gamma: no edges at all
+        let gamma = get("gamma");
+        assert_eq!(gamma.fan_out, 0);
+        assert_eq!(gamma.fan_in, 0);
+        assert_eq!(gamma.complexity, 0);
+
+        // Ordered by complexity, highest first
+        assert_eq!(metrics[0].name, "alpha");
+    }
+
+    #[test]
+    fn test_file_complexity_aggregates_per_file() {
+        let db = metrics_fixture();
+        let files = db.file_complexity().unwrap();
+        assert_eq!(files.len(), 1);
+
+        let f = &files[0];
+        assert_eq!(f.file_path, "src/a.rs");
+        assert_eq!(f.symbol_count, 3);
+        assert_eq!(f.fan_out, 3);
+        // alpha (5) + beta (3) + gamma (0)
+        assert_eq!(f.complexity, 8);
+    }
+
+    #[test]
+    fn test_fan_in_counts() {
+        let db = metrics_fixture();
+
+        let ids = vec![
+            "src/a.rs::alpha".to_string(),
+            "src/a.rs::beta".to_string(),
+            "src/a.rs::gamma".to_string(),
+        ];
+        let counts = db.fan_in_counts(&ids).unwrap();
+        assert_eq!(counts.get("src/a.rs::alpha"), Some(&1));
+        assert_eq!(counts.get("src/a.rs::beta"), Some(&1));
+        // gamma has no incoming resolved calls, so it is absent
+        assert!(!counts.contains_key("src/a.rs::gamma"));
+
+        // Empty input short-circuits
+        assert!(db.fan_in_counts(&[]).unwrap().is_empty());
     }
 
     #[test]

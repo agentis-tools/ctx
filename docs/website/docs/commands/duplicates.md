@@ -1,7 +1,7 @@
 ---
 id: duplicates
 title: ctx duplicates
-sidebar_position: 5
+sidebar_position: 8
 ---
 
 # ctx duplicates
@@ -119,6 +119,6 @@ ctx duplicates --json
 
 ## See Also
 
-- [ctx score](score.md) - counts *newly introduced* duplication as a gate metric
-- [Quality Gates](overview.md)
-- [JSON Output](../reference/json-output.md)
+- [ctx score](./score.md) - counts *newly introduced* duplication as a gate metric
+- [Quality Gates](../integrations/quality-gates.md)
+- [JSON Output](../json-output.md)

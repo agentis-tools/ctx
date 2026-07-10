@@ -1,0 +1,46 @@
+# Architecture rules for `ctx check` (and `ctx score`'s check_violations).
+#
+# This starter file is intentionally inert: it parses as a valid rules file
+# but constrains nothing. Uncomment and adapt the examples below to your
+# codebase, then run `ctx check --list` to inspect what was parsed.
+#
+# ctx never overwrites this file once it exists (not even `ctx harness init
+# --force`): it encodes your policy, not ctx's.
+
+version = 1
+
+# Layers are named glob patterns over indexed file paths. A file may belong
+# to at most one layer; files in no layer are unconstrained.
+#
+# [layers]
+# domain         = ["src/domain/**"]
+# application    = ["src/app/**"]
+# infrastructure = ["src/infra/**", "src/db/**"]
+
+# `from` must not depend on `to`.
+#
+# [[rules.forbidden]]
+# from   = "domain"
+# to     = "infrastructure"
+# reason = "Domain layer must stay persistence-agnostic"
+
+# Only the listed layers may depend on `layer`.
+#
+# [[rules.allowed_dependents]]
+# layer = "infrastructure"
+# only  = ["application"]
+
+# Metric thresholds: fan_in | fan_out | complexity | file_symbols,
+# scoped to "symbol" or "file".
+#
+# [[rules.limit]]
+# metric  = "fan_in"
+# scope   = "symbol"
+# max     = 25
+# exclude = ["src/core/**"]
+
+# Frozen paths that must not gain new dependents.
+#
+# [[rules.no_new_dependents]]
+# paths  = ["src/legacy/**"]
+# reason = "Legacy module is frozen; do not add new callers"

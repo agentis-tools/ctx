@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::commands::hotspots::HotspotBy;
+
 /// CLI output format (with clap integration).
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
 pub enum OutputFormat {
@@ -9,6 +11,8 @@ pub enum OutputFormat {
     #[value(alias = "md")]
     Md,
     Plain,
+    /// Plain text (used by `ctx map`; alias for plain elsewhere)
+    Text,
     Json,
 }
 
@@ -18,7 +22,7 @@ impl OutputFormat {
         match self {
             OutputFormat::Xml => ctx::formatter::OutputFormat::Xml,
             OutputFormat::Markdown | OutputFormat::Md => ctx::formatter::OutputFormat::Markdown,
-            OutputFormat::Plain => ctx::formatter::OutputFormat::Plain,
+            OutputFormat::Plain | OutputFormat::Text => ctx::formatter::OutputFormat::Plain,
             OutputFormat::Json => ctx::formatter::OutputFormat::Json,
         }
     }
@@ -27,7 +31,11 @@ impl OutputFormat {
 #[derive(Parser, Debug)]
 #[command(name = "ctx")]
 #[command(about = "Generate formatted context for AI assistants")]
-#[command(version)]
+// clap's auto --version exits during parsing, before our code runs; we
+// define our own flag below so `--version --check` can compare against the
+// latest GitHub release (`ctx --version` alone prints the same "ctx <ver>"
+// line clap used to).
+#[command(disable_version_flag = true)]
 #[command(after_help = r#"EXAMPLES:
     ctx                           # All files in current directory
     ctx "src/**/*.rs"             # Rust files matching glob
@@ -43,6 +51,14 @@ impl OutputFormat {
 pub struct Args {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Print version
+    #[arg(short = 'V', long = "version")]
+    pub version: bool,
+
+    /// With --version: also query GitHub for a newer release
+    #[arg(long, requires = "version")]
+    pub check: bool,
 
     /// File patterns or paths to include (glob syntax supported)
     /// Examples: "src/**/*.rs", "*.ts", "src/"
@@ -76,6 +92,10 @@ pub struct Args {
     /// Buffer all output before printing (instead of streaming)
     #[arg(long, global = true)]
     pub no_stream: bool,
+
+    /// Emit machine-readable JSON to stdout (see docs/json-output.md)
+    #[arg(long, global = true)]
+    pub json: bool,
 
     /// Print stats (file count, total size, time taken)
     #[arg(long, global = true)]
@@ -136,6 +156,50 @@ pub enum Command {
     Query {
         #[command(subcommand)]
         query: QueryCommand,
+    },
+
+    /// Run read-only SQL against the code index (via the stable `v1.*` views)
+    #[command(after_help = r#"EXAMPLES:
+    ctx sql "SELECT name, file, complexity FROM v1.symbols ORDER BY complexity DESC LIMIT 10"
+    ctx sql --json "SELECT kind, COUNT(*) n FROM v1.symbols GROUP BY kind"
+    ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
+    ctx sql --schema        # print the v1 schema reference and exit
+
+The query surface is the versioned `v1` schema; anything outside `v1.*` is
+internal and unstable. Access is read-only and engine-hardened.
+"#)]
+    Sql {
+        /// SQL text. If "-" or omitted while stdin is piped, read from stdin.
+        query: Option<String>,
+
+        /// Read the query from a file (mutually exclusive with the QUERY arg)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+
+        /// Output format: table, csv, or json (the global -f/--format does not
+        /// apply here; use this or --json)
+        #[arg(long = "output", default_value = "table")]
+        output: String,
+
+        /// Alias for --output json
+        #[arg(long)]
+        json: bool,
+
+        /// Cap returned rows (0 = unlimited)
+        #[arg(long, default_value = "1000")]
+        max_rows: usize,
+
+        /// Abort the query after N seconds
+        #[arg(long, default_value = "10")]
+        timeout: u64,
+
+        /// Exit 1 if the query returns >= 1 row (for gate usage)
+        #[arg(long)]
+        fail_on_rows: bool,
+
+        /// Print the public schema reference and exit
+        #[arg(long)]
+        schema: bool,
     },
 
     /// Search for symbols using semantic or text search
@@ -221,6 +285,33 @@ pub enum Command {
         openai: bool,
     },
 
+    /// Find existing functions similar to a description (reuse before you write)
+    ///
+    /// Searches function and method symbols by embedding similarity and
+    /// reports a one-line doc, similarity score, and fan-in for each hit so
+    /// you can judge whether an established utility already covers the need.
+    ///
+    /// Exit codes: 0 = success (even with no matches); 2 = no embeddings
+    /// generated yet (run `ctx embed`, or use --keyword for FTS-based search
+    /// that needs no embeddings) or any other operational error.
+    Similar {
+        /// Natural language or signature-like description of the intended function
+        query: String,
+
+        /// Maximum number of results
+        #[arg(long, short, default_value = "10")]
+        limit: usize,
+
+        /// Use FTS5 keyword search instead of embeddings (works with zero
+        /// embeddings and no API key)
+        #[arg(long)]
+        keyword: bool,
+
+        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        #[arg(long)]
+        openai: bool,
+    },
+
     /// Analyze code complexity and flag high fan-out functions
     Complexity {
         /// Fan-out threshold (default: 10, flag > 50 as critical)
@@ -236,19 +327,61 @@ pub enum Command {
         output: String,
     },
 
-    /// Detect duplicate or similar code blocks
+    /// Detect structurally similar functions (MinHash near-duplicate search)
+    ///
+    /// Functions are compared by the Jaccard similarity of their normalized
+    /// token shingles (identifiers -> ID, literals -> LIT, comments dropped),
+    /// so renamed variables and changed literals still match. Fingerprints
+    /// are built during `ctx index`; reindex before running this command.
+    /// Solidity functions are skipped (no tree-sitter grammar).
+    ///
+    /// Breaking change: this replaces the old line-based detector and its
+    /// percent/line-count flags.
     Duplicates {
-        /// Minimum similarity percentage (0-100)
-        #[arg(long, default_value = "80")]
-        similarity: u32,
+        /// Jaccard similarity threshold (0.0-1.0) over normalized token
+        /// shingles. Breaking change from the old percent-based, line-oriented
+        /// threshold: 0.85 means 85% of 5-token shingles are shared, not that
+        /// 85% of lines match. Values below 0.5 are clamped to 0.5.
+        #[arg(long, default_value_t = 0.85)]
+        threshold: f64,
 
-        /// Minimum lines for a code block to be considered
-        #[arg(long, default_value = "5")]
-        min_lines: u32,
+        /// Ignore functions with fewer than N normalized tokens
+        #[arg(long, default_value_t = 50)]
+        min_tokens: i64,
 
-        /// Output format (table, json)
-        #[arg(long, default_value = "table")]
-        output: String,
+        /// Only report pairs where at least one function is in a file
+        /// changed relative to this git reference (e.g. `main`)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
+
+        /// Exit with code 1 when any near-duplicate pair is reported
+        /// (default: informational, exit 0)
+        #[arg(long)]
+        fail_on_found: bool,
+    },
+
+    /// Print a token-budgeted map of the repository's most important symbols
+    ///
+    /// Ranks symbols with PageRank over the resolved symbol graph (calls,
+    /// imports, extends, implements) and emits them (grouped by file,
+    /// preceded by a compact project tree) until the token budget is
+    /// exhausted. Tokens are estimated as ceil(chars / 4). Output is
+    /// deterministic for identical index state, which makes it well suited
+    /// for SessionStart hooks that prime an AI assistant with a stable
+    /// overview of the codebase.
+    Map {
+        /// Token budget for the map (tokens are estimated as ceil(chars / 4))
+        #[arg(long, default_value = "2000")]
+        budget: usize,
+
+        /// Focus on a file path/glob or symbol name: boosts the matching
+        /// symbols and their direct neighbors in the ranking
+        #[arg(long)]
+        focus: Option<String>,
+
+        /// Output format (text, markdown, json)
+        #[arg(short = 'f', long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
 
     /// Generate a dependency graph visualization
@@ -393,6 +526,50 @@ pub enum Command {
         no_tree: bool,
     },
 
+    /// Rank files by combined git churn and code complexity (hotspots)
+    ///
+    /// A hotspot is code that is both structurally complex and frequently
+    /// changed -- usually the highest-leverage refactoring target. Requires a
+    /// git repository and a built index (run `ctx index` first).
+    #[command(after_help = r#"SCORING:
+    score = normalized_churn x normalized_complexity, where both factors are
+    min-max normalized to [0, 1] over the analyzed set (indexed files with at
+    least --min-churn commits since --since). If all values are equal, they
+    all normalize to 1.0. Raw commit and complexity counts are reported
+    alongside the score.
+
+APPROXIMATIONS (v1):
+    - With --by symbol, a symbol's churn is approximated by its FILE's commit
+      count; per-symbol git history is not tracked yet.
+    - Churn is collected with `git log --no-renames`, so renaming a file
+      resets its commit count.
+
+EXIT CODES:
+    0    success (informational command; hotspots never affect the exit code)
+    2    operational error (not a git repository, missing index, bad ref)
+"#)]
+    Hotspots {
+        /// How far back to count commits (git --since date spec)
+        #[arg(long, default_value = "6 months ago")]
+        since: String,
+
+        /// Maximum number of entries to show
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Rank by file or by symbol (symbol churn is approximated by its file's churn)
+        #[arg(long, value_enum, default_value_t = HotspotBy::File)]
+        by: HotspotBy,
+
+        /// Minimum number of commits for a file to be analyzed
+        #[arg(long, default_value = "2")]
+        min_churn: u32,
+
+        /// Only analyze files changed relative to this git ref (e.g. main)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
+    },
+
     /// Generate code quality audit report
     Audit {
         /// Output format (text, json, markdown)
@@ -410,6 +587,167 @@ pub enum Command {
         /// Only audit changed files (not yet implemented)
         #[arg(long)]
         incremental: bool,
+    },
+
+    /// Check architecture rules from .ctx/rules.toml against the index
+    ///
+    /// Exit codes: 0 = no violations, 1 = at least one violation,
+    /// 2 = operational error (missing/invalid rules file, unknown or
+    /// overlapping layers, missing index, bad git ref).
+    #[command(after_help = r#"RULES FILE (.ctx/rules.toml):
+    version = 1
+
+    [layers]                                   # layer name -> globs over indexed files
+    domain         = ["src/domain/**"]
+    application    = ["src/app/**"]
+    infrastructure = ["src/infra/**", "src/db/**"]
+
+    [[rules.forbidden]]                        # `from` must not depend on `to`
+    from   = "domain"
+    to     = "infrastructure"
+    reason = "Domain layer must stay persistence-agnostic"
+
+    [[rules.allowed_dependents]]               # only `only` may depend on `layer`
+    layer = "infrastructure"                   # (files in no layer are exempt)
+    only  = ["application"]
+
+    [[rules.limit]]                            # metric thresholds
+    metric  = "fan_in"                         # fan_in | fan_out | complexity | file_symbols
+    scope   = "symbol"                         # symbol | file
+    max     = 25
+    exclude = ["src/core/**"]
+
+    [[rules.no_new_dependents]]                # frozen paths
+    paths  = ["src/legacy/**"]
+    reason = "Legacy module is frozen; do not add new callers"
+
+EXAMPLES:
+    ctx check                        # check all rules
+    ctx check --against main         # only violations touching files changed since main
+    ctx check --list                 # show parsed rules and layer sizes
+    ctx check --json                 # machine-readable output (see docs/json-output.md)
+"#)]
+    Check {
+        /// Path to the rules file (default: .ctx/rules.toml)
+        #[arg(long)]
+        rules: Option<std::path::PathBuf>,
+
+        /// Only report violations where at least one endpoint's file changed
+        /// since REF (for no_new_dependents: where the new dependent changed)
+        #[arg(long, value_name = "REF")]
+        against: Option<String>,
+
+        /// Print the parsed rules and layer membership counts, then exit 0
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Score the quality delta of your changes against a git reference
+    ///
+    /// Compares the working tree (plus commits since the merge base with
+    /// REF) against REF and prints a scorecard: complexity and fan-out
+    /// deltas, newly introduced near-duplicate functions, architecture-rule
+    /// violations, and symbols added/removed. The index is refreshed
+    /// incrementally before scoring.
+    ///
+    /// Exit codes: 0 = clean (or no --fail-on given), 1 = at least one
+    /// --fail-on condition was met, 2 = operational error (not a git repo,
+    /// bad reference, malformed --fail-on, invalid rules file).
+    #[command(after_help = r#"METRICS (for --fail-on and JSON output):
+    complexity_delta    sum over changed files of per-function
+                        2*fan_out + same-file fan_in, current - baseline
+    fan_out_delta       calls sourced in changed files, current - baseline
+    new_duplication     near-duplicate pairs (Jaccard >= 0.85, >= 50 tokens,
+                        >= 1 endpoint in a changed file) absent at REF
+    check_violations    `ctx check --against REF` violations
+                        (0 with a note when .ctx/rules.toml is missing)
+    symbols_added       symbols present now but not at REF
+    symbols_removed     symbols present at REF but not now
+    files_changed       changed source files that were scored
+
+NOTES:
+    Baseline metrics come from parsing each changed file's content at REF in
+    memory with the same parser; fan-in is approximated as same-file callers
+    on both sides so the deltas compare like with like.
+
+EXAMPLES:
+    ctx score                        # score uncommitted changes (vs HEAD)
+    ctx score --against main         # score the whole branch / PR vs main
+    ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+    ctx score --fail-on "complexity_delta>=20" --json
+"#)]
+    Score {
+        /// Git reference to compare against. The default (HEAD) scores
+        /// uncommitted changes; use your default branch (main/master) to
+        /// score a whole branch or PR
+        #[arg(long, value_name = "REF", default_value = "HEAD")]
+        against: String,
+
+        /// Fail (exit 1) when any comma-separated condition `metric OP value`
+        /// holds; OP is one of >=, <=, >, < (e.g. "new_duplication>0")
+        #[arg(long, value_name = "EXPR")]
+        fail_on: Option<String>,
+    },
+
+    /// Package ctx as an AI coding harness integration (Claude Code)
+    ///
+    /// `init` scaffolds hook scripts, settings, and (in plugin mode) a full
+    /// Claude Code plugin from templates embedded in this binary. `compat`
+    /// is the version guard those generated hooks call before doing any
+    /// work. `doctor` diagnoses the integration end to end.
+    #[command(after_help = r#"EXIT CODES:
+    0    success / healthy
+    1    doctor found problems (errors or warnings)
+    2    operational error (unknown --target, bad arguments, IO failure)
+    3    version requirement not met (reserved exclusively for
+         'ctx harness compat --require <VERSION>')
+
+EXAMPLES:
+    ctx harness init                          # wire hooks into .claude/ (local mode)
+    ctx harness init --mode plugin            # scaffold a Claude Code plugin
+    ctx harness init --force                  # regenerate even user-modified files
+    ctx harness compat --require 0.2          # exit 0 if this binary is new enough
+    ctx harness doctor --json                 # machine-readable health report
+"#)]
+    Harness {
+        #[command(subcommand)]
+        cmd: HarnessCommand,
+    },
+
+    /// Update ctx to the latest GitHub release (or a pinned version)
+    ///
+    /// Downloads the release artifact for this platform, verifies its
+    /// sha256 against the release's published SHA256SUMS file, and
+    /// atomically replaces the running executable. ctx never updates
+    /// itself automatically: the passive update notice only points here.
+    #[command(after_help = r#"EXIT CODES (ctx-wide convention):
+    0    updated successfully, or already up to date
+    2    operational error (network failure, checksum mismatch, install
+         location not writable, unsupported platform, unknown version)
+
+SECURITY:
+    The downloaded archive is verified against the SHA256SUMS file published
+    with the GitHub release before anything is replaced. On mismatch the
+    update aborts with exit code 2 and the installed binary is untouched.
+    Harness permissions generated by 'ctx harness init' deny
+    'Bash(ctx self-update*)', so AI agents cannot swap the binary out from
+    under a running session.
+
+NOTES:
+    Set CTX_NO_UPDATE_CHECK=1 to silence the passive update notice.
+    If ctx was installed via cargo, prefer 'cargo install agentis-ctx'.
+    On Windows the previous binary is left beside the new one as
+    'ctx.exe.old' (removed on the next self-update).
+
+EXAMPLES:
+    ctx self-update                    # update to the latest release
+    ctx self-update --version 0.3.0    # install an exact release
+    ctx self-update --json             # machine-readable result
+"#)]
+    SelfUpdate {
+        /// Install this exact release (allows downgrades) instead of the latest
+        #[arg(long, value_name = "X.Y.Z")]
+        version: Option<String>,
     },
 
     /// Interactive shell for exploring codebase
@@ -434,6 +772,73 @@ pub enum Command {
         #[arg(long)]
         mcp: bool,
     },
+}
+
+/// Harness targets supported by `ctx harness init`.
+///
+/// Unknown targets are rejected by clap with a usage error (exit code 2)
+/// that lists the supported values.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
+pub enum HarnessTarget {
+    /// Claude Code (hooks, settings, skills, plugin manifest)
+    #[default]
+    Claude,
+}
+
+/// Scaffolding mode for `ctx harness init`.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
+pub enum HarnessMode {
+    /// Hook scripts under `.claude/hooks/ctx/` plus a settings snippet
+    /// printed for manual inclusion
+    #[default]
+    Local,
+    /// A distributable Claude Code plugin (`.claude-plugin/`, hooks, skill,
+    /// marketplace manifest)
+    Plugin,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HarnessCommand {
+    /// Generate integration files from templates embedded in this binary
+    ///
+    /// Every generated file carries a `generated by ctx` header and a
+    /// checksum. Re-running `init` regenerates unmodified files in place
+    /// but never overwrites files you have edited (warn + skip) unless
+    /// `--force` is given. `.ctx/rules.toml` is never overwritten, even
+    /// with `--force`.
+    Init {
+        /// Harness to target (unknown values exit 2 listing supported targets)
+        #[arg(long, value_enum, default_value = "claude")]
+        target: HarnessTarget,
+
+        /// What to scaffold: local hooks or a distributable plugin
+        #[arg(long, value_enum, default_value = "local")]
+        mode: HarnessMode,
+
+        /// Overwrite user-modified generated files (except .ctx/rules.toml)
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Check that this binary satisfies a version requirement
+    ///
+    /// Exits 0 when the running binary satisfies REQUIRE, otherwise prints
+    /// one line to stderr and exits 3. Exit code 3 is reserved exclusively
+    /// for this subcommand; generated hook scripts call it as a guard so
+    /// they can fail open (loudly) when the binary is older than the
+    /// templates that generated them.
+    Compat {
+        /// Required version: a bare version ("0.2" means "at least 0.2.0")
+        /// or a semver requirement expression ("^0.2", ">=0.2, <0.4")
+        #[arg(long, value_name = "SEMVER")]
+        require: String,
+    },
+
+    /// Diagnose the harness integration (binary, templates, index, rules, hooks, MCP)
+    ///
+    /// Exit codes: 0 = healthy (info-level notes only), 1 = problems found
+    /// (errors or warnings), 2 = operational error.
+    Doctor,
 }
 
 #[derive(Subcommand, Debug)]

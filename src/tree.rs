@@ -1,3 +1,8 @@
+//! ASCII project tree rendering.
+//!
+//! Builds the `├──`/`└──` style directory tree shown at the top of
+//! generated context. Entry point: [`generate_tree`].
+
 use std::collections::BTreeMap;
 
 use crate::walker::{format_size, FileEntry};

@@ -3,25 +3,76 @@ mod cli;
 mod commands;
 mod shell;
 
-use std::process;
+use std::process::ExitCode;
 
 use clap::Parser;
 
-use cli::{Args, Command};
+use cli::{Args, Command, OutputFormat};
+use commands::MapFormat;
 use ctx::error::Result;
+use ctx::exit::Outcome;
 
-fn main() {
-    let args = Args::parse();
-
-    if let Err(e) = run(args) {
-        eprintln!("Error: {}", e);
-        process::exit(1);
-    }
+/// Exit codes: 0 = clean, 1 = findings, 2 = operational error,
+/// 3 = version requirement not met (`ctx harness compat` only).
+fn main() -> ExitCode {
+    // The OS-provided main thread stack is too small on some platforms (notably
+    // Windows, which defaults to ~1 MiB) for this program's parsing/graph-walking
+    // call depth; run on a thread with a larger, explicit stack instead.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(run_main)
+        .expect("failed to spawn main worker thread")
+        .join()
+        .expect("main worker thread panicked")
 }
 
-fn run(args: Args) -> Result<()> {
+fn run_main() -> ExitCode {
+    // Same rationale as the main thread above: give rayon's global pool (used by
+    // `ctx index --parallel`) an explicit stack size instead of the platform default.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .stack_size(16 * 1024 * 1024)
+        .build_global();
+
+    let args = Args::parse();
+    let json = args.json;
+    // The passive update check never runs for update-related invocations
+    // (`ctx self-update`, `ctx --version [--check]`); its remaining
+    // suppression rules (TTY, --json, env vars, 24h cache) live in
+    // `ctx::update::passive_check`.
+    let skip_passive_check =
+        args.version || matches!(args.command, Some(Command::SelfUpdate { .. }));
+
+    let exit = match run(args) {
+        Ok(outcome) => ExitCode::from(outcome.code()),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            ExitCode::from(2)
+        }
+    };
+
+    // Passive update notice (stderr only, at most one network call per 24h,
+    // silent on failure; see docs/commands/self-update.md). Never automatic:
+    // this only prints a notice, it never installs anything.
+    if !skip_passive_check {
+        ctx::update::passive_check(json);
+    }
+
+    exit
+}
+
+fn run(args: Args) -> Result<Outcome> {
+    // Global machine-readable output flag (see docs/json-output.md)
+    let json = args.json;
+
+    // Custom --version handling: clap's auto flag is disabled (it would
+    // exit before `--check` could run). `ctx --version` prints the same
+    // line the auto flag did; `--check` adds a release comparison.
+    if args.version {
+        return commands::run_version(args.check, json);
+    }
+
     // Handle subcommands
-    match args.command {
+    let result: Result<()> = match args.command {
         Some(Command::Index {
             watch,
             verbose,
@@ -44,17 +95,43 @@ fn run(args: Args) -> Result<()> {
             );
             commands::run_index(config)
         }
-        Some(Command::Query { query }) => commands::run_query(query),
+        Some(Command::Query { query }) => commands::run_query(query, json),
+        Some(Command::Sql {
+            query,
+            file,
+            output,
+            json: json_flag,
+            max_rows,
+            timeout,
+            fail_on_rows,
+            schema,
+        }) => {
+            // `ctx sql` owns its exit code (0 clean / 1 with --fail-on-rows / 2 error),
+            // so it returns an Outcome directly like the other quality commands.
+            return commands::run_sql(commands::SqlArgs {
+                query,
+                file,
+                format: output,
+                json: json || json_flag,
+                max_rows,
+                timeout,
+                fail_on_rows,
+                schema,
+            });
+        }
         Some(Command::Search {
             query,
             limit,
             output,
-        }) => commands::run_search(&query, limit, &output),
+        }) => {
+            let output = if json { "json".to_string() } else { output };
+            commands::run_search(&query, limit, &output)
+        }
         Some(Command::Source { symbol, file, kind }) => {
             commands::run_source(&symbol, file.as_deref(), kind.as_deref())
         }
         Some(Command::Explain { symbol, file, kind }) => {
-            commands::run_explain(&symbol, file.as_deref(), kind.as_deref())
+            commands::run_explain(&symbol, file.as_deref(), kind.as_deref(), json)
         }
         Some(Command::Embed {
             force,
@@ -74,17 +151,61 @@ fn run(args: Args) -> Result<()> {
             limit,
             output,
             openai,
-        }) => commands::run_semantic(&query, limit, &output, openai),
+        }) => {
+            let output = if json { "json".to_string() } else { output };
+            commands::run_semantic(&query, limit, &output, openai)
+        }
+        Some(Command::Similar {
+            query,
+            limit,
+            keyword,
+            openai,
+        }) => {
+            // `similar` participates in the Outcome convention directly:
+            // Clean on success, Err (exit 2) when embeddings are missing.
+            return commands::run_similar(&query, limit, keyword, openai, json);
+        }
         Some(Command::Complexity {
             threshold,
             warnings_only,
             output,
         }) => commands::run_complexity(threshold, warnings_only, &output),
         Some(Command::Duplicates {
-            similarity,
-            min_lines,
-            output,
-        }) => commands::run_duplicates(similarity, min_lines, &output),
+            threshold,
+            min_tokens,
+            against,
+            fail_on_found,
+        }) => {
+            // Quality command: returns its own Outcome (Findings with
+            // --fail-on-found when pairs are reported).
+            return commands::run_duplicates(
+                threshold,
+                min_tokens,
+                against.as_deref(),
+                json,
+                fail_on_found,
+            );
+        }
+        Some(Command::Map {
+            budget,
+            focus,
+            format,
+        }) => {
+            // The global --json flag forces JSON format for consistency.
+            let format = if json {
+                Ok(MapFormat::Json)
+            } else {
+                match format {
+                    OutputFormat::Text => Ok(MapFormat::Text),
+                    OutputFormat::Markdown | OutputFormat::Md => Ok(MapFormat::Markdown),
+                    OutputFormat::Json => Ok(MapFormat::Json),
+                    OutputFormat::Xml | OutputFormat::Plain => Err(ctx::error::CtxError::Other(
+                        "ctx map supports --format text, markdown, or json".to_string(),
+                    )),
+                }
+            };
+            format.and_then(|format| commands::run_map(budget, focus.as_deref(), format))
+        }
         Some(Command::Graph {
             output,
             by_file,
@@ -149,12 +270,42 @@ fn run(args: Args) -> Result<()> {
             show_sizes,
             no_tree,
         ),
+        Some(Command::Hotspots {
+            since,
+            limit,
+            by,
+            min_churn,
+            against,
+        }) => commands::run_hotspots(&since, limit, by, min_churn, against.as_deref(), json),
+        Some(Command::Check {
+            rules,
+            against,
+            list,
+        }) => {
+            // Quality command: returns Outcome natively (0 clean / 1 findings).
+            return commands::run_check(rules, against, list, json);
+        }
+        Some(Command::Score { against, fail_on }) => {
+            // Quality command: returns Outcome natively (0 clean / 1 when a
+            // --fail-on condition is met).
+            return commands::run_score(&against, fail_on.as_deref(), json);
+        }
         Some(Command::Audit {
             output_format,
             min_score,
             categories,
             incremental,
         }) => commands::run_audit(&output_format, min_score, categories, incremental),
+        Some(Command::Harness { cmd }) => {
+            // Harness command: returns its own Outcome (doctor exits 1 on
+            // problems; compat exits 3 on version mismatch).
+            return commands::run_harness(cmd, json);
+        }
+        Some(Command::SelfUpdate { version }) => {
+            // Update command: returns its own Outcome (Clean when updated or
+            // already up to date; any failure maps to exit 2 in main).
+            return commands::run_self_update(version.as_deref(), json);
+        }
         Some(Command::Shell {
             history,
             no_history,
@@ -163,5 +314,10 @@ fn run(args: Args) -> Result<()> {
         #[cfg(feature = "mcp")]
         Some(Command::Serve { mcp }) => commands::run_serve(mcp),
         None => commands::run_context(args),
-    }
+    };
+
+    // Commands routed through this fallthrough never report findings;
+    // quality commands (e.g. `duplicates`) return early with their own
+    // Outcome above.
+    result.map(|_| Outcome::Clean)
 }

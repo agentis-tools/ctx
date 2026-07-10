@@ -303,7 +303,9 @@ Total: 94 functions analyzed
 
 ### Duplicate Detection
 
-Find copy-pasted code:
+Find copy-pasted code, even when variables were renamed or literals changed
+(functions are compared structurally with MinHash fingerprints built during
+`ctx index`):
 
 ```bash
 ctx duplicates
@@ -311,19 +313,20 @@ ctx duplicates
 
 Output:
 ```
-Duplicate Code Detection (similarity >= 80%, min 5 lines)
+Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens)
 ====================================================================================================
 
-1. Similarity: 90.9% (9 lines)
-   extract_edges (src/parser/python.rs:318)
-   extract_edges (src/parser/typescript.rs:430)
-
-2. Similarity: 82.9% (24 lines)
-   test_extract_calls (src/parser/python.rs:889)
-   test_extract_calls (src/parser/rust.rs:614)
+1. similarity 0.938
+   src/parser/python.rs:318 extract_edges (74 tokens)
+   src/parser/typescript.rs:430 extract_edges (76 tokens)
 ----------------------------------------------------------------------------------------------------
-Found 17 duplicate pairs
+Found 1 near-duplicate pair(s).
 ```
+
+Tune it with `--threshold <0.0-1.0>` (Jaccard similarity, default 0.85) and
+`--min-tokens <N>` (default 50, raise it to filter idiomatic boilerplate).
+Use `--against main` to only check functions in changed files, and
+`--fail-on-found` to exit 1 in CI when a pair is reported.
 
 ### Dependency Graph
 
@@ -560,8 +563,8 @@ ctx index
 # Find complex functions that might need review
 ctx complexity --warnings-only
 
-# Find duplicate code
-ctx duplicates --similarity 75
+# Find near-duplicate functions (structural match, renames ignored)
+ctx duplicates --threshold 0.9
 
 # Understand file dependencies
 ctx graph --by-file --output mermaid

@@ -1,9 +1,3 @@
----
-id: score
-title: ctx score
-sidebar_position: 3
----
-
 # ctx score
 
 Score the quality delta of your changes against a git reference.
@@ -20,7 +14,7 @@ The `score` command compares the working tree (plus commits since the merge base
 
 - **Complexity and fan-out deltas** - per changed file, baseline vs. current
 - **New duplication** - near-duplicate function pairs that did not exist at REF
-- **Architecture violations** - the [`ctx check`](check.md) rules, scoped to the same REF
+- **Architecture violations** - the [`ctx check`](./check.md) rules, scoped to the same REF
 - **Symbols added / removed** - API surface churn
 
 The index is refreshed **incrementally** before scoring (a `note: index refreshed (N files reindexed)` notice goes to stderr). Baseline metrics are computed by parsing each changed file's content at REF **in memory** with the same parser used for indexing - nothing is written to the database, and both sides use the same method so the deltas are honest.
@@ -136,12 +130,12 @@ ctx score --against main --json
 
 - **Fan-in approximation:** the baseline side is parsed in isolation, so cross-file callers are unknowable there. Fan-in is therefore counted as *same-file* callers on **both** sides, keeping the delta comparable. This is surfaced as a note in every run.
 - Symbols are matched across sides by `(file, parent, name)` - never by symbol id, since ids embed line numbers that shift. A renamed function counts as one removal plus one addition.
-- `new_duplication` inherits the [`ctx duplicates`](duplicates.md) caveats: Solidity functions are not fingerprinted, and idiomatic boilerplate can look structurally similar.
+- `new_duplication` inherits the [`ctx duplicates`](./duplicates.md) caveats: Solidity functions are not fingerprinted, and idiomatic boilerplate can look structurally similar.
 - Changed files that are excluded from the index (ignore patterns) are not scored.
 
 ## See Also
 
-- [Quality Gates](overview.md) - wiring `ctx score` into CI and Claude Code hooks
-- [ctx check](check.md)
-- [ctx duplicates](duplicates.md)
-- [JSON Output](../reference/json-output.md)
+- [Quality Gates](../integrations/quality-gates.md) - wiring `ctx score` into CI and Claude Code hooks
+- [ctx check](./check.md)
+- [ctx duplicates](./duplicates.md)
+- [JSON Output](../json-output.md)

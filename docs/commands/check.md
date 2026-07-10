@@ -1,9 +1,3 @@
----
-id: check
-title: ctx check
-sidebar_position: 2
----
-
 # ctx check
 
 Enforce architecture rules from `.ctx/rules.toml` against the code intelligence index.
@@ -143,7 +137,7 @@ ctx check --against main --json
 }
 ```
 
-See [JSON Output](../reference/json-output.md) for the full payload contract.
+See [JSON Output](../json-output.md) for the full payload contract.
 
 ## Caveats
 
@@ -153,6 +147,6 @@ See [JSON Output](../reference/json-output.md) for the full payload contract.
 
 ## See Also
 
-- [ctx score](score.md) - includes `check_violations` as one metric of a combined quality gate
-- [Quality Gates](overview.md)
-- [JSON Output](../reference/json-output.md)
+- [ctx score](./score.md) - includes `check_violations` as one metric of a combined quality gate
+- [Quality Gates](../integrations/quality-gates.md)
+- [JSON Output](../json-output.md)

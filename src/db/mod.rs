@@ -10,4 +10,7 @@ pub mod models;
 pub mod schema;
 
 pub use models::*;
-pub use schema::Database;
+pub use schema::{
+    CrossFileEdge, Database, EdgeSymbol, FileComplexity, MapSymbolRow, SymbolMetrics,
+    SCHEMA_VERSION,
+};

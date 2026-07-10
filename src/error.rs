@@ -86,6 +86,10 @@ pub enum CtxError {
     #[allow(dead_code)] // Part of public API for future use
     IndexNotFound(String),
 
+    /// The on-disk index was created with a different schema version.
+    #[error("Index schema version mismatch (found v{found}, expected v{expected}). Run 'ctx index --force' to rebuild the index.")]
+    SchemaVersionMismatch { found: i64, expected: i64 },
+
     /// Parse error during code analysis.
     #[error("Parse error: {0}")]
     #[allow(dead_code)] // Part of public API for future use

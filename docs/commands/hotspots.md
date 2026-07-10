@@ -1,9 +1,3 @@
----
-id: hotspots
-title: ctx hotspots
-sidebar_position: 4
----
-
 # ctx hotspots
 
 Rank files and symbols by churn x complexity to find refactoring hotspots.
@@ -67,6 +61,6 @@ ctx hotspots --json
 
 ## See Also
 
-- [ctx score](score.md)
+- [ctx score](./score.md)
 - [ctx complexity in Code Intelligence](../code-intelligence.md)
-- [Quality Gates](overview.md)
+- [Quality Gates](../integrations/quality-gates.md)

@@ -7,8 +7,10 @@
 //! - Codebase statistics aggregations
 
 use std::path::Path;
+use std::sync::Arc;
 
-use duckdb::{params, Connection, Result};
+use duckdb::types::ValueRef;
+use duckdb::{params, Connection, InterruptHandle, Result};
 
 use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode};
 use crate::index::{CTX_DIR, DB_FILE};
@@ -520,6 +522,301 @@ impl Analytics {
         })?;
 
         rows.collect()
+    }
+
+    // ========================================================================
+    // Raw SQL surface (`ctx sql`) — hardened, read-only query sandbox.
+    // ========================================================================
+
+    /// Open DuckDB for the `ctx sql` command: attach the SQLite index read-only,
+    /// build the public `v1` view layer, then lock the engine down so untrusted
+    /// user SQL cannot touch the filesystem, load extensions, or re-enable any
+    /// of that. Safety is enforced entirely by engine configuration — never by
+    /// inspecting the SQL text.
+    pub fn open_sql_sandbox(root: &Path) -> Result<Self> {
+        let ctx_dir = root.join(CTX_DIR);
+        let sqlite_path = ctx_dir.join(DB_FILE);
+
+        let conn = Connection::open_in_memory()?;
+
+        // Attach the SQLite index read-only (single-quote-escape the path).
+        let path_str = sqlite_path.display().to_string();
+        let escaped_path = path_str.replace('\'', "''");
+        conn.execute(
+            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
+            [],
+        )?;
+
+        let analytics = Self { conn };
+
+        // Build the public `v1` contract views BEFORE hardening — creating views
+        // and reading the attached DB must happen while access is still allowed.
+        let index_root = root.display().to_string();
+        analytics.create_public_schema_v1(env!("CARGO_PKG_VERSION"), &index_root)?;
+
+        // Engine-level hardening (order matters: memory + external-access first,
+        // then lock configuration, which blocks any further `SET`).
+        //
+        // `enable_external_access = false` disables the filesystem (COPY,
+        // read_csv, file-based ATTACH), extension installation, and config
+        // changes; `lock_configuration = true` prevents user SQL from re-enabling
+        // any of it. The SQLite index is attached READ_ONLY, so it cannot be
+        // mutated. Note: DuckDB 1.4 has no engine toggle to reject a bare
+        // in-memory `ATTACH ':memory:'`; that is permitted but inert (no
+        // filesystem access, the index stays read-only, and the one-result-set
+        // rule blocks chaining a write onto it). We do not add SQL-text filtering
+        // for it — safety is enforced by engine configuration, not by parsing.
+        let mem_limit =
+            std::env::var("CTX_SQL_MEMORY_LIMIT").unwrap_or_else(|_| "512MB".to_string());
+        let mem_escaped = mem_limit.replace('\'', "''");
+        analytics.conn.execute_batch(&format!(
+            "SET memory_limit = '{}';\n\
+             SET enable_external_access = false;\n\
+             SET lock_configuration = true;",
+            mem_escaped
+        ))?;
+
+        Ok(analytics)
+    }
+
+    /// Create the versioned public schema `v1` — the stable query surface.
+    ///
+    /// These views (not the physical `code.*` tables) are the contract. Column
+    /// lists here are the documented `v1` schema; derived columns (fan-in/out,
+    /// complexity) are computed in-view.
+    fn create_public_schema_v1(&self, ctx_version: &str, index_root: &str) -> Result<()> {
+        // Literals injected into `v1.meta`; single-quote-escape defensively.
+        let ctx_version_lit = ctx_version.replace('\'', "''");
+        let index_root_lit = index_root.replace('\'', "''");
+
+        self.conn.execute_batch(&format!(
+            r#"
+            CREATE SCHEMA v1;
+
+            CREATE VIEW v1.symbols AS
+            WITH fan_out_counts AS (
+                SELECT source_id AS id, COUNT(*) AS fan_out
+                FROM code.edges
+                WHERE kind = 'calls'
+                GROUP BY source_id
+            ),
+            fan_in_counts AS (
+                SELECT target_id AS id, COUNT(*) AS fan_in
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+                GROUP BY target_id
+            )
+            SELECT
+                s.id,
+                s.name,
+                s.qualified_name,
+                s.kind,
+                s.file_path AS file,
+                s.line_start,
+                s.line_end,
+                (s.visibility = 'public') AS is_public,
+                (COALESCE(fo.fan_out, 0) * 2 + COALESCE(fi.fan_in, 0)) AS complexity,
+                COALESCE(fi.fan_in, 0) AS fan_in,
+                COALESCE(fo.fan_out, 0) AS fan_out,
+                COALESCE(s.docstring, s.brief) AS doc
+            FROM code.symbols s
+            LEFT JOIN fan_out_counts fo ON fo.id = s.id
+            LEFT JOIN fan_in_counts fi ON fi.id = s.id;
+
+            CREATE VIEW v1.edges AS
+            SELECT
+                e.source_id,
+                s.name AS source_name,
+                s.file_path AS source_file,
+                e.target_id,
+                e.target_name,
+                t.file_path AS target_file,
+                e.kind,
+                e.line
+            FROM code.edges e
+            JOIN code.symbols s ON e.source_id = s.id
+            LEFT JOIN code.symbols t ON e.target_id = t.id;
+
+            CREATE VIEW v1.files AS
+            SELECT
+                f.path,
+                f.language,
+                COALESCE(agg.symbol_count, 0) AS symbol_count,
+                COALESCE(agg.total_complexity, 0) AS total_complexity,
+                f.last_indexed AS indexed_at
+            FROM code.files f
+            LEFT JOIN (
+                SELECT file, COUNT(*) AS symbol_count, SUM(complexity) AS total_complexity
+                FROM v1.symbols
+                GROUP BY file
+            ) agg ON agg.file = f.path;
+
+            CREATE VIEW v1.meta AS
+            SELECT
+                1 AS schema_version,
+                '{ctx_version}' AS ctx_version,
+                (SELECT MIN(last_indexed) FROM code.files) AS index_created_at,
+                '{index_root}' AS index_root;
+            "#,
+            ctx_version = ctx_version_lit,
+            index_root = index_root_lit,
+        ))?;
+
+        Ok(())
+    }
+
+    /// A handle that can interrupt an in-flight query from another thread
+    /// (used to enforce `--timeout`). `InterruptHandle` is `Send + Sync`.
+    pub fn interrupt_handle(&self) -> Arc<InterruptHandle> {
+        self.conn.interrupt_handle()
+    }
+
+    /// Execute a non-final statement in a multi-statement submission.
+    ///
+    /// Returns `Ok(true)` if the statement produces a result set — the caller
+    /// rejects that (only the final statement may return rows, per the one
+    /// result-set rule). Statements that produce no result set (e.g.
+    /// `CREATE TEMP TABLE …`, `SET …`) are executed for their side effects and
+    /// return `Ok(false)`.
+    ///
+    /// (DuckDB only knows a statement's column count *after* execution, so the
+    /// statement is always run — harmless here, since the index is read-only
+    /// and the in-memory DuckDB is throwaway.)
+    pub fn exec_non_final_statement(&self, sql: &str) -> Result<bool> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query([])?;
+        let produced = rows
+            .as_ref()
+            .map(|s| {
+                let n = s.column_count();
+                if n == 0 {
+                    return false;
+                }
+                // DuckDB reports DDL/DML — CREATE/INSERT/UPDATE/DELETE, including
+                // `CREATE TABLE … AS SELECT` — as a single BIGINT column named
+                // "Count" (rows affected). That is not a user-facing result set,
+                // so such statements are allowed to precede the final one.
+                !(n == 1 && s.column_name(0).map(|c| c == "Count").unwrap_or(false))
+            })
+            .unwrap_or(false);
+        Ok(produced)
+    }
+
+    /// Run the final (result-producing) statement, streaming rows and stopping
+    /// once `max_rows` is reached (`0` = unlimited). One extra row is fetched to
+    /// detect truncation, so the full result is never materialized in Rust.
+    pub fn run_final_statement(&self, sql: &str, max_rows: usize) -> Result<SqlResult> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let mut rows = stmt.query([])?;
+
+        // Column metadata is only available after the statement has executed.
+        let columns: Vec<SqlColumn> = {
+            let executed = rows.as_ref().expect("statement is available after query()");
+            let col_count = executed.column_count();
+            let names = executed.column_names();
+            (0..col_count)
+                .map(|i| SqlColumn {
+                    name: names.get(i).cloned().unwrap_or_default(),
+                    type_name: duckdb_type_name(&executed.column_type(i)),
+                })
+                .collect()
+        };
+        let col_count = columns.len();
+
+        let cap = if max_rows == 0 { usize::MAX } else { max_rows };
+        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut truncated = false;
+
+        while let Some(row) = rows.next()? {
+            if rows_out.len() >= cap {
+                truncated = true;
+                break;
+            }
+            let mut record = Vec::with_capacity(col_count);
+            for i in 0..col_count {
+                record.push(value_ref_to_json(row.get_ref(i)?));
+            }
+            rows_out.push(record);
+        }
+
+        Ok(SqlResult {
+            columns,
+            rows: rows_out,
+            truncated,
+        })
+    }
+}
+
+/// A column in a `ctx sql` result: its name and DuckDB type name.
+#[derive(Debug, Clone)]
+pub struct SqlColumn {
+    pub name: String,
+    pub type_name: String,
+}
+
+/// The result of a `ctx sql` query: columns plus row-capped data.
+#[derive(Debug, Clone)]
+pub struct SqlResult {
+    pub columns: Vec<SqlColumn>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub truncated: bool,
+}
+
+/// Map an Arrow `DataType` (what duckdb-rs reports for a column via
+/// `column_type`) to a DuckDB type name for the JSON envelope (e.g. `VARCHAR`,
+/// `BIGINT`).
+fn duckdb_type_name(dt: &duckdb::arrow::datatypes::DataType) -> String {
+    use duckdb::arrow::datatypes::DataType as D;
+    match dt {
+        D::Null => "NULL",
+        D::Boolean => "BOOLEAN",
+        D::Int8 => "TINYINT",
+        D::Int16 => "SMALLINT",
+        D::Int32 => "INTEGER",
+        D::Int64 => "BIGINT",
+        D::UInt8 => "UTINYINT",
+        D::UInt16 => "USMALLINT",
+        D::UInt32 => "UINTEGER",
+        D::UInt64 => "UBIGINT",
+        D::Float16 | D::Float32 => "FLOAT",
+        D::Float64 => "DOUBLE",
+        D::Utf8 | D::LargeUtf8 | D::Utf8View => "VARCHAR",
+        D::Binary | D::LargeBinary | D::BinaryView => "BLOB",
+        D::Date32 | D::Date64 => "DATE",
+        D::Timestamp(_, _) => "TIMESTAMP",
+        D::Time32(_) | D::Time64(_) => "TIME",
+        D::Decimal128(_, _) | D::Decimal256(_, _) => "DECIMAL",
+        other => return format!("{:?}", other),
+    }
+    .to_string()
+}
+
+/// Convert a DuckDB `ValueRef` into a `serde_json::Value` for output. Exotic
+/// types (temporal, decimal, nested) fall back to a debug string so rendering
+/// never panics.
+fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
+    use serde_json::Value as J;
+    match v {
+        ValueRef::Null => J::Null,
+        ValueRef::Boolean(b) => J::Bool(b),
+        ValueRef::TinyInt(n) => J::from(n),
+        ValueRef::SmallInt(n) => J::from(n),
+        ValueRef::Int(n) => J::from(n),
+        ValueRef::BigInt(n) => J::from(n),
+        ValueRef::UTinyInt(n) => J::from(n),
+        ValueRef::USmallInt(n) => J::from(n),
+        ValueRef::UInt(n) => J::from(n),
+        ValueRef::UBigInt(n) => J::from(n),
+        ValueRef::HugeInt(n) => J::String(n.to_string()),
+        ValueRef::Float(f) => serde_json::Number::from_f64(f as f64)
+            .map(J::Number)
+            .unwrap_or(J::Null),
+        ValueRef::Double(f) => serde_json::Number::from_f64(f)
+            .map(J::Number)
+            .unwrap_or(J::Null),
+        ValueRef::Text(bytes) => J::String(String::from_utf8_lossy(bytes).into_owned()),
+        ValueRef::Blob(bytes) => J::String(format!("<blob: {} bytes>", bytes.len())),
+        other => J::String(format!("{:?}", other)),
     }
 }
 

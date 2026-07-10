@@ -31,3 +31,6 @@ specs/
 .specify
 .opencode
 .claude
+
+# Release plugin packaging output (scripts/release-plugin-check.sh)
+ctx-claude-plugin-*.zip

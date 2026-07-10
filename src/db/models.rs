@@ -213,6 +213,23 @@ impl Symbol {
     }
 }
 
+/// A stored MinHash fingerprint for a function/method symbol.
+///
+/// See [`crate::fingerprint`] for how fingerprints are computed. The
+/// `minhash` blob is the 128-permutation signature serialized as 1024
+/// little-endian bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprint {
+    /// Symbol id (`path::[parent::]name@line`).
+    pub symbol_id: String,
+    /// Index-relative path of the file containing the symbol.
+    pub file_path: String,
+    /// MinHash signature: 128 u64 words, little-endian (1024 bytes).
+    pub minhash: Vec<u8>,
+    /// Number of normalized tokens in the symbol's token stream.
+    pub token_count: i64,
+}
+
 /// The kind of relationship between symbols.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

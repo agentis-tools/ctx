@@ -32,7 +32,7 @@ To package the same integration as a distributable Claude Code plugin (hooks + s
 ctx harness init --mode plugin
 ```
 
-The `ctx harness` command family is the full reference for this workflow. If you prefer to wire the hooks by hand, the manual `settings.json` reference lives in the [Quality Gates guide](../governance/overview.md).
+See [`ctx harness`](../commands/harness.md) for the full reference. If you prefer to wire the hooks by hand, the manual `settings.json` reference lives in the [Quality Gates guide](./quality-gates.md).
 
 ## Claude Desktop (MCP)
 
@@ -45,6 +45,10 @@ ctx implements the Model Context Protocol (MCP), allowing Claude to directly que
 > "Find all functions that call the authenticate method"
 > "Show me the source code for the UserService class"
 > "What files should I look at to add caching?"
+
+> **Note:** The MCP server (`ctx serve --mcp`) is only available when ctx is built
+> with the `mcp` feature. Install a build that includes it before configuring
+> Claude Desktop.
 
 ## Quick Setup
 
@@ -199,9 +203,9 @@ Start broad, then narrow down:
 ### "No MCP tools available"
 
 1. Verify ctx is installed: `ctx --version`
-2. Check config file syntax (must be valid JSON)
-3. Restart Claude Desktop completely
-4. Check logs for errors
+2. Confirm the build includes MCP: rebuild with `cargo build --release --features mcp`
+3. Check config file syntax (must be valid JSON)
+4. Restart Claude Desktop completely
 
 ### "Symbol not found"
 

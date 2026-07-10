@@ -1,7 +1,7 @@
 ---
 id: map
 title: ctx map
-sidebar_position: 6
+sidebar_position: 11
 ---
 
 # ctx map
@@ -59,5 +59,5 @@ ctx map --format markdown
 
 ## See Also
 
-- [ctx smart](smart.md) - task-driven file selection (map is task-agnostic orientation)
-- [Quality Gates](../governance/overview.md) - using `ctx map` in a SessionStart hook
+- [ctx smart](./smart.md) - task-driven file selection (map is task-agnostic orientation)
+- [Quality Gates](../integrations/quality-gates.md) - using `ctx map` in a SessionStart hook

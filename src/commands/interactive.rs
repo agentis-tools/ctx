@@ -29,8 +29,8 @@ pub fn run_shell(history: Option<PathBuf>, no_history: bool, vi: bool) -> Result
 /// Run the MCP server.
 #[cfg(feature = "mcp")]
 pub fn run_serve(mcp: bool) -> Result<()> {
-    use crate::mcp;
     use ctx::error::CtxError;
+    use ctx::mcp;
 
     if !mcp {
         eprintln!("Error: Please specify --mcp flag to start the MCP server.");

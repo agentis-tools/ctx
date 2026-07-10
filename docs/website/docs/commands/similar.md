@@ -1,7 +1,7 @@
 ---
 id: similar
 title: ctx similar
-sidebar_position: 7
+sidebar_position: 10
 ---
 
 # ctx similar
@@ -59,6 +59,6 @@ ctx similar "token counting" --json
 
 ## See Also
 
-- [ctx duplicates](../governance/duplicates.md) - structural (after-the-fact) duplicate detection
+- [ctx duplicates](./duplicates.md) - structural (after-the-fact) duplicate detection
 - [Semantic Search in Code Intelligence](../code-intelligence.md)
-- [Quality Gates](../governance/overview.md)
+- [Quality Gates](../integrations/quality-gates.md)

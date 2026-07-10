@@ -1,7 +1,7 @@
 ---
-id: overview
+id: quality-gates
 title: Quality Gates
-sidebar_position: 1
+sidebar_position: 4
 ---
 
 # Quality Gates
@@ -26,11 +26,11 @@ The quality commands are designed to be composed:
 
 | Command | Question it answers | Gate |
 |---------|--------------------|------|
-| [`ctx check`](check.md) | Does this change violate our architecture rules? | exits 1 on violations |
-| [`ctx hotspots`](hotspots.md) | Where does refactoring pay off most (churn x complexity)? | informational |
-| [`ctx duplicates`](duplicates.md) | Which functions are structural near-copies? | `--fail-on-found` |
+| [`ctx check`](../commands/check.md) | Does this change violate our architecture rules? | exits 1 on violations |
+| [`ctx hotspots`](../commands/hotspots.md) | Where does refactoring pay off most (churn x complexity)? | informational |
+| [`ctx duplicates`](../commands/duplicates.md) | Which functions are structural near-copies? | `--fail-on-found` |
 | [`ctx similar`](../commands/similar.md) | Does the function I'm about to write already exist? | informational (pre-emptive) |
-| [`ctx score`](score.md) | Did this change make the code better or worse? | `--fail-on "metric OP value,..."` |
+| [`ctx score`](../commands/score.md) | Did this change make the code better or worse? | `--fail-on "metric OP value,..."` |
 | [`ctx map`](../commands/map.md) | What does this codebase look like, in N tokens? | informational (orientation) |
 
 `ctx score` is the composite gate: it folds check violations, new duplication, complexity/fan-out deltas, and symbol churn into one scorecard with `--fail-on` conditions.
@@ -99,6 +99,6 @@ With the default `--against HEAD`, this scores exactly what is about to be commi
 
 ## See Also
 
-- [ctx score](score.md), [ctx check](check.md), [ctx duplicates](duplicates.md)
-- [JSON Output](../reference/json-output.md) - payload contract for `--json` consumers
-- [CI/CD Integration](../integrations/ci-cd.md)
+- [ctx score](../commands/score.md), [ctx check](../commands/check.md), [ctx duplicates](../commands/duplicates.md)
+- [JSON Output](../json-output.md) - payload contract for `--json` consumers
+- [CI/CD Integration](./ci-cd.md)

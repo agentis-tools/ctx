@@ -63,7 +63,6 @@ impl ShellHelper {
                 "deps".to_string(),
                 "impact".to_string(),
                 "complexity".to_string(),
-                "duplicates".to_string(),
                 "smart".to_string(),
                 "audit".to_string(),
                 "stats".to_string(),

@@ -314,6 +314,6 @@ mod tests {
         let text = "Hello, world!"; // 13 chars
         let estimate = estimate_tokens(text);
         // Should be roughly 3-4 tokens based on ~4 chars per token
-        assert!(estimate >= 3 && estimate <= 5);
+        assert!((3..=5).contains(&estimate));
     }
 }
