@@ -152,7 +152,18 @@ pub mod output;
 pub mod tree;
 
 // Architecture rules (ctx check)
+pub mod check;
 pub mod rules;
+
+// Quality scorecard (ctx score)
+pub mod score;
+
+// Harness packaging (ctx harness): Claude Code hooks, plugin scaffolding,
+// version compatibility guard, and integration diagnostics
+pub mod harness;
+
+// Release & update mechanism (ctx self-update, passive update notices)
+pub mod update;
 
 // Utilities
 pub mod audit;

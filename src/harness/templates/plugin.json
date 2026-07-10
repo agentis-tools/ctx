@@ -1,0 +1,8 @@
+{
+  "name": "ctx",
+  "description": "Code intelligence for AI-assisted development: indexed symbol search, architecture rules, duplication detection, and quality scoring via the ctx CLI",
+  "version": "{{CTX_VERSION}}",
+  "author": {
+    "name": "{{AUTHOR_NAME}}"
+  }
+}

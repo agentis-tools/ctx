@@ -1,0 +1,13 @@
+{
+  "name": "ctx-local",
+  "owner": {
+    "name": "{{AUTHOR_NAME}}"
+  },
+  "plugins": [
+    {
+      "name": "ctx",
+      "source": "./",
+      "description": "Code intelligence hooks, skill, and MCP wiring for the ctx CLI"
+    }
+  ]
+}

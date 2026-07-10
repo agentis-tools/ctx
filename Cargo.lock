@@ -14,7 +14,6 @@ version = "0.2.1"
 dependencies = [
  "assert_cmd",
  "async-trait",
- "chrono",
  "clap",
  "dirs",
  "duckdb",
@@ -31,11 +30,13 @@ dependencies = [
  "rusqlite",
  "rustyline",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
  "solang-parser",
  "sqlite-vec",
+ "tar",
  "tempfile",
  "thiserror 1.0.69",
  "tiktoken-rs",
@@ -50,6 +51,7 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "zerocopy 0.7.35",
+ "zip",
 ]
 
 [[package]]
@@ -3763,6 +3765,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"

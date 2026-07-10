@@ -1,8 +1,38 @@
-# Claude Desktop Integration
+# Claude Integration
+
+Connect ctx to Claude Code (hooks, skill, plugin) and Claude Desktop (MCP).
+
+## Claude Code (recommended): `ctx harness init`
+
+The fastest way to wire the ctx quality suite into [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the harness scaffolder:
+
+```bash
+cd /path/to/your/project
+ctx index
+ctx harness init
+```
+
+This generates hook scripts under `.claude/hooks/ctx/` (session-start codebase map, post-edit architecture check, stop-time quality scorecard), a starter `.ctx/rules.toml`, and prints a settings snippet to merge into `.claude/settings.json` plus a guidance block for your `CLAUDE.md`. ctx never edits `.claude/settings.json` itself.
+
+The hooks are version-guarded and fail open: if the installed ctx binary is older than the templates that generated them, they warn on stderr and do nothing instead of blocking the session. Verify the integration with:
+
+```bash
+ctx harness doctor
+```
+
+To package the same integration as a distributable Claude Code plugin (hooks + skill + MCP wiring + permissions), use:
+
+```bash
+ctx harness init --mode plugin
+```
+
+See [`ctx harness`](../commands/harness.md) for the full reference. If you prefer to wire the hooks by hand, the manual `settings.json` reference lives in the [Quality Gates guide](./quality-gates.md).
+
+## Claude Desktop (MCP)
 
 Connect ctx to Claude Desktop for AI-powered codebase exploration.
 
-## Overview
+### Overview
 
 ctx implements the Model Context Protocol (MCP), allowing Claude to directly query your codebase through standardized tools. This enables conversations like:
 

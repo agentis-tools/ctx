@@ -888,6 +888,27 @@ impl Database {
         rows.collect()
     }
 
+    /// All `calls` edges sourced from symbols in `file_path`, as
+    /// `(source_symbol_id, target_name)` pairs.
+    ///
+    /// Used by `ctx score` to compute per-file complexity restricted to
+    /// changed files (per-changed-file queries keep scoring fast on large
+    /// indexes).
+    pub fn file_call_edges(&self, file_path: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.source_id, e.target_name
+            FROM edges e
+            JOIN symbols s ON s.id = e.source_id
+            WHERE s.file_path = ?1 AND e.kind = 'calls'
+            ORDER BY e.id
+            "#,
+        )?;
+
+        let rows = stmt.query_map([file_path], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
     /// Count resolved incoming 'calls' edges for the given symbol IDs.
     ///
     /// Symbols with no incoming calls are absent from the returned map.

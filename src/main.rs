@@ -12,7 +12,8 @@ use commands::MapFormat;
 use ctx::error::Result;
 use ctx::exit::Outcome;
 
-/// Exit codes: 0 = clean, 1 = findings, 2 = operational error.
+/// Exit codes: 0 = clean, 1 = findings, 2 = operational error,
+/// 3 = version requirement not met (`ctx harness compat` only).
 fn main() -> ExitCode {
     // The OS-provided main thread stack is too small on some platforms (notably
     // Windows, which defaults to ~1 MiB) for this program's parsing/graph-walking
@@ -33,20 +34,42 @@ fn run_main() -> ExitCode {
         .build_global();
 
     let args = Args::parse();
+    let json = args.json;
+    // The passive update check never runs for update-related invocations
+    // (`ctx self-update`, `ctx --version [--check]`); its remaining
+    // suppression rules (TTY, --json, env vars, 24h cache) live in
+    // `ctx::update::passive_check`.
+    let skip_passive_check =
+        args.version || matches!(args.command, Some(Command::SelfUpdate { .. }));
 
-    match run(args) {
-        Ok(Outcome::Clean) => ExitCode::SUCCESS,
-        Ok(Outcome::Findings) => ExitCode::from(1),
+    let exit = match run(args) {
+        Ok(outcome) => ExitCode::from(outcome.code()),
         Err(e) => {
             eprintln!("Error: {}", e);
             ExitCode::from(2)
         }
+    };
+
+    // Passive update notice (stderr only, at most one network call per 24h,
+    // silent on failure; see docs/commands/self-update.md). Never automatic:
+    // this only prints a notice, it never installs anything.
+    if !skip_passive_check {
+        ctx::update::passive_check(json);
     }
+
+    exit
 }
 
 fn run(args: Args) -> Result<Outcome> {
     // Global machine-readable output flag (see docs/json-output.md)
     let json = args.json;
+
+    // Custom --version handling: clap's auto flag is disabled (it would
+    // exit before `--check` could run). `ctx --version` prints the same
+    // line the auto flag did; `--check` adds a release comparison.
+    if args.version {
+        return commands::run_version(args.check, json);
+    }
 
     // Handle subcommands
     let result: Result<()> = match args.command {
@@ -262,12 +285,27 @@ fn run(args: Args) -> Result<Outcome> {
             // Quality command: returns Outcome natively (0 clean / 1 findings).
             return commands::run_check(rules, against, list, json);
         }
+        Some(Command::Score { against, fail_on }) => {
+            // Quality command: returns Outcome natively (0 clean / 1 when a
+            // --fail-on condition is met).
+            return commands::run_score(&against, fail_on.as_deref(), json);
+        }
         Some(Command::Audit {
             output_format,
             min_score,
             categories,
             incremental,
         }) => commands::run_audit(&output_format, min_score, categories, incremental),
+        Some(Command::Harness { cmd }) => {
+            // Harness command: returns its own Outcome (doctor exits 1 on
+            // problems; compat exits 3 on version mismatch).
+            return commands::run_harness(cmd, json);
+        }
+        Some(Command::SelfUpdate { version }) => {
+            // Update command: returns its own Outcome (Clean when updated or
+            // already up to date; any failure maps to exit 2 in main).
+            return commands::run_self_update(version.as_deref(), json);
+        }
         Some(Command::Shell {
             history,
             no_history,

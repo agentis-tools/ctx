@@ -31,7 +31,11 @@ impl OutputFormat {
 #[derive(Parser, Debug)]
 #[command(name = "ctx")]
 #[command(about = "Generate formatted context for AI assistants")]
-#[command(version)]
+// clap's auto --version exits during parsing, before our code runs; we
+// define our own flag below so `--version --check` can compare against the
+// latest GitHub release (`ctx --version` alone prints the same "ctx <ver>"
+// line clap used to).
+#[command(disable_version_flag = true)]
 #[command(after_help = r#"EXAMPLES:
     ctx                           # All files in current directory
     ctx "src/**/*.rs"             # Rust files matching glob
@@ -47,6 +51,14 @@ impl OutputFormat {
 pub struct Args {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Print version
+    #[arg(short = 'V', long = "version")]
+    pub version: bool,
+
+    /// With --version: also query GitHub for a newer release
+    #[arg(long, requires = "version")]
+    pub check: bool,
 
     /// File patterns or paths to include (glob syntax supported)
     /// Examples: "src/**/*.rs", "*.ts", "src/"
@@ -630,6 +642,114 @@ EXAMPLES:
         list: bool,
     },
 
+    /// Score the quality delta of your changes against a git reference
+    ///
+    /// Compares the working tree (plus commits since the merge base with
+    /// REF) against REF and prints a scorecard: complexity and fan-out
+    /// deltas, newly introduced near-duplicate functions, architecture-rule
+    /// violations, and symbols added/removed. The index is refreshed
+    /// incrementally before scoring.
+    ///
+    /// Exit codes: 0 = clean (or no --fail-on given), 1 = at least one
+    /// --fail-on condition was met, 2 = operational error (not a git repo,
+    /// bad reference, malformed --fail-on, invalid rules file).
+    #[command(after_help = r#"METRICS (for --fail-on and JSON output):
+    complexity_delta    sum over changed files of per-function
+                        2*fan_out + same-file fan_in, current - baseline
+    fan_out_delta       calls sourced in changed files, current - baseline
+    new_duplication     near-duplicate pairs (Jaccard >= 0.85, >= 50 tokens,
+                        >= 1 endpoint in a changed file) absent at REF
+    check_violations    `ctx check --against REF` violations
+                        (0 with a note when .ctx/rules.toml is missing)
+    symbols_added       symbols present now but not at REF
+    symbols_removed     symbols present at REF but not now
+    files_changed       changed source files that were scored
+
+NOTES:
+    Baseline metrics come from parsing each changed file's content at REF in
+    memory with the same parser; fan-in is approximated as same-file callers
+    on both sides so the deltas compare like with like.
+
+EXAMPLES:
+    ctx score                        # score uncommitted changes (vs HEAD)
+    ctx score --against main         # score the whole branch / PR vs main
+    ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+    ctx score --fail-on "complexity_delta>=20" --json
+"#)]
+    Score {
+        /// Git reference to compare against. The default (HEAD) scores
+        /// uncommitted changes; use your default branch (main/master) to
+        /// score a whole branch or PR
+        #[arg(long, value_name = "REF", default_value = "HEAD")]
+        against: String,
+
+        /// Fail (exit 1) when any comma-separated condition `metric OP value`
+        /// holds; OP is one of >=, <=, >, < (e.g. "new_duplication>0")
+        #[arg(long, value_name = "EXPR")]
+        fail_on: Option<String>,
+    },
+
+    /// Package ctx as an AI coding harness integration (Claude Code)
+    ///
+    /// `init` scaffolds hook scripts, settings, and (in plugin mode) a full
+    /// Claude Code plugin from templates embedded in this binary. `compat`
+    /// is the version guard those generated hooks call before doing any
+    /// work. `doctor` diagnoses the integration end to end.
+    #[command(after_help = r#"EXIT CODES:
+    0    success / healthy
+    1    doctor found problems (errors or warnings)
+    2    operational error (unknown --target, bad arguments, IO failure)
+    3    version requirement not met (reserved exclusively for
+         'ctx harness compat --require <VERSION>')
+
+EXAMPLES:
+    ctx harness init                          # wire hooks into .claude/ (local mode)
+    ctx harness init --mode plugin            # scaffold a Claude Code plugin
+    ctx harness init --force                  # regenerate even user-modified files
+    ctx harness compat --require 0.2          # exit 0 if this binary is new enough
+    ctx harness doctor --json                 # machine-readable health report
+"#)]
+    Harness {
+        #[command(subcommand)]
+        cmd: HarnessCommand,
+    },
+
+    /// Update ctx to the latest GitHub release (or a pinned version)
+    ///
+    /// Downloads the release artifact for this platform, verifies its
+    /// sha256 against the release's published SHA256SUMS file, and
+    /// atomically replaces the running executable. ctx never updates
+    /// itself automatically: the passive update notice only points here.
+    #[command(after_help = r#"EXIT CODES (ctx-wide convention):
+    0    updated successfully, or already up to date
+    2    operational error (network failure, checksum mismatch, install
+         location not writable, unsupported platform, unknown version)
+
+SECURITY:
+    The downloaded archive is verified against the SHA256SUMS file published
+    with the GitHub release before anything is replaced. On mismatch the
+    update aborts with exit code 2 and the installed binary is untouched.
+    Harness permissions generated by 'ctx harness init' deny
+    'Bash(ctx self-update*)', so AI agents cannot swap the binary out from
+    under a running session.
+
+NOTES:
+    Set CTX_NO_UPDATE_CHECK=1 to silence the passive update notice.
+    If ctx was installed via cargo, prefer 'cargo install agentis-ctx'.
+    On Windows the previous binary is left beside the new one as
+    'ctx.exe.old' (removed on the next self-update).
+
+EXAMPLES:
+    ctx self-update                    # update to the latest release
+    ctx self-update --version 0.3.0    # install an exact release
+    ctx self-update --json             # machine-readable result
+"#)]
+    SelfUpdate {
+        /// Install this exact release (allows downgrades) instead of the latest
+        #[arg(long, value_name = "X.Y.Z")]
+        version: Option<String>,
+    },
+
     /// Interactive shell for exploring codebase
     Shell {
         /// History file location
@@ -652,6 +772,73 @@ EXAMPLES:
         #[arg(long)]
         mcp: bool,
     },
+}
+
+/// Harness targets supported by `ctx harness init`.
+///
+/// Unknown targets are rejected by clap with a usage error (exit code 2)
+/// that lists the supported values.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
+pub enum HarnessTarget {
+    /// Claude Code (hooks, settings, skills, plugin manifest)
+    #[default]
+    Claude,
+}
+
+/// Scaffolding mode for `ctx harness init`.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
+pub enum HarnessMode {
+    /// Hook scripts under `.claude/hooks/ctx/` plus a settings snippet
+    /// printed for manual inclusion
+    #[default]
+    Local,
+    /// A distributable Claude Code plugin (`.claude-plugin/`, hooks, skill,
+    /// marketplace manifest)
+    Plugin,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HarnessCommand {
+    /// Generate integration files from templates embedded in this binary
+    ///
+    /// Every generated file carries a `generated by ctx` header and a
+    /// checksum. Re-running `init` regenerates unmodified files in place
+    /// but never overwrites files you have edited (warn + skip) unless
+    /// `--force` is given. `.ctx/rules.toml` is never overwritten, even
+    /// with `--force`.
+    Init {
+        /// Harness to target (unknown values exit 2 listing supported targets)
+        #[arg(long, value_enum, default_value = "claude")]
+        target: HarnessTarget,
+
+        /// What to scaffold: local hooks or a distributable plugin
+        #[arg(long, value_enum, default_value = "local")]
+        mode: HarnessMode,
+
+        /// Overwrite user-modified generated files (except .ctx/rules.toml)
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Check that this binary satisfies a version requirement
+    ///
+    /// Exits 0 when the running binary satisfies REQUIRE, otherwise prints
+    /// one line to stderr and exits 3. Exit code 3 is reserved exclusively
+    /// for this subcommand; generated hook scripts call it as a guard so
+    /// they can fail open (loudly) when the binary is older than the
+    /// templates that generated them.
+    Compat {
+        /// Required version: a bare version ("0.2" means "at least 0.2.0")
+        /// or a semver requirement expression ("^0.2", ">=0.2, <0.4")
+        #[arg(long, value_name = "SEMVER")]
+        require: String,
+    },
+
+    /// Diagnose the harness integration (binary, templates, index, rules, hooks, MCP)
+    ///
+    /// Exit codes: 0 = healthy (info-level notes only), 1 = problems found
+    /// (errors or warnings), 2 = operational error.
+    Doctor,
 }
 
 #[derive(Subcommand, Debug)]

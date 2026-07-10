@@ -1,0 +1,5 @@
+# Force LF line endings for all text files regardless of platform checkout
+# settings. Several `include_str!`'d templates (src/harness/templates/*) are
+# compared byte-for-byte against LF-only expectations in tests; without this,
+# Windows checkouts (git core.autocrlf=true by default) rewrite them to CRLF.
+* text=auto eol=lf

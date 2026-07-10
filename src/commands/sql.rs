@@ -323,53 +323,24 @@ mod engine {
     }
 
     fn render_json(result: &SqlResult, elapsed_ms: u128) {
-        use serde::Serialize;
+        let columns: Vec<serde_json::Value> = result
+            .columns
+            .iter()
+            .map(|c| serde_json::json!({ "name": c.name, "type": c.type_name }))
+            .collect();
 
-        #[derive(Serialize)]
-        struct Column<'a> {
-            name: &'a str,
-            #[serde(rename = "type")]
-            type_name: &'a str,
-        }
-        #[derive(Serialize)]
-        struct Data<'a> {
-            columns: Vec<Column<'a>>,
-            rows: &'a [Vec<serde_json::Value>],
-            row_count: usize,
-            truncated: bool,
-            elapsed_ms: u128,
-        }
-        #[derive(Serialize)]
-        struct Envelope<'a> {
-            ctx_version: &'a str,
-            command: &'a str,
-            generated_at: String,
-            data: Data<'a>,
-        }
+        // Reuse the shared ctx JSON envelope (ctx_version / command /
+        // generated_at / data) so `ctx sql --json` matches every other command.
+        let data = serde_json::json!({
+            "columns": columns,
+            "rows": result.rows,
+            "row_count": result.rows.len(),
+            "truncated": result.truncated,
+            "elapsed_ms": elapsed_ms,
+        });
 
-        let envelope = Envelope {
-            ctx_version: env!("CARGO_PKG_VERSION"),
-            command: "sql",
-            generated_at: chrono::Utc::now().to_rfc3339(),
-            data: Data {
-                columns: result
-                    .columns
-                    .iter()
-                    .map(|c| Column {
-                        name: &c.name,
-                        type_name: &c.type_name,
-                    })
-                    .collect(),
-                rows: &result.rows,
-                row_count: result.rows.len(),
-                truncated: result.truncated,
-                elapsed_ms,
-            },
-        };
-
-        match serde_json::to_string_pretty(&envelope) {
-            Ok(s) => println!("{}", s),
-            Err(e) => eprintln!("failed to serialize result: {}", e),
+        if let Err(e) = ctx::json::emit("sql", data) {
+            eprintln!("failed to serialize result: {}", e);
         }
     }
 

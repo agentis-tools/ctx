@@ -120,6 +120,10 @@ ctx complexity --warnings-only        # Only show high complexity
 ctx duplicates                        # Detect near-duplicate functions
 ctx duplicates --threshold 0.9        # Require 90% shingle overlap (Jaccard)
 ctx duplicates --min-tokens 80        # Ignore functions under 80 tokens
+ctx check                             # Enforce .ctx/rules.toml architecture rules
+ctx check --against main              # Only new violations (exit 1 on findings)
+ctx score                             # Score uncommitted changes vs HEAD
+ctx score --against main --fail-on "check_violations>0,new_duplication>0"
 
 # Dependency graph visualization
 ctx graph                             # Generate DOT graph
@@ -529,6 +533,46 @@ ctx duplicates --json                 # JSON envelope output
 #    src/handlers/admin.ts:89 createAdmin (90 tokens)
 ```
 
+### `ctx check`
+
+Enforce architecture rules from `.ctx/rules.toml` (layer globs plus
+`forbidden`, `allowed_dependents`, `limit`, and `no_new_dependents` rules)
+against the index. Exit codes: 0 = no violations, 1 = violations found,
+2 = operational error (missing/invalid rules file, missing index, bad ref).
+
+```bash
+ctx check                             # Check all rules
+ctx check --against main              # Only violations touching changed files
+ctx check --list                      # Show parsed rules and layer sizes
+ctx check --json                      # JSON envelope output
+```
+
+### `ctx score`
+
+Score the quality delta of the working tree against a git reference. The
+index is refreshed incrementally first; baselines are parsed in memory at
+the reference with the same parser. Metrics: `complexity_delta`,
+`fan_out_delta`, `new_duplication`, `check_violations`, `symbols_added`,
+`symbols_removed`, `files_changed`. Note: fan-in is approximated as
+same-file callers on both sides for comparability.
+
+```bash
+ctx score                             # Score uncommitted changes (vs HEAD)
+ctx score --against main              # Score the whole branch / PR
+ctx score --fail-on "new_duplication>0,complexity_delta>=25"  # CI gate (exit 1)
+ctx score --against main --json       # JSON envelope output
+
+# Example output:
+# Score vs main (2 files changed)
+#
+#   complexity_delta        8 → 12     ▲ +4
+#   fan_out_delta           4 → 5      ▲ +1
+#   new_duplication         0          =
+#   check_violations        0          =
+#   symbols_added           2          ▲
+#   symbols_removed         0          =
+```
+
 ### `ctx graph`
 
 Generate dependency graph visualizations:
@@ -687,10 +731,14 @@ ctx complexity --warnings-only
 # 3. Detect near-duplicate functions for refactoring
 ctx duplicates --threshold 0.85
 
-# 4. Generate architecture diagram
+# 4. Enforce architecture rules and gate the change
+ctx check --against main
+ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+
+# 5. Generate architecture diagram
 ctx graph --by-file --output mermaid > ARCHITECTURE.md
 
-# 5. Focus on specific module
+# 6. Focus on specific module
 ctx graph --filter "src/auth" --output dot | dot -Tpng > auth-deps.png
 ```
 
@@ -787,6 +835,8 @@ ctx source <SYMBOL>            Get source code for symbol
 ctx explain <SYMBOL>           Explain symbol with relationships
 ctx complexity [OPTIONS]       Analyze code complexity (fan-out/fan-in)
 ctx duplicates [OPTIONS]       Detect structurally similar functions (MinHash)
+ctx check [OPTIONS]            Check architecture rules from .ctx/rules.toml
+ctx score [OPTIONS]            Score quality delta of changes vs a git reference
 ctx graph [OPTIONS]            Generate dependency graph visualization
 
 Global Options:
@@ -835,6 +885,16 @@ Duplicates Options:
       --min-tokens <N>         Ignore functions with fewer tokens (default: 50)
       --against <REF>          Only pairs touching files changed vs REF
       --fail-on-found          Exit 1 when any pair is reported
+
+Check Options:
+      --rules <PATH>           Rules file (default: .ctx/rules.toml)
+      --against <REF>          Only violations touching files changed vs REF
+      --list                   Show parsed rules and layer sizes, exit 0
+
+Score Options:
+      --against <REF>          Reference to compare against (default: HEAD)
+      --fail-on <EXPR>         Exit 1 when any "metric OP value" condition
+                               holds (OP: >=, <=, >, <)
 
 Graph Options:
       --output <FORMAT>        Output format (dot, mermaid, json)
