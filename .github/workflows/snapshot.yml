@@ -1,0 +1,97 @@
+name: snapshot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+# Appends to the ctx-snapshots data branch must be serialized; queue runs
+# instead of cancelling so no merge loses its partition.
+concurrency:
+  group: ctx-snapshots
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    # Skip on forks: they can't (and shouldn't) push the data branch
+    if: github.repository == 'agentis-tools/ctx'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: churn metrics look back over a 90-day window
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          # ImageVersion is set by hosted runners; keying on it prevents a
+          # target/ dir cached under one runner image (Xcode/clang paths)
+          # from poisoning builds on a newer image
+          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-snapshot-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        # default features include duckdb, which `ctx snapshot` requires
+        run: cargo build --release
+
+      - name: Capture snapshot
+        run: |
+          target/release/ctx index
+          target/release/ctx snapshot --json
+
+      - name: Append to ctx-snapshots branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code origin refs/heads/ctx-snapshots >/dev/null 2>&1; then
+            # Steady state: check the data branch out in a linked worktree.
+            # Explicit refspec because actions/checkout narrows
+            # remote.origin.fetch to the checked-out branch.
+            git fetch origin +refs/heads/ctx-snapshots:refs/remotes/origin/ctx-snapshots
+            git worktree add -B ctx-snapshots ../snapshots-branch origin/ctx-snapshots
+          else
+            # Bootstrap: orphan branch (no shared history with main).
+            # --orphan on worktree add needs git >= 2.42; ubuntu-latest
+            # ships >= 2.43. The new worktree starts empty.
+            git worktree add --orphan -b ctx-snapshots ../snapshots-branch
+          fi
+
+          mkdir -p ../snapshots-branch/snapshots
+          cp -R .ctx/snapshots/. ../snapshots-branch/snapshots/
+
+          cd ../snapshots-branch
+          git add -A
+          # Idempotent: re-run on the same sha stages nothing -> succeed as no-op
+          if git diff --cached --quiet; then
+            echo "Partition for ${GITHUB_SHA} already present; nothing to push."
+            exit 0
+          fi
+          git commit -m "snapshot: ${GITHUB_SHA}"
+          git push origin ctx-snapshots
+
+      - name: Usage hint
+        run: |
+          {
+            echo "### Querying the snapshot history"
+            echo '```bash'
+            echo "git fetch origin ctx-snapshots"
+            echo "git worktree add ../snapshots ctx-snapshots"
+            echo "ctx sql --snapshots=../snapshots/snapshots \"SELECT ...\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

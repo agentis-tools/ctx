@@ -529,15 +529,48 @@ impl Analytics {
     // ========================================================================
 
     /// Open DuckDB for the `ctx sql` command: attach the SQLite index read-only,
-    /// build the public `v1` view layer, then lock the engine down so untrusted
+    /// build the public `v1` view layer, optionally materialize snapshot
+    /// partitions as `snap.*` tables, then lock the engine down so untrusted
     /// user SQL cannot touch the filesystem, load extensions, or re-enable any
     /// of that. Safety is enforced entirely by engine configuration — never by
     /// inspecting the SQL text.
-    pub fn open_sql_sandbox(root: &Path) -> Result<Self> {
+    ///
+    /// `snapshots`, when set, is a directory of `sha=<sha>/` Parquet
+    /// partitions written by `ctx snapshot`; each partition's four files are
+    /// loaded into in-memory tables `snap.files`, `snap.symbols`,
+    /// `snap.dup_pairs`, and `snap.meta`.
+    pub fn open_sql_sandbox(root: &Path, snapshots: Option<&Path>) -> crate::error::Result<Self> {
         // Attach the index and build the public `v1` contract views BEFORE
         // hardening — creating views and reading the attached DB must happen
         // while access is still allowed.
         let analytics = Self::open_with_public_schema(root)?;
+
+        // Load snapshot partitions BEFORE hardening, as MATERIALIZED tables
+        // (CREATE TABLE ... AS), not views. This ordering is load-bearing:
+        // `enable_external_access = false` below disables all filesystem reads
+        // at query time, so a lazy view over read_parquet() would fail on its
+        // first use — the Parquet data must be fully read into memory now.
+        if let Some(dir) = snapshots {
+            if !Self::has_snapshot_partitions(dir) {
+                return Err(crate::error::CtxError::Other(format!(
+                    "no snapshots found under {}; run 'ctx snapshot' first",
+                    dir.display()
+                )));
+            }
+            // Single-quote-escape the glob path, like the ATTACH path above.
+            let escaped_dir = dir.display().to_string().replace('\'', "''");
+            analytics.conn.execute_batch("CREATE SCHEMA snap;")?;
+            for table in ["files", "symbols", "dup_pairs", "meta"] {
+                // `hive_partitioning = false`: every row already carries
+                // `commit_sha`; don't add a duplicate `sha` column from the
+                // partition directory name.
+                analytics.conn.execute_batch(&format!(
+                    "CREATE TABLE snap.{table} AS \
+                     SELECT * FROM read_parquet('{escaped_dir}/sha=*/{table}.parquet', \
+                     union_by_name = true, hive_partitioning = false);"
+                ))?;
+            }
+        }
 
         // Engine-level hardening (order matters: memory + external-access first,
         // then lock configuration, which blocks any further `SET`).
@@ -562,6 +595,17 @@ impl Analytics {
         ))?;
 
         Ok(analytics)
+    }
+
+    /// Whether `dir` contains at least one `sha=<sha>/` snapshot partition.
+    fn has_snapshot_partitions(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries.filter_map(|e| e.ok()).any(|e| {
+                    e.file_name().to_string_lossy().starts_with("sha=") && e.path().is_dir()
+                })
+            })
+            .unwrap_or(false)
     }
 
     /// Open DuckDB for snapshot export (`ctx snapshot`): attach the SQLite

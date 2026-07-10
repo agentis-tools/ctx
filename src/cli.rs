@@ -164,6 +164,7 @@ pub enum Command {
     ctx sql --json "SELECT kind, COUNT(*) n FROM v1.symbols GROUP BY kind"
     ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
     ctx sql --schema        # print the v1 schema reference and exit
+    ctx sql --snapshots "SELECT commit_sha, count(*) FROM snap.dup_pairs GROUP BY commit_sha"
 
 The query surface is the versioned `v1` schema; anything outside `v1.*` is
 internal and unstable. Access is read-only and engine-hardened.
@@ -200,6 +201,19 @@ internal and unstable. Access is read-only and engine-hardened.
         /// Print the public schema reference and exit
         #[arg(long)]
         schema: bool,
+
+        /// Load snapshot partitions from DIR (default .ctx/snapshots) as
+        /// in-memory tables snap.files / snap.symbols / snap.dup_pairs /
+        /// snap.meta for trend queries (see `ctx snapshot`). Pass a custom
+        /// dir with `--snapshots=DIR`.
+        #[arg(
+            long,
+            value_name = "DIR",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ".ctx/snapshots"
+        )]
+        snapshots: Option<std::path::PathBuf>,
     },
 
     /// Search for symbols using semantic or text search

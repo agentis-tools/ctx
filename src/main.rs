@@ -105,6 +105,7 @@ fn run(args: Args) -> Result<Outcome> {
             timeout,
             fail_on_rows,
             schema,
+            snapshots,
         }) => {
             // `ctx sql` owns its exit code (0 clean / 1 with --fail-on-rows / 2 error),
             // so it returns an Outcome directly like the other quality commands.
@@ -117,6 +118,7 @@ fn run(args: Args) -> Result<Outcome> {
                 timeout,
                 fail_on_rows,
                 schema,
+                snapshots,
             });
         }
         Some(Command::Search {

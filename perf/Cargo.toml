@@ -1,0 +1,30 @@
+# Companion perf-harness crate. Deliberately NOT a workspace member of the
+# root crate: the empty [workspace] table below (the cargo-fuzz pattern)
+# keeps it out of any parent workspace resolution, and the root package's
+# `include` list keeps perf/ out of the published crate.
+[package]
+name = "ctx-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "perf-harness"
+path = "src/main.rs"
+
+[dependencies]
+# The harness only needs the fixture generator from the library; analytics
+# (duckdb) is not required, so build the dependency lean.
+agentis-ctx = { path = "..", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+libc = "0.2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "hotpaths"
+harness = false

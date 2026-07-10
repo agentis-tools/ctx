@@ -123,3 +123,11 @@ predicates = "3"
 lto = true
 strip = true
 codegen-units = 1
+
+# Perf-harness build: near-release optimization without fat-LTO compile cost.
+# Baselines in perf/baselines/ are recorded under this profile.
+[profile.perf]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = false
