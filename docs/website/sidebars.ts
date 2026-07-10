@@ -10,6 +10,7 @@ const sidebars: SidebarsConfig = {
     'language-support',
     'architecture',
     'json-output',
+    'sql-schema',
     {
       type: 'category',
       label: 'Commands',
@@ -25,6 +26,7 @@ const sidebars: SidebarsConfig = {
         'commands/self-update',
         'commands/diff',
         'commands/smart',
+        'commands/sql',
         'commands/shell',
         'commands/serve',
       ],

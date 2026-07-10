@@ -74,5 +74,8 @@ mod stub;
 #[cfg(feature = "duckdb")]
 pub use duckdb_impl::Analytics;
 
+#[cfg(feature = "duckdb")]
+pub use duckdb_impl::{SqlColumn, SqlResult};
+
 #[cfg(not(feature = "duckdb"))]
 pub use stub::Analytics;

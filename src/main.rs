@@ -96,6 +96,29 @@ fn run(args: Args) -> Result<Outcome> {
             commands::run_index(config)
         }
         Some(Command::Query { query }) => commands::run_query(query, json),
+        Some(Command::Sql {
+            query,
+            file,
+            output,
+            json: json_flag,
+            max_rows,
+            timeout,
+            fail_on_rows,
+            schema,
+        }) => {
+            // `ctx sql` owns its exit code (0 clean / 1 with --fail-on-rows / 2 error),
+            // so it returns an Outcome directly like the other quality commands.
+            return commands::run_sql(commands::SqlArgs {
+                query,
+                file,
+                format: output,
+                json: json || json_flag,
+                max_rows,
+                timeout,
+                fail_on_rows,
+                schema,
+            });
+        }
         Some(Command::Search {
             query,
             limit,

@@ -21,6 +21,7 @@ pub mod search;
 pub mod self_update;
 pub mod similar;
 pub mod smart_cmd;
+pub mod sql;
 pub mod symbol;
 
 pub use analysis::{run_audit, run_complexity};
@@ -43,6 +44,7 @@ pub use search::run_search;
 pub use self_update::{run_self_update, run_version};
 pub use similar::run_similar;
 pub use smart_cmd::run_smart;
+pub use sql::{run_sql, SqlArgs};
 pub use symbol::{run_explain, run_source};
 
 /// Format a token count as a human-readable string (e.g. 241_502 → "241.5k").
