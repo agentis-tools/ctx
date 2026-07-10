@@ -255,6 +255,151 @@ pub fn render_claude_md_block(root: &Path) -> String {
 }
 
 // ============================================================================
+// Settings wiring (.claude/settings.json)
+// ============================================================================
+
+/// Outcome of merging the ctx snippet into `.claude/settings.json`.
+#[derive(Debug, PartialEq)]
+pub enum SettingsWireAction {
+    /// No settings file existed; wrote a fresh one from the snippet.
+    Created,
+    /// Merged ctx's entries into an existing settings file.
+    Merged,
+    /// Settings already referenced ctx's hooks; nothing to add.
+    AlreadyWired,
+    /// Settings existed but were not valid JSON (object); left untouched.
+    SkippedInvalid,
+}
+
+/// Idempotency marker: a hook group already wired for ctx references this
+/// substring in its command. Mirrors the doctor's `check_settings_wiring`.
+const CTX_HOOKS_MARKER: &str = ".claude/hooks/ctx/";
+
+/// Merge the ctx hooks + permissions snippet into `.claude/settings.json`.
+///
+/// Additive, idempotent, and never clobbers unrelated user settings:
+/// - a missing file is created from the snippet;
+/// - an existing JSON object has ctx's permission entries unioned (dedup by
+///   value) and ctx's hook groups appended only when no group in that event
+///   already references [`CTX_HOOKS_MARKER`];
+/// - a file that is not valid JSON (or not an object) is left byte-for-byte
+///   untouched.
+pub fn wire_local_settings(root: &Path) -> Result<SettingsWireAction> {
+    let snippet = render_settings_snippet();
+    let snippet_value: serde_json::Value = serde_json::from_str(&snippet)
+        .map_err(|e| CtxError::Other(format!("settings snippet is not valid JSON: {e}")))?;
+    let path = root.join(".claude/settings.json");
+
+    let Ok(existing_raw) = fs::read_to_string(&path) else {
+        // Missing (or unreadable): write the snippet fresh.
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = serde_json::to_string_pretty(&snippet_value)
+            .map_err(|e| CtxError::Other(format!("failed to serialize settings: {e}")))?;
+        fs::write(&path, format!("{body}\n"))?;
+        return Ok(SettingsWireAction::Created);
+    };
+
+    let Ok(serde_json::Value::Object(existing)) =
+        serde_json::from_str::<serde_json::Value>(&existing_raw)
+    else {
+        // Present but not a JSON object: leave it exactly as-is.
+        return Ok(SettingsWireAction::SkippedInvalid);
+    };
+
+    let mut merged = existing.clone();
+    merge_settings(&mut merged, &snippet_value);
+
+    if serde_json::Value::Object(merged.clone()) == serde_json::Value::Object(existing) {
+        return Ok(SettingsWireAction::AlreadyWired);
+    }
+
+    let body = serde_json::to_string_pretty(&serde_json::Value::Object(merged))
+        .map_err(|e| CtxError::Other(format!("failed to serialize settings: {e}")))?;
+    fs::write(&path, format!("{body}\n"))?;
+    Ok(SettingsWireAction::Merged)
+}
+
+/// Deep-merge ctx's snippet into an existing settings object, in place.
+fn merge_settings(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    snippet: &serde_json::Value,
+) {
+    let Some(snippet_obj) = snippet.as_object() else {
+        return;
+    };
+
+    // permissions.allow / permissions.deny: union with dedup by value.
+    if let Some(perms) = snippet_obj.get("permissions").and_then(|v| v.as_object()) {
+        let target_perms = target
+            .entry("permissions")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if let serde_json::Value::Object(ref mut target_perms) = target_perms {
+            for key in ["allow", "deny"] {
+                if let Some(add) = perms.get(key).and_then(|v| v.as_array()) {
+                    union_array(target_perms, key, add);
+                }
+            }
+        }
+    }
+
+    // hooks.<Event>: append ctx's group unless one already references the marker.
+    if let Some(hooks) = snippet_obj.get("hooks").and_then(|v| v.as_object()) {
+        let target_hooks = target
+            .entry("hooks")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if let serde_json::Value::Object(ref mut target_hooks) = target_hooks {
+            for (event, groups) in hooks {
+                if let Some(groups) = groups.as_array() {
+                    append_hook_groups_if_absent(target_hooks, event, groups);
+                }
+            }
+        }
+    }
+}
+
+/// Append `additions` to `map[key]` (an array), keeping existing entries in
+/// order and skipping any addition already present by value.
+fn union_array(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    additions: &[serde_json::Value],
+) {
+    let entry = map
+        .entry(key)
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if let serde_json::Value::Array(ref mut arr) = entry {
+        for add in additions {
+            if !arr.contains(add) {
+                arr.push(add.clone());
+            }
+        }
+    }
+}
+
+/// Append ctx's hook groups for `event` unless a group in that event's array
+/// already references [`CTX_HOOKS_MARKER`] (serialize-and-substring check,
+/// the same idempotency marker the doctor uses).
+fn append_hook_groups_if_absent(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    additions: &[serde_json::Value],
+) {
+    let entry = hooks
+        .entry(event)
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if let serde_json::Value::Array(ref mut arr) = entry {
+        let already_wired = serde_json::Value::Array(arr.clone())
+            .to_string()
+            .contains(CTX_HOOKS_MARKER);
+        if !already_wired {
+            arr.extend(additions.iter().cloned());
+        }
+    }
+}
+
+// ============================================================================
 // Ownership + writing
 // ============================================================================
 
@@ -559,6 +704,86 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o111, 0o111, "mode: {:o}", mode);
+    }
+
+    #[test]
+    fn test_wire_creates_settings_when_missing() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let action = wire_local_settings(root).unwrap();
+        assert_eq!(action, SettingsWireAction::Created);
+        let content = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+        assert!(content.contains(".claude/hooks/ctx/"), "content: {content}");
+        serde_json::from_str::<serde_json::Value>(&content).unwrap();
+    }
+
+    #[test]
+    fn test_wire_merges_additively_preserving_user_settings() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        // Unrelated top-level key + a user-defined hook under a different path.
+        fs::write(
+            root.join(".claude/settings.json"),
+            r#"{
+  "foo": "bar",
+  "permissions": { "allow": ["Bash(git *)"] },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "/my/own/hook.sh" }] }
+    ]
+  }
+}"#,
+        )
+        .unwrap();
+
+        let action = wire_local_settings(root).unwrap();
+        assert_eq!(action, SettingsWireAction::Merged);
+
+        let content = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        // Unrelated key preserved.
+        assert_eq!(value["foo"], "bar");
+        // Existing permission preserved, ctx permission added.
+        let allow = value["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.contains(&serde_json::json!("Bash(git *)")));
+        assert!(allow.contains(&serde_json::json!("Bash(ctx *)")));
+        // User hook preserved, ctx hook appended in the same event.
+        let session = value["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(session.len(), 2, "user + ctx group: {session:?}");
+        assert!(content.contains("/my/own/hook.sh"));
+        assert!(content.contains(".claude/hooks/ctx/session-start.sh"));
+    }
+
+    #[test]
+    fn test_wire_is_idempotent() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        assert_eq!(
+            wire_local_settings(root).unwrap(),
+            SettingsWireAction::Created
+        );
+        let first = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+
+        assert_eq!(
+            wire_local_settings(root).unwrap(),
+            SettingsWireAction::AlreadyWired
+        );
+        let second = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+        assert_eq!(first, second, "bytes must be unchanged on re-wire");
+    }
+
+    #[test]
+    fn test_wire_leaves_invalid_json_untouched() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        let path = root.join(".claude/settings.json");
+        fs::write(&path, "{not json").unwrap();
+
+        let action = wire_local_settings(root).unwrap();
+        assert_eq!(action, SettingsWireAction::SkippedInvalid);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{not json");
     }
 
     #[test]

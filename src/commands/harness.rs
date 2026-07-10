@@ -80,6 +80,15 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
     let snippet = harness::render_settings_snippet();
     let guidance = harness::render_claude_md_block(root);
 
+    // In local mode, merge the ctx hooks + permissions into
+    // .claude/settings.json ourselves (additive + idempotent). Plugin mode
+    // is unaffected.
+    let settings_action = if mode == Mode::Local {
+        Some(harness::wire_local_settings(root)?)
+    } else {
+        None
+    };
+
     if json_mode {
         let files: Vec<serde_json::Value> = actions
             .iter()
@@ -94,6 +103,10 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
         if mode == Mode::Local {
             data["settings_snippet"] = serde_json::Value::String(snippet);
             data["claude_md_block"] = serde_json::Value::String(guidance);
+            if let Some(action) = &settings_action {
+                data["settings_action"] =
+                    serde_json::Value::String(settings_action_str(action).to_string());
+            }
         }
         ctx::json::emit("harness.init", data)?;
         return Ok(Outcome::Clean);
@@ -102,9 +115,26 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
     match mode {
         Mode::Local => {
             eprintln!();
-            eprintln!("Merge this snippet into .claude/settings.json (ctx does not edit it):");
+            match settings_action.expect("local mode always wires settings") {
+                harness::SettingsWireAction::Created => {
+                    eprintln!("wired ctx hooks into .claude/settings.json");
+                }
+                harness::SettingsWireAction::Merged => {
+                    eprintln!("merged ctx hooks into existing .claude/settings.json");
+                }
+                harness::SettingsWireAction::AlreadyWired => {
+                    eprintln!(".claude/settings.json already wired for ctx");
+                }
+                harness::SettingsWireAction::SkippedInvalid => {
+                    eprintln!(
+                        "warning: .claude/settings.json is not valid JSON; not modified. \
+                         Merge this snippet manually:"
+                    );
+                    eprintln!();
+                    println!("{snippet}");
+                }
+            }
             eprintln!();
-            println!("{snippet}");
             eprintln!("Add this block to your CLAUDE.md so the model knows about ctx:");
             eprintln!();
             println!("{guidance}");
@@ -129,6 +159,16 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
     }
 
     Ok(Outcome::Clean)
+}
+
+/// Stable identifier for a settings-wire action, used in `--json` output.
+fn settings_action_str(action: &harness::SettingsWireAction) -> &'static str {
+    match action {
+        harness::SettingsWireAction::Created => "created",
+        harness::SettingsWireAction::Merged => "merged",
+        harness::SettingsWireAction::AlreadyWired => "already_wired",
+        harness::SettingsWireAction::SkippedInvalid => "skipped_invalid",
+    }
 }
 
 // ============================================================================

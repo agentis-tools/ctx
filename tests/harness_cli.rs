@@ -73,10 +73,18 @@ fn test_local_init_post_tool_use_hook_runs_end_to_end() {
     assert!(root.join(".ctx/rules.toml").exists());
     assert!(root.join(".ctx/harness.lock").exists());
 
-    // The settings snippet and CLAUDE.md guidance go to stdout.
+    // init now wires .claude/settings.json itself (no manual paste).
+    let settings_path = root.join(".claude/settings.json");
+    assert!(settings_path.exists(), "settings.json should be written");
+    let settings = fs::read_to_string(&settings_path).unwrap();
+    serde_json::from_str::<serde_json::Value>(&settings).expect("settings.json is valid JSON");
+    assert!(
+        settings.contains(".claude/hooks/ctx/"),
+        "settings: {settings}"
+    );
+
+    // The CLAUDE.md guidance still goes to stdout.
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("\"Bash(ctx *)\""), "stdout: {stdout}");
-    assert!(stdout.contains("$CLAUDE_PROJECT_DIR"), "stdout: {stdout}");
     assert!(stdout.contains("ctx map --budget 2000"), "stdout: {stdout}");
 
     // Run the PostToolUse hook like Claude Code would.
@@ -94,6 +102,86 @@ fn test_local_init_post_tool_use_hook_runs_end_to_end() {
         "stdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+// ============================================================================
+// (1b) settings.json auto-wiring: merge, idempotency, invalid-JSON fallback
+// ============================================================================
+
+#[test]
+fn test_init_merges_into_existing_settings_additively() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".claude")).unwrap();
+    fs::write(
+        root.join(".claude/settings.json"),
+        r#"{"permissions":{"allow":["Bash(git *)"]},"foo":"bar"}"#,
+    )
+    .unwrap();
+
+    let out = ctx(root, &["harness", "init", "--mode", "local"]);
+    assert_eq!(out.status.code(), Some(0));
+
+    let content = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&content).expect("settings.json stays valid JSON");
+
+    // Unrelated user settings preserved.
+    assert_eq!(value["foo"], "bar");
+    let allow = value["permissions"]["allow"].as_array().unwrap();
+    assert!(allow.contains(&serde_json::json!("Bash(git *)")));
+    // ctx entries added.
+    assert!(allow.contains(&serde_json::json!("Bash(ctx *)")));
+    assert!(content.contains(".claude/hooks/ctx/"), "content: {content}");
+
+    // No duplicate hook groups: each event has exactly one ctx group.
+    for event in ["SessionStart", "PostToolUse", "Stop"] {
+        let groups = value["hooks"][event].as_array().unwrap();
+        let ctx_groups = groups
+            .iter()
+            .filter(|g| g.to_string().contains(".claude/hooks/ctx/"))
+            .count();
+        assert_eq!(ctx_groups, 1, "{event}: {groups:?}");
+    }
+}
+
+#[test]
+fn test_init_is_idempotent_on_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    let out = ctx(root, &["harness", "init", "--mode", "local"]);
+    assert_eq!(out.status.code(), Some(0));
+    let first = fs::read(root.join(".claude/settings.json")).unwrap();
+
+    let out = ctx(root, &["harness", "init", "--mode", "local"]);
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("already wired"), "stderr: {stderr}");
+
+    let second = fs::read(root.join(".claude/settings.json")).unwrap();
+    assert_eq!(first, second, "settings bytes must be identical on re-init");
+}
+
+#[test]
+fn test_init_leaves_invalid_settings_untouched_and_prints_snippet() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".claude")).unwrap();
+    fs::write(root.join(".claude/settings.json"), "{not json").unwrap();
+
+    let out = ctx(root, &["harness", "init", "--mode", "local"]);
+    assert_eq!(out.status.code(), Some(0));
+
+    // File left byte-for-byte unchanged.
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/settings.json")).unwrap(),
+        "{not json"
+    );
+    // Fallback: the snippet is printed to stdout for manual merge.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"Bash(ctx *)\""), "stdout: {stdout}");
+    assert!(stdout.contains("$CLAUDE_PROJECT_DIR"), "stdout: {stdout}");
 }
 
 // ============================================================================
