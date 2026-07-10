@@ -9,6 +9,11 @@
 //! and exit-code checks rather than parsing JSON, to avoid depending on
 //! `serde_json` from an integration-test target.
 
+// The entire suite drives `ctx sql` against a DuckDB-backed index, so it is
+// meaningless without the duckdb feature (Windows CI runs --no-default-features,
+// where `ctx sql` exits 2 with a "requires the duckdb feature" error).
+#![cfg(feature = "duckdb")]
+
 use std::path::Path;
 
 use assert_cmd::Command;

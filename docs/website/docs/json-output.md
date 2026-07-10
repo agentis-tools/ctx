@@ -38,7 +38,7 @@ Every JSON document has the same top-level shape:
 
 ```json
 {
-  "ctx_version": "0.2.1",
+  "ctx_version": "0.3.0",
   "command": "query.find",
   "generated_at": "2026-07-09T13:30:46.623878Z",
   "data": { }
@@ -425,12 +425,12 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 ```json
 {
   "healthy": false,
-  "binary_version": "0.2.1",
+  "binary_version": "0.3.0",
   "mcp_compiled": false,
-  "templates_version": "0.2.1",
+  "templates_version": "0.3.0",
   "summary": { "errors": 1, "warnings": 1, "info": 1 },
   "checks": [
-    { "severity": "info", "code": "binary_version", "message": "ctx v0.2.1 (mcp feature: not compiled in)" },
+    { "severity": "info", "code": "binary_version", "message": "ctx v0.3.0 (mcp feature: not compiled in)" },
     { "severity": "warning", "code": "index_missing", "message": "no code intelligence index (.ctx/codebase.sqlite)", "hint": "run 'ctx index' to build it" },
     { "severity": "error", "code": "rules_invalid", "message": ".ctx/rules.toml is invalid: ...", "hint": "fix the rules file; 'ctx check --help' documents the format" }
   ]

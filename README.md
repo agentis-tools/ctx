@@ -127,10 +127,10 @@ indexing, search, and context generation in your own tools. The package is
 
 ```toml
 [dependencies]
-agentis-ctx = "0.2"
+agentis-ctx = "0.3"
 
 # On Windows (or to skip DuckDB analytics):
-# agentis-ctx = { version = "0.2", default-features = false }
+# agentis-ctx = { version = "0.3", default-features = false }
 ```
 
 ```rust

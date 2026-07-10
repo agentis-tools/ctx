@@ -99,7 +99,7 @@ ctx score --against main --json
 
 ```json
 {
-  "ctx_version": "0.2.1",
+  "ctx_version": "0.3.0",
   "command": "score",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {

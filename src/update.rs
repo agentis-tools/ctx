@@ -42,7 +42,7 @@ use sha2::{Digest, Sha256};
 use crate::error::{CtxError, Result};
 
 /// GitHub API base for this repository's releases.
-const DEFAULT_BASE_URL: &str = "https://api.github.com/repos/saldestechnology/ctx";
+const DEFAULT_BASE_URL: &str = "https://api.github.com/repos/agentis-tools/ctx";
 
 /// How often the passive check may touch the network (24 hours).
 pub const PASSIVE_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;

@@ -1,6 +1,6 @@
 ## Code intelligence (ctx)
 
-This project uses [ctx](https://github.com/saldestechnology/ctx) for code
+This project uses [ctx](https://github.com/agentis-tools/ctx) for code
 intelligence. Prefer its index over grepping when exploring:
 
 - `ctx map --budget 2000` -- token-budgeted architectural overview (also runs

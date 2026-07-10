@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-10
+
 ### Added
 - `ctx self-update [--version X.Y.Z]`: update the binary from GitHub releases -- picks the artifact for the current platform (mirroring the release build matrix), verifies its sha256 against the release's aggregated `SHA256SUMS` file (mismatch aborts with exit 2, binary untouched), and atomically replaces the running executable (on Windows the previous binary is renamed aside as `ctx.exe.old` and cleaned up on the next run); `--version` pins an exact release (downgrades allowed), unwritable install locations are refused with guidance before any network work, and `--json` emits a `self_update` envelope (`old_version`, `new_version`, `outcome`)
 - Passive update notice: interactive invocations check GitHub for a newer release at most once per 24h (timestamp cache under the user cache dir, 1-second timeout, silent failure) and print a single stderr line pointing at `ctx self-update`. **ctx never updates itself automatically** -- the check only prints a notice. It is skipped entirely (no network call) with `CTX_NO_UPDATE_CHECK=1`, when stderr is not a terminal, in `--json` mode, and inside Claude Code hooks/sessions (`CLAUDECODE`, `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`)
@@ -30,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs.rs builds with all features enabled
 
 ### Changed
+- Repository moved to [agentis-tools/ctx](https://github.com/agentis-tools/ctx); documentation now lives at [docs.agentis.tools](https://docs.agentis.tools) (the old saldestechnology.github.io Pages URL no longer works, GitHub repo URLs redirect)
 - Exit code 3 is now reserved exclusively for `ctx harness compat` (version requirement not met); all other commands keep the 0 = clean / 1 = findings / 2 = error convention
 - **Breaking:** exit codes now follow a three-way convention: 0 = clean, 1 = findings, 2 = operational error (errors previously exited with code 1)
 - **Breaking:** `search --output json` and `semantic --output json` now emit the new envelope instead of the old ad-hoc JSON arrays; `query graph --output json` is an alias for `--json` (`complexity`/`graph`/`audit` keep their legacy shapes for now)
@@ -98,5 +101,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File size display option (`--show-sizes`)
 - Binary file detection and exclusion
 
-[Unreleased]: https://github.com/saldestechnology/ctx/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/saldestechnology/ctx/releases/tag/v0.2.1
+[Unreleased]: https://github.com/agentis-tools/ctx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/agentis-tools/ctx/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/agentis-tools/ctx/releases/tag/v0.2.1

@@ -52,7 +52,7 @@ cargo build --release --features mcp
 
 ```bash
 ctx --version
-# ctx 0.2.1
+# ctx 0.3.0
 ```
 
 ## Part 1: Context Generation

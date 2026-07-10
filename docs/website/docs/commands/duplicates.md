@@ -89,7 +89,7 @@ ctx duplicates --json
 
 ```json
 {
-  "ctx_version": "0.2.1",
+  "ctx_version": "0.3.0",
   "command": "duplicates",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {

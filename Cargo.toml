@@ -1,13 +1,13 @@
 [package]
 name = "agentis-ctx"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.91"
 description = "Fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence"
 documentation = "https://docs.rs/agentis-ctx"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/saldestechnology/ctx"
-homepage = "https://github.com/saldestechnology/ctx"
+repository = "https://github.com/agentis-tools/ctx"
+homepage = "https://docs.agentis.tools"
 readme = "README.md"
 keywords = ["cli", "llm", "ai", "context", "prompt"]
 categories = ["command-line-utilities", "development-tools"]

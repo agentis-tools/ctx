@@ -6,7 +6,7 @@ Thank you for your interest in contributing to ctx! This document outlines how t
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/saldestechnology/ctx.git
+   git clone https://github.com/agentis-tools/ctx.git
    cd ctx
    ```
 
