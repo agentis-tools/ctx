@@ -17,6 +17,39 @@ pub fn compute_total(items: &[i64]) -> i64 {
 }
 "#;
 
+/// A function with > 50 normalized tokens (near-duplicate detection floor).
+const DUPE_A: &str = r#"
+pub fn process_orders(items: &[i64]) -> i64 {
+    let mut total = 0;
+    for item in items {
+        if *item > 10 {
+            total += *item * 2;
+        } else {
+            total += *item + 1;
+        }
+    }
+    println!("processed the batch: {}", total);
+    total
+}
+"#;
+
+/// A structural copy of `DUPE_A` with renamed identifiers and different
+/// string/number literals.
+const DUPE_B: &str = r#"
+pub fn sum_invoices(entries: &[i64]) -> i64 {
+    let mut acc = 0;
+    for entry in entries {
+        if *entry > 99 {
+            acc += *entry * 7;
+        } else {
+            acc += *entry + 3;
+        }
+    }
+    println!("done with invoices: {}", acc);
+    acc
+}
+"#;
+
 fn ctx(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ctx"))
         .args(args)
@@ -25,11 +58,12 @@ fn ctx(dir: &Path, args: &[&str]) -> Output {
         .expect("failed to run ctx binary")
 }
 
-/// Run a generated hook script with `sh`, empty stdin, and the ctx binary's
-/// directory prefixed to PATH (so the script's bare `ctx` resolves to the
-/// freshly built binary).
+/// Run a generated hook script with `sh`, empty stdin, extra environment
+/// variables, and the ctx binary's directory prefixed to PATH (so the
+/// script's bare `ctx` resolves to the freshly built binary). Gate settings
+/// are never inherited from the test runner's environment.
 #[cfg(unix)]
-fn run_hook(dir: &Path, script: &Path) -> Output {
+fn run_hook_env(dir: &Path, script: &Path, envs: &[(&str, &str)]) -> Output {
     let bin_dir = Path::new(env!("CARGO_BIN_EXE_ctx")).parent().unwrap();
     let path = format!(
         "{}:{}",
@@ -40,9 +74,18 @@ fn run_hook(dir: &Path, script: &Path) -> Output {
         .arg(script)
         .current_dir(dir)
         .env("PATH", path)
+        .env_remove("CTX_GATE_LOG")
+        .env_remove("CTX_GATE_BLOCKING")
+        .envs(envs.iter().map(|(k, v)| (k.to_string(), v.to_string())))
         .stdin(Stdio::null())
         .output()
         .expect("failed to run hook script")
+}
+
+/// [`run_hook_env`] with no extra environment.
+#[cfg(unix)]
+fn run_hook(dir: &Path, script: &Path) -> Output {
+    run_hook_env(dir, script, &[])
 }
 
 // ============================================================================
@@ -105,7 +148,117 @@ fn test_local_init_post_tool_use_hook_runs_end_to_end() {
 }
 
 // ============================================================================
-// (1b) settings.json auto-wiring: merge, idempotency, invalid-JSON fallback
+// (1b) stop hook: gate outcome mapping (non-blocking / blocking / clean)
+// ============================================================================
+
+/// A committed, indexed repo with generated local hooks. Returns the repo
+/// and the path to the generated stop hook.
+#[cfg(unix)]
+fn stop_hook_repo(dir: &Path) -> (GitRepo, std::path::PathBuf) {
+    let repo = GitRepo::init(dir);
+    repo.write("src/a.rs", DUPE_A);
+    repo.write("src/b.rs", "pub fn tiny() -> i64 { 1 }\n");
+    repo.commit_all("v1");
+    assert!(ctx(&repo.root, &["index"]).status.success());
+    assert!(ctx(&repo.root, &["harness", "init", "--mode", "local"])
+        .status
+        .success());
+    let hook = repo.root.join(".claude/hooks/ctx/stop.sh");
+    assert!(hook.exists());
+    (repo, hook)
+}
+
+/// Trip the stop hook's quality gate: an uncommitted structural duplicate
+/// of `DUPE_A` makes `new_duplication > 0` against the default branch.
+#[cfg(unix)]
+fn trip_gate(repo: &GitRepo) {
+    repo.write(
+        "src/b.rs",
+        &format!("pub fn tiny() -> i64 {{ 1 }}\n{DUPE_B}"),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_stop_hook_gate_failure_is_nonblocking_by_default() {
+    let temp = tempfile::tempdir().unwrap();
+    let (repo, hook) = stop_hook_repo(temp.path());
+    trip_gate(&repo);
+
+    // CTX_GATE_BLOCKING unset: the gate fires but the hook still exits 0.
+    let out = run_hook(&repo.root, &hook);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("non-blocking"), "stderr: {stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
+    let temp = tempfile::tempdir().unwrap();
+    let (repo, hook) = stop_hook_repo(temp.path());
+    trip_gate(&repo);
+
+    // CTX_GATE_BLOCKING=1: exit 2 (Claude Code's blocking stop) with the
+    // reason on stderr; CTX_GATE_LOG=1 makes `ctx score` record the gate.
+    let out = run_hook_env(
+        &repo.root,
+        &hook,
+        &[("CTX_GATE_BLOCKING", "1"), ("CTX_GATE_LOG", "1")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("blocking"), "stderr: {stderr}");
+
+    let content = fs::read_to_string(repo.root.join(".ctx/gate-log.jsonl")).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 1, "content: {content:?}");
+    let record: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(record["schema_version"], 1);
+    assert_eq!(record["source"], "score");
+    assert_eq!(record["against"], "main");
+    assert_eq!(record["outcome"], "fail");
+    assert_eq!(record["blocking"], true);
+    assert!(
+        record["failed_conditions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c == "new_duplication > 0"),
+        "record: {record}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_stop_hook_blocking_mode_with_clean_state_exits_zero() {
+    let temp = tempfile::tempdir().unwrap();
+    let (repo, hook) = stop_hook_repo(temp.path());
+
+    // No source changes vs main: the gate passes, blocking mode is inert.
+    let out = run_hook_env(&repo.root, &hook, &[("CTX_GATE_BLOCKING", "1")]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("quality gates"), "stderr: {stderr}");
+}
+
+// ============================================================================
+// (1c) settings.json auto-wiring: merge, idempotency, invalid-JSON fallback
 // ============================================================================
 
 #[test]

@@ -135,6 +135,86 @@ fn churn_since_in(dir: &Path, since: &str) -> Result<HashMap<String, u32>> {
     Ok(churn)
 }
 
+/// Count how many commits touched each file since `since`, optionally
+/// anchored with `--until=<until>` (any `git log` date spec).
+///
+/// Like [`churn_since`] but dir-explicit and with an optional upper bound,
+/// so historical snapshots can measure churn as of a commit's date instead
+/// of wall-clock now.
+pub fn churn_between_in(
+    dir: &Path,
+    since: &str,
+    until: Option<&str>,
+) -> Result<HashMap<String, u32>> {
+    if !is_git_repo_in(dir) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    let prefix = repo_prefix_in(dir)?;
+    let since_arg = format!("--since={}", since);
+    let until_arg = until.map(|u| format!("--until={}", u));
+    let mut args = vec!["log", &since_arg];
+    if let Some(ref until_arg) = until_arg {
+        args.push(until_arg);
+    }
+    args.extend(["--format=", "--name-only", "--no-renames", "--", "."]);
+    let output = run_git(dir, &args)?;
+    let log = stdout_or_err(output, None)?;
+
+    let mut churn = HashMap::new();
+    for (path, count) in parse_name_only_log(&log) {
+        if let Some(local) = strip_repo_prefix(&path, &prefix) {
+            *churn.entry(local).or_insert(0) += count;
+        }
+    }
+    Ok(churn)
+}
+
+/// The current HEAD commit as `(full sha, committer date)`.
+///
+/// The committer date is strict ISO 8601 (`git log --format=%cI`, e.g.
+/// `2026-07-09T12:00:00+02:00`).
+pub fn head_commit_in(dir: &Path) -> Result<(String, String)> {
+    if !is_git_repo_in(dir) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    let output = run_git(dir, &["log", "-1", "--format=%H%x00%cI"])?;
+    let stdout = stdout_or_err(output, Some("HEAD"))?;
+    let line = stdout.trim();
+    let (sha, date) = line
+        .split_once('\0')
+        .ok_or_else(|| CtxError::git(format!("unexpected `git log -1` output: {:?}", line)))?;
+    Ok((sha.to_string(), date.to_string()))
+}
+
+/// First-parent commit shas in `range` (e.g. `abc123..HEAD`), oldest first.
+pub fn rev_list_first_parent_in(dir: &Path, range: &str) -> Result<Vec<String>> {
+    if !is_git_repo_in(dir) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    let output = run_git(dir, &["rev-list", "--first-parent", "--reverse", range])?;
+    let stdout = stdout_or_err(output, Some(range))?;
+    Ok(stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
+/// Whether the working tree has uncommitted changes (staged, unstaged, or
+/// untracked), per `git status --porcelain`.
+pub fn is_dirty_in(dir: &Path) -> Result<bool> {
+    if !is_git_repo_in(dir) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    let output = run_git(dir, &["status", "--porcelain"])?;
+    let stdout = stdout_or_err(output, None)?;
+    Ok(stdout.lines().any(|l| !l.trim().is_empty()))
+}
+
 /// Dir-explicit variant of [`show_file`], for commands and tests that
 /// operate on an explicit project root instead of the process cwd.
 pub fn show_file_in(dir: &Path, reference: &str, path: &str) -> Result<Option<String>> {
@@ -332,9 +412,11 @@ mod tests {
     }
 
     #[test]
-    fn test_changed_files_not_a_repo() {
+    fn test_not_a_repo_errors() {
         let dir = tempfile::tempdir().unwrap();
         let err = changed_files_against_in(dir.path(), "main").unwrap_err();
+        assert!(matches!(err, CtxError::NotGitRepo));
+        let err = churn_since_in(dir.path(), "1 week ago").unwrap_err();
         assert!(matches!(err, CtxError::NotGitRepo));
     }
 
@@ -352,10 +434,89 @@ mod tests {
     }
 
     #[test]
-    fn test_churn_since_not_a_repo() {
+    fn test_churn_between() {
         let dir = tempfile::tempdir().unwrap();
-        let err = churn_since_in(dir.path(), "1 week ago").unwrap_err();
+        let repo = GitRepo::init(dir.path());
+        repo.write("src/a.rs", "v1");
+        repo.commit_all_with_date("one", "2020-01-01T12:00:00 +0000");
+        repo.write("src/a.rs", "v2");
+        repo.commit_all_with_date("two", "2021-01-01T12:00:00 +0000");
+        repo.write("src/b.rs", "v1");
+        repo.commit_all_with_date("three", "2022-01-01T12:00:00 +0000");
+
+        // Unbounded: all three commits count.
+        let churn = churn_between_in(&repo.root, "2000-01-01", None).unwrap();
+        assert_eq!(churn.get("src/a.rs"), Some(&2));
+        assert_eq!(churn.get("src/b.rs"), Some(&1));
+
+        // Anchored at mid-2021: the 2022 commit is excluded.
+        let churn = churn_between_in(&repo.root, "2000-01-01", Some("2021-06-01")).unwrap();
+        assert_eq!(churn.get("src/a.rs"), Some(&2));
+        assert_eq!(churn.get("src/b.rs"), None);
+    }
+
+    #[test]
+    fn test_churn_between_not_a_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = churn_between_in(dir.path(), "1 week ago", None).unwrap_err();
         assert!(matches!(err, CtxError::NotGitRepo));
+    }
+
+    #[test]
+    fn test_head_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path());
+        repo.write("a.rs", "fn a() {}");
+        repo.commit_all_with_date("initial", "2020-01-02T03:04:05 +0000");
+
+        let (sha, date) = head_commit_in(&repo.root).unwrap();
+        assert_eq!(sha.len(), 40, "expected a full sha: {}", sha);
+        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(date.starts_with("2020-01-02T03:04:05"), "date: {}", date);
+
+        // Not a repo -> error.
+        let empty = tempfile::tempdir().unwrap();
+        let err = head_commit_in(empty.path()).unwrap_err();
+        assert!(matches!(err, CtxError::NotGitRepo));
+    }
+
+    #[test]
+    fn test_rev_list_first_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path());
+        repo.commit_file("a.rs", "v1", "one");
+        let (first, _) = head_commit_in(&repo.root).unwrap();
+        repo.commit_file("a.rs", "v2", "two");
+        repo.commit_file("a.rs", "v3", "three");
+        let (head, _) = head_commit_in(&repo.root).unwrap();
+
+        let shas = rev_list_first_parent_in(&repo.root, &format!("{}..HEAD", first)).unwrap();
+        assert_eq!(shas.len(), 2, "expected the two commits after the first");
+        assert_eq!(shas.last(), Some(&head), "oldest-first order");
+
+        let err = rev_list_first_parent_in(&repo.root, "no-such..HEAD").unwrap_err();
+        assert!(matches!(
+            err,
+            CtxError::InvalidRevision(_) | CtxError::Git(_)
+        ));
+    }
+
+    #[test]
+    fn test_is_dirty() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path());
+        repo.commit_file("a.rs", "fn a() {}", "initial");
+        assert!(!is_dirty_in(&repo.root).unwrap());
+
+        // Untracked file counts as dirty.
+        repo.write("b.rs", "fn b() {}");
+        assert!(is_dirty_in(&repo.root).unwrap());
+
+        // Modified tracked file counts as dirty.
+        std::fs::remove_file(repo.root.join("b.rs")).unwrap();
+        assert!(!is_dirty_in(&repo.root).unwrap());
+        repo.write("a.rs", "fn a() { /* changed */ }");
+        assert!(is_dirty_in(&repo.root).unwrap());
     }
 
     #[test]

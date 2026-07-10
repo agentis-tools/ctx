@@ -8,7 +8,8 @@ use std::path::Path;
 
 use ctx::error::Result;
 use ctx::exit::Outcome;
-use ctx::score::{self, FailCondition, ScoreReport};
+use ctx::gatelog;
+use ctx::score::{self, FailCondition, Metrics, ScoreReport};
 
 /// Run `ctx score` in the current directory.
 pub fn run_score(against: &str, fail_on: Option<&str>, json: bool) -> Result<Outcome> {
@@ -38,6 +39,32 @@ fn run_score_in(
 
     let failed = score::failed_conditions(&conditions, &report.metrics);
 
+    // Opt-in gate log (CTX_GATE_LOG): append one record per evaluation.
+    // Best-effort -- an IO failure warns once on stderr and never changes
+    // the command's exit outcome.
+    if let Some(log_path) = gatelog::gate_log_target(root) {
+        let record = gatelog::GateRecord {
+            schema_version: gatelog::GATE_LOG_SCHEMA_VERSION,
+            ts: gatelog::now_rfc3339(),
+            ctx_version: env!("CARGO_PKG_VERSION").to_string(),
+            source: "score".to_string(),
+            against: against.to_string(),
+            fail_on: fail_on.map(str::to_string),
+            metrics: metrics_value(&report.metrics),
+            failed_conditions: failed.iter().map(|c| c.to_string()).collect(),
+            outcome: if failed.is_empty() { "pass" } else { "fail" }.to_string(),
+            blocking: gatelog::blocking_enabled(),
+            session_id: gatelog::session_id(),
+        };
+        if let Err(err) = gatelog::append(&log_path, &record) {
+            eprintln!(
+                "warning: could not append gate log {}: {}",
+                log_path.display(),
+                err
+            );
+        }
+    }
+
     if json_mode {
         ctx::json::emit("score", score_data(&report, &failed))?;
     } else {
@@ -63,6 +90,20 @@ fn run_score_in(
 // Output
 // ============================================================================
 
+/// The seven-key `metrics` object shared by the `--json` payload and the
+/// gate log (see docs/json-output.md, `score`).
+fn metrics_value(m: &Metrics) -> serde_json::Value {
+    serde_json::json!({
+        "complexity_delta": m.complexity_delta,
+        "fan_out_delta": m.fan_out_delta,
+        "new_duplication": m.new_duplication,
+        "check_violations": m.check_violations,
+        "symbols_added": m.symbols_added,
+        "symbols_removed": m.symbols_removed,
+        "files_changed": m.files_changed,
+    })
+}
+
 /// The `data` payload for `--json` mode (see docs/json-output.md, `score`).
 fn score_data(report: &ScoreReport, failed: &[FailCondition]) -> serde_json::Value {
     let m = &report.metrics;
@@ -85,15 +126,7 @@ fn score_data(report: &ScoreReport, failed: &[FailCondition]) -> serde_json::Val
     serde_json::json!({
         "against": report.against,
         "files_changed": m.files_changed,
-        "metrics": {
-            "complexity_delta": m.complexity_delta,
-            "fan_out_delta": m.fan_out_delta,
-            "new_duplication": m.new_duplication,
-            "check_violations": m.check_violations,
-            "symbols_added": m.symbols_added,
-            "symbols_removed": m.symbols_removed,
-            "files_changed": m.files_changed,
-        },
+        "metrics": metrics_value(m),
         "check_violations_note": report.check_violations_note,
         "per_file": per_file,
         "failed_conditions": failed.iter().map(|c| c.to_string()).collect::<Vec<_>>(),

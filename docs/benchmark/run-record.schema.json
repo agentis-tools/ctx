@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.agentis.tools/schemas/run-record-v1.json",
+  "title": "Benchmark run record",
+  "description": "One record per benchmark run in the ctx longitudinal study. A run is a single agent attempt at a task under one experiment arm; records are appended as JSON Lines and joined against ctx gate logs for analysis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "task_id",
+    "arm",
+    "run_index",
+    "started_at",
+    "finished_at",
+    "model_version",
+    "ctx_version",
+    "harness_mode",
+    "gate_config",
+    "transcript_path",
+    "exit_status",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of this record schema. Always 1 for records validated by this schema; a breaking change bumps the version and the schema $id."
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Globally unique identifier for this run (UUID)."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Identifier of the benchmark task this run attempted."
+    },
+    "arm": {
+      "type": "string",
+      "description": "Experiment arm the run belongs to. Conventional values are \"control\" (no gates), \"gates\" (advisory gates), and \"gates_blocking\" (blocking gates); the field is deliberately not enum-restricted so new arms can be added without a schema change."
+    },
+    "run_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based index of this run among the repeated runs of (task_id, arm)."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp at which the run started."
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp at which the run finished."
+    },
+    "model_version": {
+      "type": "string",
+      "description": "Exact model identifier used by the agent for this run."
+    },
+    "ctx_version": {
+      "type": "string",
+      "description": "Version of ctx installed during the run."
+    },
+    "harness_mode": {
+      "enum": ["local", "plugin"],
+      "description": "How the ctx harness was wired into the agent: \"local\" (hooks generated into the repo) or \"plugin\" (marketplace plugin)."
+    },
+    "gate_config": {
+      "type": "object",
+      "description": "Effective gate configuration for the run.",
+      "required": ["fail_on", "blocking", "gate_log_enabled"],
+      "properties": {
+        "fail_on": {
+          "type": ["string", "null"],
+          "description": "Gate failure condition (e.g. a ctx check/score threshold expression), or null when no failure condition is configured."
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "Whether gate failures block the agent (true) or are advisory only (false)."
+        },
+        "gate_log_enabled": {
+          "type": "boolean",
+          "description": "Whether gate evaluations were appended to .ctx/gate-log.jsonl during the run."
+        }
+      }
+    },
+    "transcript_path": {
+      "type": "string",
+      "description": "Path (relative to the study data root) of the full agent transcript for this run."
+    },
+    "exit_status": {
+      "enum": ["success", "failure", "timeout", "error"],
+      "description": "How the run ended: \"success\" (task completed and accepted), \"failure\" (completed but not accepted), \"timeout\" (hit the wall-clock limit), \"error\" (harness or infrastructure error)."
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Quantitative outcomes of the run.",
+      "required": ["score", "gate_evaluations", "wall_clock_seconds"],
+      "properties": {
+        "score": {
+          "type": "object",
+          "description": "Final `ctx score --against <base>` metrics for the run's diff. Exactly the seven ctx score metric keys, all numeric.",
+          "additionalProperties": false,
+          "required": [
+            "complexity_delta",
+            "fan_out_delta",
+            "new_duplication",
+            "check_violations",
+            "symbols_added",
+            "symbols_removed",
+            "files_changed"
+          ],
+          "properties": {
+            "complexity_delta": { "type": "number" },
+            "fan_out_delta": { "type": "number" },
+            "new_duplication": { "type": "number" },
+            "check_violations": { "type": "number" },
+            "symbols_added": { "type": "number" },
+            "symbols_removed": { "type": "number" },
+            "files_changed": { "type": "number" }
+          }
+        },
+        "gate_evaluations": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of gate evaluations performed during the run."
+        },
+        "wall_clock_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total wall-clock duration of the run in seconds."
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-form operator notes about the run."
+    }
+  }
+}

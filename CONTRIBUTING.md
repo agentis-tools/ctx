@@ -51,6 +51,16 @@ cargo test
 cargo publish --dry-run
 ```
 
+### Performance gates
+
+CI runs an **advisory** `perf` job on every PR: it spawns a prebuilt `ctx` binary against deterministic synthetic fixtures and checks the hook-path commands (incremental index, score, check, map, sql) against latency budgets, an RSS ceiling, and a committed baseline. Advisory means it does not block merges — but treat a red `perf` job as a real finding, not noise.
+
+When it fails:
+
+1. **Reproduce locally** following [`perf/README.md`](perf/README.md) (`cargo build --profile perf --all-features`, then run the harness with `CTX_PERF_BIN` pointing at the binary).
+2. **Mind the budget scale.** Budgets are calibrated for local bare-metal runs (`CTX_PERF_BUDGET_SCALE=1.0`); CI uses `1.5` because hosted runners are slower and noisier. A scenario that passes locally but fails in CI by a hair is usually runner noise — re-run before digging. The 1.20x baseline-regression factor is deliberately *not* scaled.
+3. **Baseline updates are deliberate, never automatic.** CI never writes baselines. If a slowdown is intentional (e.g. a feature genuinely does more work), capture a new baseline on the CI runner class per `perf/baselines/README.md` and commit it in its own commit with a justification.
+
 ## IDE Configuration
 
 The repository includes `.vscode` and `.idea` in `.gitignore`. Feel free to add local IDE configs but do not commit them.

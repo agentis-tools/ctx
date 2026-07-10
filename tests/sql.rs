@@ -17,6 +17,7 @@
 use std::path::Path;
 
 use assert_cmd::Command;
+use ctx::testutil::GitRepo;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -374,4 +375,273 @@ fn gate_files_drive_pass_and_fail_exit_codes() {
         .arg(".ctx/gates/fail.sql")
         .assert()
         .code(1);
+}
+
+// ---------------------------------------------------------------------------
+// Snapshots: `--snapshots` loads Parquet partitions as `snap.*` tables for
+// trend queries, without weakening the sandbox.
+// ---------------------------------------------------------------------------
+
+/// A function with > 50 normalized tokens (the snapshot near-duplicate
+/// detector's minimum).
+const DUPE_A: &str = r#"
+pub fn process_orders(items: &[i64]) -> i64 {
+    let mut total = 0;
+    for item in items {
+        if *item > 10 {
+            total += *item * 2;
+        } else {
+            total += *item + 1;
+        }
+    }
+    println!("processed the batch: {}", total);
+    total
+}
+"#;
+
+/// A structural copy of `DUPE_A` with renamed identifiers and different
+/// literals, so every snapshot partition contains one near-duplicate pair.
+const DUPE_B: &str = r#"
+pub fn sum_invoices(entries: &[i64]) -> i64 {
+    let mut acc = 0;
+    for entry in entries {
+        if *entry > 99 {
+            acc += *entry * 7;
+        } else {
+            acc += *entry + 3;
+        }
+    }
+    println!("done with invoices: {}", acc);
+    acc
+}
+"#;
+
+/// A file with call edges so its `total_complexity` strictly exceeds the
+/// duplicate file's — the hotspot-mass query's `percent_rank() >= 0.9`
+/// bucket then contains this file for every commit.
+const CALLS_V1: &str = r#"
+pub fn alpha() -> i64 {
+    beta() + gamma() + beta()
+}
+
+pub fn beta() -> i64 {
+    1
+}
+
+pub fn gamma() -> i64 {
+    beta() + 2
+}
+"#;
+
+const CALLS_V2: &str = r#"
+pub fn alpha() -> i64 {
+    beta() + gamma() + beta() + delta()
+}
+
+pub fn beta() -> i64 {
+    1
+}
+
+pub fn gamma() -> i64 {
+    beta() + 2
+}
+
+pub fn delta() -> i64 {
+    beta() + gamma()
+}
+"#;
+
+/// The three canned trend queries documented in the schema reference
+/// (`ctx sql --schema`). `canned_queries_match_schema_reference` keeps these
+/// strings and the docs in lockstep.
+const TREND_DUPLICATION: &str = "SELECT commit_sha, min(committed_at) AS committed_at, count(*) AS dup_pairs FROM snap.dup_pairs GROUP BY commit_sha ORDER BY committed_at;";
+const TREND_VIOLATIONS: &str = "SELECT commit_sha, min(committed_at) AS committed_at, sum(violation_count) AS violations FROM snap.files GROUP BY commit_sha ORDER BY committed_at;";
+const TREND_HOTSPOT_MASS: &str = "WITH ranked AS (SELECT commit_sha, committed_at, churn_commits * total_complexity AS mass, percent_rank() OVER (PARTITION BY commit_sha ORDER BY total_complexity) AS pr FROM snap.files) SELECT commit_sha, min(committed_at) AS committed_at, sum(mass) AS hotspot_mass FROM ranked WHERE pr >= 0.9 GROUP BY commit_sha ORDER BY committed_at;";
+
+use ctx::testutil::git_stdout;
+
+/// A repo with two dated commits, an index, and one snapshot partition per
+/// commit (via `ctx snapshot backfill`). Returns the commit shas oldest-first.
+fn snapshot_fixture() -> (TempDir, GitRepo, Vec<String>) {
+    let temp = TempDir::new().expect("create temp dir");
+    let repo = GitRepo::init(temp.path());
+    repo.write("src/dupes.rs", &format!("{}\n{}", DUPE_A, DUPE_B));
+    repo.write("src/calls.rs", CALLS_V1);
+    repo.commit_all_with_date("one", "2024-01-01T12:00:00 +0000");
+    repo.write("src/calls.rs", CALLS_V2);
+    repo.commit_all_with_date("two", "2024-02-01T12:00:00 +0000");
+
+    Command::cargo_bin("ctx")
+        .unwrap()
+        .current_dir(&repo.root)
+        .arg("index")
+        .assert()
+        .success();
+
+    let shas: Vec<String> = git_stdout(&repo.root, &["rev-list", "--reverse", "HEAD"])
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(shas.len(), 2, "fixture has two commits");
+
+    Command::cargo_bin("ctx")
+        .unwrap()
+        .current_dir(&repo.root)
+        .args(["snapshot", "backfill", "--since", &shas[0]])
+        .assert()
+        .success();
+
+    (temp, repo, shas)
+}
+
+/// Run `ctx sql --snapshots --json <query>` in `dir`, assert success, and
+/// return stdout.
+fn snapshots_json(dir: &Path, query: &str) -> String {
+    let assert = sql(dir)
+        .arg("--snapshots")
+        .arg("--json")
+        .arg(query)
+        .assert()
+        .success();
+    String::from_utf8(assert.get_output().stdout.clone()).expect("stdout is utf-8")
+}
+
+/// One trend row per partition, ordered ascending by `committed_at`
+/// (fixture commits are dated oldest-first, so the older sha must appear
+/// first in the JSON `rows` array).
+fn assert_trend_rows(stdout: &str, shas: &[String]) {
+    assert!(
+        stdout.contains("\"row_count\": 2"),
+        "expected one row per partition, got:\n{}",
+        stdout
+    );
+    let first = stdout
+        .find(&shas[0])
+        .unwrap_or_else(|| panic!("first commit {} missing from:\n{}", shas[0], stdout));
+    let second = stdout
+        .find(&shas[1])
+        .unwrap_or_else(|| panic!("second commit {} missing from:\n{}", shas[1], stdout));
+    assert!(
+        first < second,
+        "rows must be ordered ascending by committed_at (oldest commit first):\n{}",
+        stdout
+    );
+}
+
+/// The canned trend queries below must be exactly the ones documented in the
+/// schema reference, so docs and tests cannot drift apart.
+#[test]
+fn canned_queries_match_schema_reference() {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let schema =
+        std::fs::read_to_string(Path::new(manifest).join("src/commands/sql_schema.md")).unwrap();
+    for query in [TREND_DUPLICATION, TREND_VIOLATIONS, TREND_HOTSPOT_MASS] {
+        assert!(
+            schema.contains(query),
+            "schema reference must contain the canned query:\n{}",
+            query
+        );
+    }
+}
+
+#[test]
+fn snapshots_duplication_trend() {
+    let (_temp, repo, shas) = snapshot_fixture();
+    let stdout = snapshots_json(&repo.root, TREND_DUPLICATION);
+    assert_trend_rows(&stdout, &shas);
+}
+
+#[test]
+fn snapshots_violation_trend() {
+    let (_temp, repo, shas) = snapshot_fixture();
+    let stdout = snapshots_json(&repo.root, TREND_VIOLATIONS);
+    assert_trend_rows(&stdout, &shas);
+}
+
+#[test]
+fn snapshots_hotspot_mass_trend() {
+    let (_temp, repo, shas) = snapshot_fixture();
+    let stdout = snapshots_json(&repo.root, TREND_HOTSPOT_MASS);
+    assert_trend_rows(&stdout, &shas);
+}
+
+#[test]
+fn snapshots_meta_is_accessible() {
+    let (_temp, repo, shas) = snapshot_fixture();
+    // Backfilled partitions record their capture mode; also exercise the
+    // explicit `--snapshots=DIR` form.
+    let assert = sql(&repo.root)
+        .arg("--snapshots=.ctx/snapshots")
+        .arg("--json")
+        .arg("SELECT commit_sha, capture_mode FROM snap.meta ORDER BY committed_at")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_trend_rows(&stdout, &shas);
+    assert!(
+        stdout.contains("backfill"),
+        "snap.meta must expose capture_mode values:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn snapshots_do_not_weaken_the_sandbox() {
+    let (_temp, repo, _shas) = snapshot_fixture();
+
+    // The engine read the Parquet partitions at startup, but user SQL must
+    // still be denied filesystem access...
+    sql(&repo.root)
+        .arg("--snapshots")
+        .arg("SELECT * FROM read_parquet('.ctx/snapshots/sha=*/files.parquet')")
+        .assert()
+        .code(2);
+
+    // ...including writes.
+    let leak = repo.root.join("leak.csv");
+    let query = format!("COPY (SELECT * FROM snap.files) TO '{}'", leak.display());
+    sql(&repo.root)
+        .arg("--snapshots")
+        .arg(&query)
+        .assert()
+        .code(2);
+    assert!(
+        !leak.exists(),
+        "COPY must not create a file on disk: {}",
+        leak.display()
+    );
+}
+
+#[test]
+fn snapshots_missing_or_empty_dir_is_an_operational_error() {
+    // Indexed project, but `ctx snapshot` never ran: the default dir is absent.
+    let temp = indexed_fixture();
+    sql(temp.path())
+        .arg("--snapshots")
+        .arg("SELECT 1")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no snapshots found"))
+        .stderr(predicate::str::contains("ctx snapshot"));
+
+    // The directory existing but holding no `sha=*` partitions is the same
+    // operational error.
+    std::fs::create_dir_all(temp.path().join(".ctx").join("snapshots")).unwrap();
+    sql(temp.path())
+        .arg("--snapshots")
+        .arg("SELECT 1")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no snapshots found"));
+}
+
+#[test]
+fn snap_tables_require_the_snapshots_flag() {
+    let (_temp, repo, _shas) = snapshot_fixture();
+    // Without --snapshots the snap schema must not exist, even though the
+    // partitions are on disk.
+    sql(&repo.root)
+        .arg("SELECT * FROM snap.meta")
+        .assert()
+        .code(2);
 }

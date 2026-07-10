@@ -30,6 +30,9 @@ pub struct SqlArgs {
     pub timeout: u64,
     pub fail_on_rows: bool,
     pub schema: bool,
+    /// Snapshot partition directory to load as `snap.*` tables (relative
+    /// paths resolve against the project root).
+    pub snapshots: Option<PathBuf>,
 }
 
 /// Run `ctx sql`.
@@ -226,7 +229,17 @@ mod engine {
             return Err(CtxError::Other("no SQL statement found".into()));
         }
 
-        let analytics = Analytics::open_sql_sandbox(&root)?;
+        // Resolve `--snapshots` against the project root (like the index path
+        // above); absolute directories are taken as-is.
+        let snapshots_dir = args.snapshots.as_ref().map(|dir| {
+            if dir.is_absolute() {
+                dir.clone()
+            } else {
+                root.join(dir)
+            }
+        });
+
+        let analytics = Analytics::open_sql_sandbox(&root, snapshots_dir.as_deref())?;
 
         // Timeout watchdog: interrupt the in-flight query if it overruns.
         let timed_out = Arc::new(AtomicBool::new(false));

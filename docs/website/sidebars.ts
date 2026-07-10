@@ -26,6 +26,7 @@ const sidebars: SidebarsConfig = {
         'commands/hotspots',
         'commands/duplicates',
         'commands/sql',
+        'commands/snapshot',
       ],
     },
     {

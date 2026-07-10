@@ -164,6 +164,7 @@ pub enum Command {
     ctx sql --json "SELECT kind, COUNT(*) n FROM v1.symbols GROUP BY kind"
     ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
     ctx sql --schema        # print the v1 schema reference and exit
+    ctx sql --snapshots "SELECT commit_sha, count(*) FROM snap.dup_pairs GROUP BY commit_sha"
 
 The query surface is the versioned `v1` schema; anything outside `v1.*` is
 internal and unstable. Access is read-only and engine-hardened.
@@ -200,6 +201,19 @@ internal and unstable. Access is read-only and engine-hardened.
         /// Print the public schema reference and exit
         #[arg(long)]
         schema: bool,
+
+        /// Load snapshot partitions from DIR (default .ctx/snapshots) as
+        /// in-memory tables snap.files / snap.symbols / snap.dup_pairs /
+        /// snap.meta for trend queries (see `ctx snapshot`). Pass a custom
+        /// dir with `--snapshots=DIR`.
+        #[arg(
+            long,
+            value_name = "DIR",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ".ctx/snapshots"
+        )]
+        snapshots: Option<std::path::PathBuf>,
     },
 
     /// Search for symbols using semantic or text search
@@ -689,6 +703,44 @@ EXAMPLES:
         fail_on: Option<String>,
     },
 
+    /// Capture per-commit Parquet metric snapshots (.ctx/snapshots/sha=<sha>/)
+    ///
+    /// Refreshes the index incrementally, then exports per-symbol and
+    /// per-file metrics, near-duplicate pairs, and metadata for HEAD as one
+    /// Parquet partition, for longitudinal quality analysis. Requires a git
+    /// repository; snapshot capture requires the duckdb feature.
+    ///
+    /// Exit codes: 0 = success (including "partition already exists"),
+    /// 2 = operational error (not a git repo, missing duckdb feature, IO).
+    #[command(after_help = r#"PARTITION LAYOUT:
+    .ctx/snapshots/sha=<sha>/symbols.parquet     per-symbol metrics
+    .ctx/snapshots/sha=<sha>/files.parquet       per-file metrics + churn + violations
+    .ctx/snapshots/sha=<sha>/dup_pairs.parquet   near-duplicate function pairs
+    .ctx/snapshots/sha=<sha>/meta.parquet        capture metadata (1 row)
+
+    Every row carries commit_sha and committed_at, so tables union cleanly
+    across partitions with a read_parquet glob.
+
+EXAMPLES:
+    ctx snapshot                                # snapshot HEAD (skip if it exists)
+    ctx snapshot --force                        # rewrite the HEAD partition
+    ctx snapshot --json                         # machine-readable report
+    ctx snapshot backfill --since v0.1.0        # snapshot v0.1.0..HEAD (first-parent)
+    ctx snapshot backfill --since main~20 --every 5
+"#)]
+    Snapshot {
+        #[command(subcommand)]
+        cmd: Option<SnapshotCommand>,
+
+        /// Overwrite an existing partition for HEAD
+        #[arg(long)]
+        force: bool,
+
+        /// How far back to count per-file churn (git --since date spec)
+        #[arg(long, value_name = "SPEC", default_value = "90 days ago")]
+        churn_window: String,
+    },
+
     /// Package ctx as an AI coding harness integration (Claude Code)
     ///
     /// `init` scaffolds hook scripts, settings, and (in plugin mode) a full
@@ -795,6 +847,32 @@ pub enum HarnessMode {
     /// A distributable Claude Code plugin (`.claude-plugin/`, hooks, skill,
     /// marketplace manifest)
     Plugin,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SnapshotCommand {
+    /// Backfill snapshots for historical commits (first-parent walk)
+    ///
+    /// Walks `--since <REF>`..HEAD along the first parent, oldest first
+    /// (including REF itself when it names a commit). Each missing commit is
+    /// checked out into a temporary git worktree, snapshotted into this
+    /// repository's .ctx/snapshots/, and the worktree is removed again; the
+    /// working tree is never touched. Existing partitions are skipped.
+    /// Per-commit failures are logged to stderr and do not abort the run.
+    Backfill {
+        /// Starting commit/ref (inclusive when it resolves to a commit)
+        #[arg(long, value_name = "REF")]
+        since: String,
+
+        /// Sample every Nth commit (the newest commit is always included)
+        #[arg(long, value_name = "N", default_value = "1")]
+        every: usize,
+
+        /// How far back to count per-file churn (git --since date spec);
+        /// the upper bound is anchored to each commit's date
+        #[arg(long, value_name = "SPEC", default_value = "90 days ago")]
+        churn_window: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

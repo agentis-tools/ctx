@@ -242,10 +242,4 @@ pub fn greet() -> String {
         // Version is populated from CARGO_PKG_VERSION
         assert!(!info.server_info.version.is_empty());
     }
-
-    #[test]
-    fn test_server_compiles() {
-        // Basic sanity check that the module compiles correctly
-        assert!(true);
-    }
 }

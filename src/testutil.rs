@@ -95,6 +95,26 @@ impl GitRepo {
     }
 }
 
+/// Run a git command in `dir` and return its stdout with trailing whitespace
+/// stripped, panicking on failure. Leading whitespace is preserved because
+/// `status --porcelain` lines start with a significant space.
+pub fn git_stdout(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("failed to spawn git");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string()
+}
+
 // ============================================================================
 // Minimal HTTP mock server (for update/self-update tests)
 // ============================================================================

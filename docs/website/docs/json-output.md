@@ -395,6 +395,65 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 
 Exit codes follow the suite convention: 0 = clean or informational, 1 = at least one `--fail-on` condition met, 2 = operational error (not a git repo, bad reference, malformed `--fail-on`, invalid rules file).
 
+Separately from `--json`, setting the `CTX_GATE_LOG` environment variable makes every `ctx score` run append one **JSONL** record (a bare JSON object per line — *not* this envelope) describing the gate evaluation to a local log, default `.ctx/gate-log.jsonl`. See [ctx score — Gate logging](commands/score.md#gate-logging).
+
+### `snapshot.capture`
+
+`ctx snapshot [--force] [--churn-window SPEC] --json`
+
+```json
+{
+  "commit_sha": "86258796aa7f19c06d310f6abce6c5f56465e316",
+  "committed_at": "2026-07-10T21:25:27+02:00",
+  "partition_dir": ".ctx/snapshots/sha=86258796aa7f19c06d310f6abce6c5f56465e316",
+  "files": 2,
+  "symbols": 3,
+  "dup_pairs": 0,
+  "violations": 0,
+  "skipped_existing": false
+}
+```
+
+One report per captured partition. `commit_sha` and `committed_at` (the committer date, strict ISO 8601) identify the snapshotted commit; `partition_dir` is where the four Parquet files were written. `files`, `symbols`, and `dup_pairs` are the row counts of the corresponding Parquet tables; `violations` is the total architecture-rule violation count (0 when `.ctx/rules.toml` is absent). When a partition for the commit already exists and `--force` was not given, `skipped_existing` is `true` and the counts are reported as zero — they are not re-read from the existing files.
+
+Exit codes: 0 = snapshot written or partition already existed, 2 = operational error (not a git repo, build without the `duckdb` feature, IO failure).
+
+### `snapshot.backfill`
+
+`ctx snapshot backfill --since REF [--every N] [--churn-window SPEC] --json`
+
+```json
+{
+  "since": "3019df548fc417c7b6b06bef7defb74a0c01ba78",
+  "captured": 1,
+  "skipped_existing": 1,
+  "snapshots": [
+    {
+      "commit_sha": "3019df548fc417c7b6b06bef7defb74a0c01ba78",
+      "committed_at": "2026-07-10T21:25:27+02:00",
+      "partition_dir": ".ctx/snapshots/sha=3019df548fc417c7b6b06bef7defb74a0c01ba78",
+      "files": 1,
+      "symbols": 2,
+      "dup_pairs": 0,
+      "violations": 0,
+      "skipped_existing": false
+    },
+    {
+      "commit_sha": "86258796aa7f19c06d310f6abce6c5f56465e316",
+      "committed_at": "2026-07-10T21:25:27+02:00",
+      "partition_dir": ".ctx/snapshots/sha=86258796aa7f19c06d310f6abce6c5f56465e316",
+      "files": 0,
+      "symbols": 0,
+      "dup_pairs": 0,
+      "violations": 0,
+      "skipped_existing": true
+    }
+  ]
+}
+```
+
+`since` is the `--since` argument as given. `snapshots` carries one `snapshot.capture`-shaped report per partition, oldest first; `captured` and `skipped_existing` are the counts of new vs. already-existing partitions among them. Commits that failed to capture are logged to stderr and **do not appear** in `snapshots` — the walk continues past them, and the exit code stays 0.
+
 ### `harness.init`
 
 `ctx harness init [--mode local|plugin] [--force] --json`

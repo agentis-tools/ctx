@@ -92,3 +92,78 @@ FROM v1.symbols
 WHERE kind IN ('function', 'method') AND is_public AND fan_in = 0
 ORDER BY file, name;
 ```
+
+## Snapshot tables (`snap.*`) — only with `--snapshots`
+
+`ctx sql --snapshots[=DIR]` (default `DIR` is `.ctx/snapshots`) additionally
+loads the Parquet snapshot partitions written by `ctx snapshot` as in-memory
+tables in the `snap` schema. These tables exist **only** when `--snapshots`
+is passed; without it, any `snap.*` reference is an error. Every row is
+denormalized with the partition stamp:
+
+| Column         | Type      | Description                                    |
+|----------------|-----------|------------------------------------------------|
+| `commit_sha`   | VARCHAR   | Full sha of the snapshotted commit             |
+| `committed_at` | TIMESTAMP | Committer date of that commit, normalized to UTC |
+
+### `snap.files` — one row per file per commit
+
+Stamp columns plus:
+
+| Column             | Type    | Description                                   |
+|--------------------|---------|-----------------------------------------------|
+| `path`             | VARCHAR | File path                                     |
+| `language`         | VARCHAR | Detected language                             |
+| `symbol_count`     | BIGINT  | Symbols defined in the file                   |
+| `total_complexity` | DOUBLE  | Sum of symbol complexity for the file         |
+| `max_complexity`   | BIGINT  | Highest single-symbol complexity in the file  |
+| `churn_commits`    | INTEGER | Commits touching the file in the churn window |
+| `violation_count`  | INTEGER | Architecture-rule violations in the file      |
+
+### `snap.symbols` — one row per symbol per commit
+
+Stamp columns plus the `v1.symbols` columns `id`, `name`, `qualified_name`,
+`kind`, `file`, `line_start`, `line_end`, `is_public`, `complexity`,
+`fan_in`, and `fan_out` (same types as in `v1.symbols`; no `doc`).
+
+### `snap.dup_pairs` — one row per near-duplicate pair per commit
+
+Stamp columns plus:
+
+| Column          | Type    | Description                            |
+|-----------------|---------|----------------------------------------|
+| `file_a`        | VARCHAR | File of the first symbol               |
+| `symbol_a`      | VARCHAR | Name of the first symbol               |
+| `file_b`        | VARCHAR | File of the second symbol              |
+| `symbol_b`      | VARCHAR | Name of the second symbol              |
+| `similarity`    | DOUBLE  | Verified token similarity (0–1)        |
+| `token_count_a` | BIGINT  | Normalized token count of the first    |
+| `token_count_b` | BIGINT  | Normalized token count of the second   |
+
+### `snap.meta` — one row per partition
+
+Stamp columns plus:
+
+| Column                    | Type    | Description                               |
+|---------------------------|---------|-------------------------------------------|
+| `captured_at`             | VARCHAR | RFC 3339 time the snapshot was captured   |
+| `ctx_version`             | VARCHAR | ctx version that wrote the partition      |
+| `snapshot_schema_version` | INTEGER | Snapshot Parquet schema version           |
+| `capture_mode`            | VARCHAR | `live` or `backfill`                      |
+
+### Trend queries
+
+```sql
+-- Duplication trend
+SELECT commit_sha, min(committed_at) AS committed_at, count(*) AS dup_pairs FROM snap.dup_pairs GROUP BY commit_sha ORDER BY committed_at;
+```
+
+```sql
+-- Violation trend
+SELECT commit_sha, min(committed_at) AS committed_at, sum(violation_count) AS violations FROM snap.files GROUP BY commit_sha ORDER BY committed_at;
+```
+
+```sql
+-- Hotspot mass (top-decile complexity by commit)
+WITH ranked AS (SELECT commit_sha, committed_at, churn_commits * total_complexity AS mass, percent_rank() OVER (PARTITION BY commit_sha ORDER BY total_complexity) AS pr FROM snap.files) SELECT commit_sha, min(committed_at) AS committed_at, sum(mass) AS hotspot_mass FROM ranked WHERE pr >= 0.9 GROUP BY commit_sha ORDER BY committed_at;
+```

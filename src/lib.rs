@@ -158,6 +158,12 @@ pub mod rules;
 // Quality scorecard (ctx score)
 pub mod score;
 
+// Gate-evaluation logging (CTX_GATE_LOG JSONL records from ctx score)
+pub mod gatelog;
+
+// Per-commit Parquet metric snapshots (ctx snapshot)
+pub mod snapshot;
+
 // Harness packaging (ctx harness): Claude Code hooks, plugin scaffolding,
 // version compatibility guard, and integration diagnostics
 pub mod harness;
@@ -174,6 +180,11 @@ pub mod utils;
 // supported API surface)
 #[doc(hidden)]
 pub mod testutil;
+
+// Deterministic synthetic-repo generator for performance fixtures and the
+// external ctx-bench suite (ships in the crate; not part of the supported API)
+#[doc(hidden)]
+pub mod fixture;
 
 // Internal modules (not part of public API)
 pub(crate) mod default_ignores;

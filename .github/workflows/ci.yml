@@ -11,6 +11,11 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+  # Nightly perf run (full suite) and manual triggers (e.g. baseline capture
+  # runs). Schedule/dispatch events are unaffected by the paths-ignore above.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -85,3 +90,69 @@ jobs:
 
       - name: Dry-run publish (minimal)
         run: cargo publish --dry-run --no-default-features
+
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ctx score/check diff against git history; the harness also
+          # records the commit SHA in its results.
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            perf/target/
+          # ImageVersion is set by hosted runners; keying on it prevents a
+          # target/ dir cached under one runner image (Xcode/clang paths)
+          # from poisoning builds on a newer image
+          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-perf-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build ctx (perf profile, all features)
+        run: cargo build --profile perf --all-features
+
+      - name: Harness unit tests
+        run: cargo test --manifest-path perf/Cargo.toml
+
+      - name: Harness smoke run
+        env:
+          CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
+        run: cargo run --release --manifest-path perf/Cargo.toml -- --smoke
+
+      # Advisory period: continue-on-error until the ubuntu-latest baseline
+      # lands in perf/baselines/ and run-to-run spread is confirmed <20%.
+      # Flip this to required (remove continue-on-error) at that point.
+      - name: Run perf harness
+        continue-on-error: true
+        env:
+          CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
+          CTX_PERF_BUDGET_SCALE: "1.5"
+        run: |
+          SUITE=pr
+          if [ "${{ github.event_name }}" = "schedule" ] || \
+             [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
+             { [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; }; then
+            SUITE=full
+          fi
+          cargo run --release --manifest-path perf/Cargo.toml -- \
+            --suite "$SUITE" \
+            --baseline perf/baselines/ubuntu-latest.json \
+            --json-out perf-results.json
+
+      - name: Upload perf results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: perf-results.json
+          if-no-files-found: ignore

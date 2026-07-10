@@ -21,6 +21,7 @@ pub mod search;
 pub mod self_update;
 pub mod similar;
 pub mod smart_cmd;
+pub mod snapshot;
 pub mod sql;
 pub mod symbol;
 
@@ -44,6 +45,7 @@ pub use search::run_search;
 pub use self_update::{run_self_update, run_version};
 pub use similar::run_similar;
 pub use smart_cmd::run_smart;
+pub use snapshot::run_snapshot;
 pub use sql::{run_sql, SqlArgs};
 pub use symbol::{run_explain, run_source};
 
