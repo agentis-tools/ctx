@@ -100,7 +100,7 @@ Add to `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/saldestechnology/ctx
+  - repo: https://github.com/agentis-tools/ctx
     rev: v0.2.1
     hooks:
       - id: ctx-audit
@@ -295,4 +295,4 @@ ctx index  # Automatically incremental
 
 - [Audit Command](../commands/audit.md)
 - [Diff Command](../commands/diff.md)
-- [Pre-commit hooks definition](https://github.com/saldestechnology/ctx/blob/main/.pre-commit-hooks.yaml)
+- [Pre-commit hooks definition](https://github.com/agentis-tools/ctx/blob/main/.pre-commit-hooks.yaml)

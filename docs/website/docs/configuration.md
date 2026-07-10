@@ -387,7 +387,7 @@ _site/
 
 ### Viewing the Full List
 
-See [src/default_ignores.rs](https://github.com/saldestechnology/ctx/blob/main/src/default_ignores.rs) for the complete list.
+See [src/default_ignores.rs](https://github.com/agentis-tools/ctx/blob/main/src/default_ignores.rs) for the complete list.
 
 ## Command-Line Configuration
 

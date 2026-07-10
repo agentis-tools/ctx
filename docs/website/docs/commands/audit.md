@@ -148,7 +148,7 @@ Add to `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/saldestechnology/ctx
+  - repo: https://github.com/agentis-tools/ctx
     rev: v0.2.1
     hooks:
       - id: ctx-audit

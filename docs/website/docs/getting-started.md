@@ -32,7 +32,7 @@ cargo install agentis-ctx --no-default-features
 ### From Source
 
 ```bash
-git clone https://github.com/saldestechnology/ctx
+git clone https://github.com/agentis-tools/ctx
 cd ctx
 cargo build --release
 
