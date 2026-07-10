@@ -45,7 +45,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # ImageVersion is set by hosted runners; keying on it prevents a
+          # target/ dir cached under one runner image (Xcode/clang paths)
+          # from poisoning builds on a newer image
+          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
         run: cargo build --verbose ${{ matrix.features }}
