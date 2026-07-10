@@ -379,16 +379,7 @@ impl TypeScriptParser {
                             import_source = Some(text.trim_matches('"').trim_matches('\''));
                         }
                         "import.def" => {
-                            let src = import_source
-                                .map(String::from)
-                                .or_else(|| extract_import_source(&node, source));
-                            if let Some(src) = src {
-                                imports.push(ImportInfo {
-                                    from: src,
-                                    names: extract_import_names(&node, source),
-                                    alias: None,
-                                });
-                            }
+                            push_ts_import(&node, import_source, source, imports);
                             import_source = None;
                         }
                         // Generic .def captures
@@ -402,50 +393,22 @@ impl TypeScriptParser {
 
             // Create symbol if we have enough information
             if let (Some(name), Some(kind), Some(node)) = (name, kind, def_node) {
-                let visibility = if is_export || is_exported(&node, source) {
-                    Visibility::Public
-                } else {
-                    Visibility::Private
-                };
-
-                let docstring = extract_jsdoc(&node, source);
-                let brief = docstring.as_ref().and_then(|d| extract_brief(d));
-                let signature = build_signature(kind, name, source, &node);
-
-                // Determine parent for methods
-                let parent_name = if kind == SymbolKind::Method {
-                    current_class.as_deref()
-                } else {
-                    None
-                };
-
-                let parent_id = parent_name.map(|p| Symbol::make_id(file_path, p, None));
-                let symbol_source = node.utf8_text(source.as_bytes()).ok().map(String::from);
-
-                let id = Symbol::make_id(file_path, name, parent_name);
+                let symbol = build_ts_symbol(
+                    file_path,
+                    source,
+                    name,
+                    kind,
+                    &node,
+                    is_export,
+                    current_class.as_deref(),
+                );
 
                 // Track exports
-                if visibility == Visibility::Public {
+                if symbol.visibility == Visibility::Public {
                     exports.push(name.to_string());
                 }
 
-                symbols.push(Symbol {
-                    id,
-                    file_path: file_path.to_string(),
-                    name: name.to_string(),
-                    qualified_name: parent_name.map(|p| format!("{}.{}", p, name)),
-                    kind,
-                    visibility,
-                    signature,
-                    brief,
-                    docstring,
-                    line_start: node.start_position().row as u32 + 1,
-                    line_end: node.end_position().row as u32 + 1,
-                    col_start: node.start_position().column as u32,
-                    col_end: node.end_position().column as u32,
-                    parent_id,
-                    source: symbol_source,
-                });
+                symbols.push(symbol);
             }
         }
     }
@@ -563,6 +526,75 @@ impl TypeScriptParser {
                 }
             }
         }
+    }
+}
+
+/// Record an import from an `import.def` match into the module's import list.
+fn push_ts_import(
+    node: &Node,
+    import_source: Option<&str>,
+    source: &str,
+    imports: &mut Vec<ImportInfo>,
+) {
+    let src = import_source
+        .map(String::from)
+        .or_else(|| extract_import_source(node, source));
+    if let Some(src) = src {
+        imports.push(ImportInfo {
+            from: src,
+            names: extract_import_names(node, source),
+            alias: None,
+        });
+    }
+}
+
+/// Build a [`Symbol`] from a resolved definition capture.
+fn build_ts_symbol(
+    file_path: &str,
+    source: &str,
+    name: &str,
+    kind: SymbolKind,
+    node: &Node,
+    is_export: bool,
+    current_class: Option<&str>,
+) -> Symbol {
+    let visibility = if is_export || is_exported(node, source) {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
+    let docstring = extract_jsdoc(node, source);
+    let brief = docstring.as_ref().and_then(|d| extract_brief(d));
+    let signature = build_signature(kind, name, source, node);
+
+    // Determine parent for methods
+    let parent_name = if kind == SymbolKind::Method {
+        current_class
+    } else {
+        None
+    };
+
+    let parent_id = parent_name.map(|p| Symbol::make_id(file_path, p, None));
+    let symbol_source = node.utf8_text(source.as_bytes()).ok().map(String::from);
+    let id = Symbol::make_id(file_path, name, parent_name);
+
+    Symbol {
+        id,
+        file_path: file_path.to_string(),
+        name: name.to_string(),
+        qualified_name: parent_name.map(|p| format!("{}.{}", p, name)),
+        kind,
+        visibility,
+        signature,
+        brief,
+        docstring,
+        line_start: node.start_position().row as u32 + 1,
+        line_end: node.end_position().row as u32 + 1,
+        col_start: node.start_position().column as u32,
+        col_end: node.end_position().column as u32,
+        parent_id,
+        source: symbol_source,
     }
 }
 

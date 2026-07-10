@@ -236,256 +236,275 @@ impl GoParser {
 
             let def_name = &self.symbols_query.capture_names()[def_capture.index as usize];
 
-            // Skip import definitions
+            // Import definitions produce import edges rather than symbols.
             if def_name.starts_with("import.") {
-                // Extract import edges
-                for capture in m.captures {
-                    let capture_name = &self.symbols_query.capture_names()[capture.index as usize];
-                    if capture_name == "import.path" {
-                        let import_path = capture
-                            .node
-                            .utf8_text(source.as_bytes())
-                            .unwrap_or("")
-                            .trim_matches('"')
-                            .to_string();
-
-                        if !import_path.is_empty() {
-                            edges.push(Edge {
-                                source_id: file_path.to_string(),
-                                target_id: Some(import_path.clone()),
-                                target_name: import_path,
-                                kind: EdgeKind::Imports,
-                                line: Some(capture.node.start_position().row as u32 + 1),
-                                col: Some(capture.node.start_position().column as u32),
-                                context: None,
-                            });
-                        }
-                    }
-                }
+                push_go_import_edges(&self.symbols_query, &m, source, file_path, edges);
                 continue;
             }
 
-            // Find name capture first to determine symbol kind
-            let name_capture = m.captures.iter().find(|c| {
-                let name = &self.symbols_query.capture_names()[c.index as usize];
-                name.ends_with(".name")
-            });
+            // Everything else is a symbol definition.
+            if let Some(symbol) =
+                build_go_symbol(&self.symbols_query, &m, def_node, source, file_path)
+            {
+                symbols.push(symbol);
+            }
+        }
+    }
+}
 
-            let Some(name_capture) = name_capture else {
-                continue;
-            };
-
-            let name_capture_name =
-                &self.symbols_query.capture_names()[name_capture.index as usize];
-
-            // Determine symbol kind from the name capture
-            let Some(kind) = find_symbol_kind(name_capture_name, GO_SYMBOL_MAPPINGS) else {
-                continue;
-            };
-
-            let name = name_capture
+/// Push import edges for an `import.*` definition match.
+fn push_go_import_edges(
+    query: &Query,
+    m: &tree_sitter::QueryMatch,
+    source: &str,
+    file_path: &str,
+    edges: &mut Vec<Edge>,
+) {
+    for capture in m.captures {
+        let capture_name = &query.capture_names()[capture.index as usize];
+        if capture_name == "import.path" {
+            let import_path = capture
                 .node
                 .utf8_text(source.as_bytes())
                 .unwrap_or("")
+                .trim_matches('"')
                 .to_string();
 
-            if name.is_empty() {
-                continue;
+            if !import_path.is_empty() {
+                edges.push(Edge {
+                    source_id: file_path.to_string(),
+                    target_id: Some(import_path.clone()),
+                    target_name: import_path,
+                    kind: EdgeKind::Imports,
+                    line: Some(capture.node.start_position().row as u32 + 1),
+                    col: Some(capture.node.start_position().column as u32),
+                    context: None,
+                });
             }
+        }
+    }
+}
 
-            // Build signature
-            let signature = self.build_signature(&m, source, kind);
+/// Build a [`Symbol`] from a Go definition match, or `None` if it should be skipped.
+fn build_go_symbol(
+    query: &Query,
+    m: &tree_sitter::QueryMatch,
+    def_node: Node,
+    source: &str,
+    file_path: &str,
+) -> Option<Symbol> {
+    // Find name capture first to determine symbol kind
+    let name_capture = m.captures.iter().find(|c| {
+        let name = &query.capture_names()[c.index as usize];
+        name.ends_with(".name")
+    })?;
 
-            // Extract docstring (Go uses // comments above declarations)
-            let docstring = self.extract_docstring(&def_node, source);
-            let brief = docstring.as_ref().and_then(|d| extract_brief(d));
+    let name_capture_name = &query.capture_names()[name_capture.index as usize];
 
-            // Determine visibility (Go uses capitalization)
-            let visibility = if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                Visibility::Public
-            } else {
-                Visibility::Private
-            };
+    // Determine symbol kind from the name capture
+    let kind = find_symbol_kind(name_capture_name, GO_SYMBOL_MAPPINGS)?;
 
-            // Get position info
-            let start = def_node.start_position();
-            let end = def_node.end_position();
+    let name = name_capture
+        .node
+        .utf8_text(source.as_bytes())
+        .unwrap_or("")
+        .to_string();
 
-            // Create symbol ID
-            let id = format!("{}::{}", file_path, name);
+    if name.is_empty() {
+        return None;
+    }
 
-            // Handle method receivers
-            let parent_id = if kind == SymbolKind::Method {
-                // Extract receiver type for parent reference
-                m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "method.receiver_type" {
-                        let receiver_text = c.node.utf8_text(source.as_bytes()).ok()?;
-                        // Clean up pointer receivers (*Type -> Type)
-                        let clean_type = receiver_text.trim_start_matches('*');
-                        Some(format!("{}::{}", file_path, clean_type))
-                    } else {
-                        None
-                    }
-                })
+    // Build signature
+    let signature = build_go_signature(query, m, source, kind);
+
+    // Extract docstring (Go uses // comments above declarations)
+    let docstring = extract_go_docstring(&def_node, source);
+    let brief = docstring.as_ref().and_then(|d| extract_brief(d));
+
+    // Determine visibility (Go uses capitalization)
+    let visibility = if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
+    // Get position info
+    let start = def_node.start_position();
+    let end = def_node.end_position();
+
+    // Create symbol ID
+    let id = format!("{}::{}", file_path, name);
+
+    // Handle method receivers
+    let parent_id = if kind == SymbolKind::Method {
+        // Extract receiver type for parent reference
+        m.captures.iter().find_map(|c| {
+            let capture_name = &query.capture_names()[c.index as usize];
+            if capture_name == "method.receiver_type" {
+                let receiver_text = c.node.utf8_text(source.as_bytes()).ok()?;
+                // Clean up pointer receivers (*Type -> Type)
+                let clean_type = receiver_text.trim_start_matches('*');
+                Some(format!("{}::{}", file_path, clean_type))
             } else {
                 None
-            };
+            }
+        })
+    } else {
+        None
+    };
 
-            symbols.push(Symbol {
-                id,
-                file_path: file_path.to_string(),
-                name,
-                qualified_name: None,
-                kind,
-                visibility,
-                signature,
-                brief,
-                docstring,
-                line_start: start.row as u32 + 1,
-                line_end: end.row as u32 + 1,
-                col_start: start.column as u32,
-                col_end: end.column as u32,
-                parent_id,
-                source: None,
-            });
-        }
-    }
+    Some(Symbol {
+        id,
+        file_path: file_path.to_string(),
+        name,
+        qualified_name: None,
+        kind,
+        visibility,
+        signature,
+        brief,
+        docstring,
+        line_start: start.row as u32 + 1,
+        line_end: end.row as u32 + 1,
+        col_start: start.column as u32,
+        col_end: end.column as u32,
+        parent_id,
+        source: None,
+    })
+}
 
-    /// Build a signature string for a symbol.
-    fn build_signature(
-        &self,
-        m: &tree_sitter::QueryMatch,
-        source: &str,
-        kind: SymbolKind,
-    ) -> Option<String> {
-        match kind {
-            SymbolKind::Function | SymbolKind::Method => {
-                // Find params and return type
-                let mut params = None;
-                let mut return_type = None;
-                let mut name = "";
-                let mut receiver = None;
+/// Build a signature string for a symbol.
+fn build_go_signature(
+    query: &Query,
+    m: &tree_sitter::QueryMatch,
+    source: &str,
+    kind: SymbolKind,
+) -> Option<String> {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => {
+            // Find params and return type
+            let mut params = None;
+            let mut return_type = None;
+            let mut name = "";
+            let mut receiver = None;
 
-                for capture in m.captures {
-                    let capture_name = &self.symbols_query.capture_names()[capture.index as usize];
-                    let text = capture.node.utf8_text(source.as_bytes()).ok()?;
+            for capture in m.captures {
+                let capture_name = &query.capture_names()[capture.index as usize];
+                let text = capture.node.utf8_text(source.as_bytes()).ok()?;
 
-                    if capture_name.ends_with(".name") {
-                        name = text;
-                    } else if capture_name.ends_with(".params") {
-                        params = Some(text);
-                    } else if capture_name.ends_with(".return") {
-                        return_type = Some(text);
-                    } else if capture_name == "method.receiver_type" {
-                        receiver = Some(text);
-                    }
+                if capture_name.ends_with(".name") {
+                    name = text;
+                } else if capture_name.ends_with(".params") {
+                    params = Some(text);
+                } else if capture_name.ends_with(".return") {
+                    return_type = Some(text);
+                } else if capture_name == "method.receiver_type" {
+                    receiver = Some(text);
                 }
+            }
 
-                let mut sig = String::from("func ");
-                if let Some(recv) = receiver {
-                    sig.push_str(&format!("({}) ", recv));
-                }
-                sig.push_str(name);
-                if let Some(p) = params {
-                    sig.push_str(p);
-                } else {
-                    sig.push_str("()");
-                }
-                if let Some(ret) = return_type {
-                    sig.push(' ');
-                    sig.push_str(ret);
-                }
-                Some(sig)
+            let mut sig = String::from("func ");
+            if let Some(recv) = receiver {
+                sig.push_str(&format!("({}) ", recv));
             }
-            SymbolKind::Struct => {
-                let name = m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "struct.name" {
-                        c.node.utf8_text(source.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                })?;
-                Some(format!("type {} struct", name))
-            }
-            SymbolKind::Interface => {
-                let name = m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "interface.name" {
-                        c.node.utf8_text(source.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                })?;
-                Some(format!("type {} interface", name))
-            }
-            SymbolKind::Type => {
-                let name = m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "type.name" {
-                        c.node.utf8_text(source.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                })?;
-                Some(format!("type {}", name))
-            }
-            SymbolKind::Const => {
-                let name = m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "const.name" {
-                        c.node.utf8_text(source.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                })?;
-                Some(format!("const {}", name))
-            }
-            SymbolKind::Variable => {
-                let name = m.captures.iter().find_map(|c| {
-                    let capture_name = &self.symbols_query.capture_names()[c.index as usize];
-                    if capture_name == "var.name" {
-                        c.node.utf8_text(source.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                })?;
-                Some(format!("var {}", name))
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract docstring from comments above a node.
-    fn extract_docstring(&self, node: &Node, source: &str) -> Option<String> {
-        // Look for comments immediately preceding the node
-        let mut prev = node.prev_sibling();
-        let mut doc_lines = Vec::new();
-
-        while let Some(sibling) = prev {
-            if sibling.kind() == "comment" {
-                let comment_text = sibling.utf8_text(source.as_bytes()).ok()?;
-                // Strip // prefix and trim
-                let clean = comment_text
-                    .strip_prefix("//")
-                    .unwrap_or(comment_text)
-                    .trim();
-                doc_lines.push(clean.to_string());
-                prev = sibling.prev_sibling();
+            sig.push_str(name);
+            if let Some(p) = params {
+                sig.push_str(p);
             } else {
-                break;
+                sig.push_str("()");
             }
+            if let Some(ret) = return_type {
+                sig.push(' ');
+                sig.push_str(ret);
+            }
+            Some(sig)
         }
-
-        if doc_lines.is_empty() {
-            return None;
+        SymbolKind::Struct => {
+            let name = m.captures.iter().find_map(|c| {
+                let capture_name = &query.capture_names()[c.index as usize];
+                if capture_name == "struct.name" {
+                    c.node.utf8_text(source.as_bytes()).ok()
+                } else {
+                    None
+                }
+            })?;
+            Some(format!("type {} struct", name))
         }
-
-        // Reverse since we collected bottom-up
-        doc_lines.reverse();
-        Some(doc_lines.join("\n"))
+        SymbolKind::Interface => {
+            let name = m.captures.iter().find_map(|c| {
+                let capture_name = &query.capture_names()[c.index as usize];
+                if capture_name == "interface.name" {
+                    c.node.utf8_text(source.as_bytes()).ok()
+                } else {
+                    None
+                }
+            })?;
+            Some(format!("type {} interface", name))
+        }
+        SymbolKind::Type => {
+            let name = m.captures.iter().find_map(|c| {
+                let capture_name = &query.capture_names()[c.index as usize];
+                if capture_name == "type.name" {
+                    c.node.utf8_text(source.as_bytes()).ok()
+                } else {
+                    None
+                }
+            })?;
+            Some(format!("type {}", name))
+        }
+        SymbolKind::Const => {
+            let name = m.captures.iter().find_map(|c| {
+                let capture_name = &query.capture_names()[c.index as usize];
+                if capture_name == "const.name" {
+                    c.node.utf8_text(source.as_bytes()).ok()
+                } else {
+                    None
+                }
+            })?;
+            Some(format!("const {}", name))
+        }
+        SymbolKind::Variable => {
+            let name = m.captures.iter().find_map(|c| {
+                let capture_name = &query.capture_names()[c.index as usize];
+                if capture_name == "var.name" {
+                    c.node.utf8_text(source.as_bytes()).ok()
+                } else {
+                    None
+                }
+            })?;
+            Some(format!("var {}", name))
+        }
+        _ => None,
     }
+}
+
+/// Extract docstring from comments above a node.
+fn extract_go_docstring(node: &Node, source: &str) -> Option<String> {
+    // Look for comments immediately preceding the node
+    let mut prev = node.prev_sibling();
+    let mut doc_lines = Vec::new();
+
+    while let Some(sibling) = prev {
+        if sibling.kind() == "comment" {
+            let comment_text = sibling.utf8_text(source.as_bytes()).ok()?;
+            // Strip // prefix and trim
+            let clean = comment_text
+                .strip_prefix("//")
+                .unwrap_or(comment_text)
+                .trim();
+            doc_lines.push(clean.to_string());
+            prev = sibling.prev_sibling();
+        } else {
+            break;
+        }
+    }
+
+    if doc_lines.is_empty() {
+        return None;
+    }
+
+    // Reverse since we collected bottom-up
+    doc_lines.reverse();
+    Some(doc_lines.join("\n"))
 }
 
 impl Default for GoParser {
