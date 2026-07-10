@@ -1,0 +1,60 @@
+.wrapper {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+/* The .shiki <pre> (styled in custom.css) sits inside; let the wrapper own spacing. */
+.code :global(.shiki) {
+  margin-bottom: 0;
+}
+
+.title {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: var(--ifm-color-content-secondary);
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--ifm-toc-border-color);
+  border-bottom: none;
+  border-radius: var(--ifm-global-radius) var(--ifm-global-radius) 0 0;
+  background: var(--ifm-background-surface-color);
+}
+
+.title + .code :global(.shiki) {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.copyButton {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  z-index: 1;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  padding: 0.28rem 0.6rem;
+  color: var(--ifm-color-content-secondary);
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.wrapper:hover .copyButton,
+.copyButton:focus-visible {
+  opacity: 1;
+}
+
+.copyButton:hover {
+  color: var(--ifm-color-primary);
+  border-color: var(--ifm-color-primary);
+}
+
+@media (hover: none) {
+  .copyButton {
+    opacity: 1;
+  }
+}

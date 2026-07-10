@@ -1,11 +1,85 @@
 .features {
-  display: flex;
-  align-items: center;
-  padding: 2rem 0;
+  padding: 4.5rem 0;
   width: 100%;
 }
 
-.featureIcon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+.sectionHead {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.sectionHead h2 {
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.sectionHead p {
+  color: var(--ifm-color-content-secondary);
+  max-width: 52ch;
+  margin: 0 auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+@media screen and (max-width: 966px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: var(--ifm-global-radius);
+  padding: 1.5rem;
+  background: var(--ifm-background-color);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--ifm-color-primary);
+  transform: translateY(-2px);
+}
+
+.iconWrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--ifm-color-primary);
+  background: color-mix(in srgb, var(--ifm-color-primary) 12%, transparent);
+  margin-bottom: 1.1rem;
+}
+
+.iconWrap svg {
+  width: 21px;
+  height: 21px;
+}
+
+.card h3 {
+  font-size: 1.05rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.card p {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ifm-color-content-secondary);
+  margin: 0;
+}
+
+.card p code {
+  font-size: 0.85em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover {
+    transform: none;
+  }
 }

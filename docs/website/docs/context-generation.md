@@ -368,7 +368,7 @@ ctx --stats src/
 
 Output:
 ```
-Generated context: 42 files, 156.3 KB in 23ms
+Generated context: 42 files, 156.3 KB, ~38.9k tokens in 23ms
 ```
 
 Stats go to stderr, so they don't interfere with piping:

@@ -1,19 +1,64 @@
 /**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
+ * Homepage — clean, minimal, engineering-tool aesthetic.
  */
 
-.heroBanner {
-  padding: 4rem 0;
-  text-align: center;
+/* ---------- Hero ---------- */
+.hero {
   position: relative;
+  padding: 6rem 0 4rem;
+  text-align: center;
   overflow: hidden;
+  background-color: var(--ifm-background-color);
+  background-image:
+    radial-gradient(60% 90% at 50% -10%, rgba(99, 102, 241, 0.10), transparent 60%),
+    radial-gradient(var(--ifm-toc-border-color) 1px, transparent 1px);
+  background-size: 100% 100%, 22px 22px;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
 }
 
 @media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
+  .hero {
+    padding: 3.5rem 1rem 2.5rem;
   }
+}
+
+.eyebrow {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ifm-color-primary);
+  font-weight: 600;
+  margin-bottom: 1.1rem;
+}
+
+.heroTitle {
+  font-size: clamp(2.2rem, 5.2vw, 3.6rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  color: var(--ifm-heading-color);
+  margin: 0 auto 1.1rem;
+  max-width: 15ch;
+  text-wrap: balance;
+}
+
+.heroTitle .accent {
+  color: var(--ifm-color-primary);
+}
+
+.heroSubtitle {
+  font-size: clamp(1.05rem, 2.1vw, 1.28rem);
+  line-height: 1.5;
+  color: var(--ifm-color-content-secondary);
+  max-width: 58ch;
+  margin: 0 auto 2rem;
+}
+
+.install {
+  max-width: 380px;
+  margin: 0 auto 2rem;
+  text-align: left;
 }
 
 .buttons {
@@ -21,36 +66,121 @@
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* ---------- Proof band ---------- */
+.statBand {
+  padding: 2.5rem 0;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+  background: var(--ifm-background-color);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
 }
 
-.quickStart {
-  padding: 4rem 0;
-  background: var(--ifm-background-surface-color);
+@media screen and (max-width: 768px) {
+  .stats {
+    grid-template-columns: 1fr;
+    gap: 1.75rem;
+  }
 }
 
-.codeBlock {
-  background: var(--ifm-code-background);
-  border-radius: 8px;
+.stat {
+  text-align: center;
+  padding: 0 1.25rem;
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--ifm-toc-border-color);
+}
+
+@media screen and (max-width: 768px) {
+  .stat + .stat {
+    border-left: none;
+  }
+}
+
+.statNum {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--ifm-heading-color);
+  line-height: 1;
+  margin-bottom: 0.55rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.statLabel {
+  font-size: 0.9rem;
+  color: var(--ifm-color-content-secondary);
+  line-height: 1.45;
+  max-width: 30ch;
+  margin: 0 auto;
+}
+
+.statLabel code {
+  font-size: 0.85em;
+}
+
+/* ---------- Quick start ---------- */
+.quickStart {
+  padding: 4.5rem 0;
+  background: var(--ifm-background-surface-color);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.qsIntro {
+  text-align: center;
+  max-width: 56ch;
+  margin: 0 auto 2.5rem;
+  color: var(--ifm-color-content-secondary);
+}
+
+.codeCard {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: var(--ifm-global-radius);
   overflow: hidden;
   margin-bottom: 1rem;
+  height: 100%;
+  background: var(--ifm-background-color);
 }
 
-.codeHeader {
-  background: var(--ifm-color-primary);
-  color: white;
-  padding: 0.5rem 1rem;
+.codeCardHeader {
+  padding: 0.7rem 1rem;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  color: var(--ifm-heading-color);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.codeBlock pre {
+.codeCardHeader::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ifm-color-primary);
+  flex: none;
+}
+
+.codeCard :global(.theme-code-block) {
   margin: 0;
-  padding: 1rem;
-  overflow-x: auto;
-}
-
-.codeBlock code {
-  font-size: 0.85rem;
-  line-height: 1.5;
+  border: none;
+  border-radius: 0;
+  box-shadow: none !important;
 }

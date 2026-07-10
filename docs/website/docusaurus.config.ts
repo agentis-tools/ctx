@@ -1,11 +1,13 @@
-import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
+// Code highlighting is handled by Shiki via the swizzled @theme/CodeBlock
+// component (src/theme/CodeBlock). Prism is left unconfigured on purpose.
+
 const config: Config = {
   title: 'ctx',
-  tagline: 'AI-ready context from your codebase',
-  favicon: 'img/favicon.ico',
+  tagline: 'A queryable world model of your codebase',
+  favicon: 'img/favicon.svg',
 
   future: {
     v4: true,
@@ -18,7 +20,7 @@ const config: Config = {
   projectName: 'ctx',
 
   onBrokenLinks: 'throw',
-  
+
   markdown: {
     hooks: {
       onBrokenMarkdownLinks: 'warn',
@@ -75,38 +77,23 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Documentation',
+          title: 'Docs',
           items: [
-            {
-              label: 'Getting Started',
-              to: '/docs/getting-started',
-            },
-            {
-              label: 'Context Generation',
-              to: '/docs/context-generation',
-            },
-            {
-              label: 'Code Intelligence',
-              to: '/docs/code-intelligence',
-            },
+            {label: 'Why ctx?', to: '/docs/why-ctx'},
+            {label: 'Getting Started', to: '/docs/getting-started'},
+            {label: 'Using ctx with agents', to: '/docs/guides/using-ctx-with-agents'},
+            {label: 'Comparison', to: '/docs/comparison'},
           ],
         },
         {
           title: 'More',
           items: [
-            {
-              label: 'GitHub',
-              href: 'https://github.com/saldestechnology/ctx',
-            },
+            {label: 'GitHub', href: 'https://github.com/saldestechnology/ctx'},
+            {label: 'llms.txt', href: 'pathname:///ctx/llms.txt'},
           ],
         },
       ],
       copyright: `Copyright ${new Date().getFullYear()} ctx. Built with Docusaurus.`,
-    },
-    prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
-      additionalLanguages: ['bash', 'rust', 'typescript', 'python', 'go', 'solidity', 'sql', 'toml', 'yaml'],
     },
   } satisfies Preset.ThemeConfig,
 };

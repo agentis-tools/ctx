@@ -1,24 +1,50 @@
 ---
 id: claude
-title: Claude Desktop Integration
+title: Claude Integration
 sidebar_position: 2
 ---
 
-# Claude Desktop Integration
+# Claude Integration
+
+Connect ctx to Claude Code (hooks, skill, plugin) and Claude Desktop (MCP).
+
+## Claude Code (recommended): `ctx harness init`
+
+The fastest way to wire the ctx quality suite into [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the harness scaffolder:
+
+```bash
+cd /path/to/your/project
+ctx index
+ctx harness init
+```
+
+This generates hook scripts under `.claude/hooks/ctx/` (session-start codebase map, post-edit architecture check, stop-time quality scorecard), a starter `.ctx/rules.toml`, and prints a settings snippet to merge into `.claude/settings.json` plus a guidance block for your `CLAUDE.md`. ctx never edits `.claude/settings.json` itself.
+
+The hooks are version-guarded and fail open: if the installed ctx binary is older than the templates that generated them, they warn on stderr and do nothing instead of blocking the session. Verify the integration with:
+
+```bash
+ctx harness doctor
+```
+
+To package the same integration as a distributable Claude Code plugin (hooks + skill + MCP wiring + permissions), use:
+
+```bash
+ctx harness init --mode plugin
+```
+
+The `ctx harness` command family is the full reference for this workflow. If you prefer to wire the hooks by hand, the manual `settings.json` reference lives in the [Quality Gates guide](../governance/overview.md).
+
+## Claude Desktop (MCP)
 
 Connect ctx to Claude Desktop for AI-powered codebase exploration.
 
-## Overview
+### Overview
 
 ctx implements the Model Context Protocol (MCP), allowing Claude to directly query your codebase through standardized tools. This enables conversations like:
 
 > "Find all functions that call the authenticate method"
 > "Show me the source code for the UserService class"
 > "What files should I look at to add caching?"
-
-> **Note:** The MCP server (`ctx serve --mcp`) is only available when ctx is built
-> with the `mcp` feature. Install a build that includes it before configuring
-> Claude Desktop.
 
 ## Quick Setup
 
@@ -173,9 +199,9 @@ Start broad, then narrow down:
 ### "No MCP tools available"
 
 1. Verify ctx is installed: `ctx --version`
-2. Confirm the build includes MCP: rebuild with `cargo build --release --features mcp`
-3. Check config file syntax (must be valid JSON)
-4. Restart Claude Desktop completely
+2. Check config file syntax (must be valid JSON)
+3. Restart Claude Desktop completely
+4. Check logs for errors
 
 ### "Symbol not found"
 

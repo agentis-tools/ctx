@@ -1,105 +1,290 @@
 /**
  * ctx documentation theme
- * Using a modern dev-tool color scheme
+ * Clean, minimal, engineering-tool aesthetic: neutral cool-grays, one indigo accent,
+ * hairline borders over heavy shadows, crisp system + monospace type.
  */
 
-/* Light mode */
+/* ---------- Light ---------- */
 :root {
-  --ifm-color-primary: #6366f1;
-  --ifm-color-primary-dark: #4f46e5;
-  --ifm-color-primary-darker: #4338ca;
-  --ifm-color-primary-darkest: #3730a3;
-  --ifm-color-primary-light: #818cf8;
-  --ifm-color-primary-lighter: #a5b4fc;
-  --ifm-color-primary-lightest: #c7d2fe;
-  --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
-  --ifm-font-family-base: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', Menlo, Consolas, monospace;
+  /* Accent (indigo) */
+  --ifm-color-primary: #4f46e5;
+  --ifm-color-primary-dark: #4338ca;
+  --ifm-color-primary-darker: #3730a3;
+  --ifm-color-primary-darkest: #312e81;
+  --ifm-color-primary-light: #6366f1;
+  --ifm-color-primary-lighter: #818cf8;
+  --ifm-color-primary-lightest: #a5b4fc;
+
+  /* Neutrals with a faint cool bias */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #f7f8fa;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.8);
+  --ifm-footer-background-color: #f7f8fa;
+
+  --ifm-color-content: #1b1d23;
+  --ifm-color-content-secondary: #5b616e;
+  --ifm-heading-color: #101215;
+  --ifm-toc-border-color: #e8eaf0;
+  --ifm-color-emphasis-200: #eceef3;
+  --ifm-color-emphasis-300: #dfe2ea;
+
+  /* Type */
+  --ifm-font-family-base: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --ifm-font-family-monospace: ui-monospace, 'SF Mono', SFMono-Regular, 'JetBrains Mono', Menlo, 'Cascadia Code', Consolas, monospace;
+  --ifm-font-size-base: 16px;
+  --ifm-line-height-base: 1.65;
+  --ifm-heading-font-weight: 650;
+  --ifm-heading-line-height: 1.2;
+  --ifm-h1-font-size: 2.2rem;
+
+  /* Code */
+  --ifm-code-font-size: 88%;
+  --ifm-code-background: #f2f3f6;
+  --ifm-code-border-radius: 5px;
+  --docusaurus-highlighted-code-line-bg: rgba(79, 70, 229, 0.08);
+
+  /* Shape & depth — subtle */
+  --ifm-global-radius: 10px;
+  --ifm-button-border-radius: 8px;
+  --ifm-global-shadow-lw: 0 1px 2px rgba(16, 18, 21, 0.05);
+  --ifm-global-shadow-md: 0 2px 8px rgba(16, 18, 21, 0.06);
+  --ifm-navbar-shadow: none;
+
+  --ifm-navbar-height: 3.75rem;
 }
 
-/* Dark mode */
+/* ---------- Dark ---------- */
 [data-theme='dark'] {
-  --ifm-color-primary: #818cf8;
-  --ifm-color-primary-dark: #6366f1;
-  --ifm-color-primary-darker: #4f46e5;
-  --ifm-color-primary-darkest: #4338ca;
+  --ifm-color-primary: #8b8cf7;
+  --ifm-color-primary-dark: #6f70f2;
+  --ifm-color-primary-darker: #6366f1;
+  --ifm-color-primary-darkest: #4f46e5;
   --ifm-color-primary-light: #a5b4fc;
   --ifm-color-primary-lighter: #c7d2fe;
   --ifm-color-primary-lightest: #e0e7ff;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
-  --ifm-background-color: #0f0f0f;
-  --ifm-background-surface-color: #1a1a1a;
+
+  --ifm-background-color: #0b0c0f;
+  --ifm-background-surface-color: #131519;
+  --ifm-navbar-background-color: rgba(11, 12, 15, 0.8);
+  --ifm-footer-background-color: #0b0c0f;
+
+  --ifm-color-content: #d7dae2;
+  --ifm-color-content-secondary: #9096a4;
+  --ifm-heading-color: #f1f2f5;
+  --ifm-toc-border-color: #22252c;
+  --ifm-color-emphasis-200: #1c1f26;
+  --ifm-color-emphasis-300: #2a2e37;
+
+  --ifm-code-background: #17191f;
+  --docusaurus-highlighted-code-line-bg: rgba(139, 140, 247, 0.14);
+
+  --ifm-global-shadow-lw: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ifm-global-shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-/* Hero styling */
-.hero--primary {
-  background: linear-gradient(135deg, var(--ifm-color-primary-darkest) 0%, var(--ifm-color-primary-dark) 100%);
+/* ---------- Base ---------- */
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-[data-theme='dark'] .hero--primary {
-  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
-/* Code blocks */
-.prism-code {
-  font-size: 0.9rem;
+.markdown h2 {
+  margin-top: 2.4rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
 }
 
-/* Sidebar styling */
-.menu__link {
+.markdown > p,
+.markdown li {
+  color: var(--ifm-color-content);
+}
+
+/* ---------- Navbar: clean, translucent, hairline ---------- */
+.navbar {
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.navbar__title {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.navbar__link {
   font-weight: 500;
 }
 
-/* Tables */
-table {
-  display: table;
-  width: 100%;
+/* GitHub icon link in navbar */
+.navbar__items--right .navbar__link[href*='github'] {
+  font-weight: 500;
 }
 
-th {
-  background: var(--ifm-background-surface-color);
+/* ---------- Sidebar: airy and quiet ---------- */
+.menu {
+  padding: 1rem 0.75rem !important;
+  font-size: 0.9rem;
 }
 
-/* Better inline code */
+.menu__link {
+  font-weight: 500;
+  border-radius: 7px;
+  padding: 0.4rem 0.75rem;
+  color: var(--ifm-color-content-secondary);
+}
+
+.menu__link:hover {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.menu__link--active {
+  color: var(--ifm-color-primary);
+  background: var(--ifm-color-emphasis-200);
+  font-weight: 600;
+}
+
+.menu__list-item-collapsible .menu__link--sublist {
+  color: var(--ifm-heading-color);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+}
+
+/* ---------- Code ---------- */
 code {
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: var(--ifm-code-border-radius);
+  padding: 0.1rem 0.4rem;
+  font-weight: 500;
 }
 
-/* Terminal-style code blocks */
-pre code {
+.theme-code-block {
+  box-shadow: var(--ifm-global-shadow-lw) !important;
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: var(--ifm-global-radius);
+}
+
+.theme-code-block pre code {
+  border: none;
+  padding: 0;
   font-size: 0.85rem;
   line-height: 1.6;
 }
 
-/* Navbar */
-.navbar {
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+/* ---------- Tables: minimal ---------- */
+table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
 }
 
-[data-theme='dark'] .navbar {
-  background: #0f0f0f;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+.markdown table thead tr {
+  border-bottom: 2px solid var(--ifm-toc-border-color);
 }
 
-/* Footer */
-.footer--dark {
-  background: #0f0f0f;
+.markdown table th {
+  background: transparent;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  color: var(--ifm-color-content-secondary);
+  font-weight: 600;
 }
 
-/* Improve heading anchors */
+.markdown table tr {
+  border-top: 1px solid var(--ifm-toc-border-color);
+  background: transparent !important;
+}
+
+/* ---------- Buttons ---------- */
+.button {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.button--outline.button--secondary {
+  border-color: var(--ifm-color-emphasis-300);
+  color: inherit;
+}
+
+/* ---------- Admonitions: flatter ---------- */
+.admonition {
+  border-radius: var(--ifm-global-radius);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-left-width: 3px;
+  box-shadow: none;
+}
+
+/* ---------- Heading anchors reveal on hover ---------- */
 .hash-link {
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.15s;
 }
-
 h2:hover .hash-link,
-h3:hover .hash-link {
-  opacity: 1;
+h3:hover .hash-link,
+h4:hover .hash-link {
+  opacity: 0.6;
 }
 
-/* Better admonitions */
-.admonition {
-  border-radius: 8px;
+/* ---------- Footer ---------- */
+.footer {
+  border-top: 1px solid var(--ifm-toc-border-color);
+}
+.footer--dark {
+  --ifm-footer-background-color: var(--ifm-background-surface-color);
+  --ifm-footer-color: var(--ifm-color-content-secondary);
+  --ifm-footer-link-color: var(--ifm-color-content);
+  --ifm-footer-title-color: var(--ifm-heading-color);
+}
+
+/* ---------- Shiki code blocks (markdown/MDX) ---------- */
+.shiki {
+  padding: 1rem 1.15rem;
+  border-radius: var(--ifm-global-radius);
+  border: 1px solid var(--ifm-toc-border-color);
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin-bottom: 1.25rem;
+  font-family: var(--ifm-font-family-monospace);
+  tab-size: 2;
+  box-shadow: var(--ifm-global-shadow-lw);
+}
+
+.shiki code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: inherit;
+  display: block;
+}
+
+/* Dual-theme: switch Shiki's CSS variables under the dark theme. */
+[data-theme='dark'] .shiki,
+[data-theme='dark'] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }

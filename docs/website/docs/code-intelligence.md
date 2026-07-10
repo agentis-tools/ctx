@@ -145,7 +145,7 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files (can be repeated)
-  -j, --parallel <N>             Number of parallel indexing threads
+  -j, --parallel                 Use parallel parsing for faster indexing
 ```
 
 ## Searching
@@ -704,7 +704,7 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files
-  -j, --parallel <N>             Number of parallel indexing threads
+  -j, --parallel                 Use parallel parsing for faster indexing
 ```
 
 ### Query

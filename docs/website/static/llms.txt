@@ -1,0 +1,60 @@
+# ctx
+
+> ctx is a queryable world model of a codebase, built to ground and govern the language models that
+> modify it. A fast, local Rust CLI, it indexes a repo into a structured, queryable model (symbols,
+> call graphs, relationships, semantics), then uses it to (1) GROUND an agent — feed it accurate,
+> token-budgeted context selected by meaning and call-graph relevance ("read the right ~2,000 lines,
+> not the wrong 200,000"), and (2) GOVERN what the agent changes — impact analysis for the blast
+> radius of an edit, plus quality/complexity/duplication gates for CI. Exposed over an MCP server.
+
+ctx works out of the box: `ctx index` builds the world model, then `smart`/`semantic`/`query` ground
+the agent and `query impact`/`audit` govern its changes. Install with `cargo install agentis-ctx`
+(the binary is `ctx`). It is not a file-packer (repomix, gitingest) and not an IDE indexer (ctags,
+LSP) — it is a code world model, agent-first and local. Links below point to the markdown sources.
+
+## Getting started
+
+- [Introduction](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/intro.md): what ctx is, in one screen
+- [Why ctx](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/why-ctx.md): the problem it solves and the approach
+- [Getting started](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/getting-started.md): install and first context
+- [Comparison](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/comparison.md): ctx vs packers and IDE indexers
+
+## Guides
+
+- [Using ctx with agents](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/guides/using-ctx-with-agents.md): the index → embed → query loop, MCP, and JSON output
+- [Context generation](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/context-generation.md): file selection, formats, ignores, token budgeting
+- [Code intelligence](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/code-intelligence.md): indexing, search, callers/deps, impact
+- [Smart context](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/smart.md): task-based file selection
+- [Diff & PR context](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/diff.md): context for git changes
+- [Code quality audit](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/audit.md): complexity, duplication, CI gates
+- [Interactive shell](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/shell.md): REPL for exploration
+- [Map the codebase](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/map.md): token-budgeted structural overview
+- [Find existing code](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/similar.md): pre-write reuse check
+
+## Governance
+
+- [Quality gates overview](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/overview.md): the suite, exit-code contract, CI + agent usage
+- [Architecture rules (ctx check)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/check.md): rules over .ctx/rules.toml
+- [Quality score (ctx score)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/score.md): composite --fail-on gate
+- [Hotspots](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/hotspots.md): churn × complexity ranking
+- [Duplicates](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/duplicates.md): MinHash near-duplicate detection
+- [SQL gates (preview)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/sql-gates.md): planned repo-committed SQL gates (not yet shipped)
+
+## Reference
+
+- [Configuration](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/configuration.md): .contextignore and settings
+- [Language support](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/language-support.md): what is extracted per language
+- [MCP server](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/serve.md): the eight agent tools
+- [JSON output](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/reference/json-output.md): the --json envelope and per-command payloads
+- [Exit codes](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/reference/exit-codes.md): the 0/1/2 gate contract
+
+## Integrations
+
+- [Claude / MCP](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/integrations/claude.md): Claude Desktop setup
+- [CI/CD](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/integrations/ci-cd.md): GitHub Actions, GitLab, pre-commit
+- [VS Code](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/integrations/vscode.md): editor tasks
+
+## Optional
+
+- [Architecture](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/architecture.md): how ctx works internally
+- [Changelog](https://raw.githubusercontent.com/saldestechnology/ctx/main/CHANGELOG.md): release history

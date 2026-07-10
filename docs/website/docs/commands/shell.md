@@ -43,26 +43,30 @@ ctx index
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `find <pattern>` | Search symbols by name | `find auth` |
-| `search <query>` | Semantic search | `search "user login"` |
-| `callers <symbol>` | Show callers | `callers handleRequest` |
-| `callees <symbol>` | Show callees | `callees main` |
-| `deps <symbol>` | Show dependencies | `deps UserService` |
-| `source <symbol>` | Show source code | `source authenticate` |
-| `explain <symbol>` | Detailed symbol info | `explain Config` |
-| `files` | List indexed files | `files` |
-| `stats` | Show codebase stats | `stats` |
-| `help` | Show available commands | `help` |
-| `exit` / `quit` | Exit the shell | `exit` |
+| `find <pattern>` | Find symbols by name (use `*` for wildcards) | `find *Handler` |
+| `search <query>` | Hybrid search (text + semantic) | `search "user login"` |
+| `callers <symbol>` | Show functions that call a symbol | `callers handleRequest` |
+| `callees <symbol>` | Show functions a symbol calls | `callees main` |
+| `deps <symbol>` | Alias for `callees` | `deps UserService` |
+| `impact <symbol>` | Show what a change to a symbol would affect | `impact validateToken` |
+| `source <symbol>` | Show stored source code | `source authenticate` |
+| `explain <symbol>` | Symbol details and relationships | `explain Config` |
+| `complexity` | Fan-out complexity report | `complexity` |
+| `audit` | Code-quality audit | `audit` |
+| `stats` | Show codebase statistics | `stats` |
+| `help` / `?` | Show available commands | `help` |
+| `exit` / `quit` / `q` | Exit the shell | `exit` |
 
 ### Built-in Commands
 
 | Command | Description |
 |---------|-------------|
-| `cd <path>` | Change working directory |
-| `pwd` | Show current directory |
-| `history` | Show command history |
-| `clear` | Clear screen |
+| `cd <path>` | Scope subsequent queries to a path; `cd` with no argument clears the scope |
+| `pwd` | Show the current path scope (or `(root)`) |
+| `clear` | Clear the screen |
+
+> `cd`/`pwd` set a **path context** that filters query results — they do not change your OS
+> working directory. Use them to focus the shell on a subdirectory.
 
 ## Examples
 
@@ -157,7 +161,8 @@ ctx shell --vi
 
 ## History
 
-Command history is saved to `~/.ctx_history` by default.
+Command history is saved to `~/.ctx_history` by default. Navigate it with the arrow keys or
+search it with `Ctrl+R`.
 
 ```bash
 # Custom history location
@@ -165,15 +170,6 @@ ctx shell --history /path/to/history
 
 # Disable history (for sensitive sessions)
 ctx shell --no-history
-```
-
-In the shell:
-```
-ctx> history
-1: find auth
-2: callers handleAuth
-3: source handleAuth
-4: stats
 ```
 
 ## Tips

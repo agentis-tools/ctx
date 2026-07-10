@@ -464,31 +464,30 @@ impl OpenAIProvider {
 
 ### Similarity Search
 
+Embeddings are stored in a [**sqlite-vec**](https://github.com/asg017/sqlite-vec) `vec0` virtual
+table (`symbol_vectors`), so nearest-neighbour search runs as an **indexed vector query inside
+SQLite** rather than a full scan in application code:
+
 ```rust
+// Vectors live in a vec0 virtual table created at index time:
+//   CREATE VIRTUAL TABLE symbol_vectors USING vec0(embedding float[384]);
+// Semantic search is then a KNN query against that index:
 pub fn semantic_search(
     db: &Database,
     query_embedding: &Embedding,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
-    // Load all embeddings from database
-    let all_embeddings = db.get_all_embeddings()?;
-    
-    // Compute cosine similarity for each
-    let mut scored: Vec<_> = all_embeddings
-        .into_iter()
-        .map(|(id, name, kind, file, line, vector)| {
-            let score = cosine_similarity(&query_embedding.vector, &vector);
-            SearchResult { symbol_id: id, name, kind, file_path: file, line, score }
-        })
-        .collect();
-    
-    // Sort by score descending
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
-    scored.truncate(limit);
-    
-    Ok(scored)
+    // Uses the sqlite-vec `MATCH ... ORDER BY distance LIMIT k` KNN query
+    // when the extension is available (registered via init_vec_extension()).
+    db.vec_knn(&query_embedding.vector, limit)
 }
+```
 
+The sqlite-vec extension is registered at startup (`init_vec_extension()` in `src/db/schema.rs`). If
+it can't be loaded on a given platform, ctx falls back to loading the stored vectors and ranking them
+by cosine similarity in Rust — correct, just without the index:
+
+```rust
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();

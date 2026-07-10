@@ -1,31 +1,39 @@
 import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
+import CodeBlock from '@theme/CodeBlock';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
 
 function HomepageHeader() {
-  const {siteConfig} = useDocusaurusContext();
   return (
-    <header className={clsx('hero hero--primary', styles.heroBanner)}>
+    <header className={styles.hero}>
       <div className="container">
-        <Heading as="h1" className="hero__title">
-          {siteConfig.title}
+        <div className={styles.eyebrow}>ctx &middot; a queryable model of your codebase</div>
+        <Heading as="h1" className={styles.heroTitle}>
+          The local quality authority for <span className={styles.accent}>AI-written code</span>
         </Heading>
-        <p className="hero__subtitle">{siteConfig.tagline}</p>
+        <p className={styles.heroSubtitle}>
+          ctx is a queryable model of your codebase that <strong>grounds</strong> your agent and{' '}
+          <strong>gates</strong> its output &mdash; every turn. It hands your agent a map before it
+          starts, shows the blast radius of every edit, and enforces your rules as deterministic
+          gates. Locally.
+        </p>
+        <div className={styles.install}>
+          <CodeBlock language="bash">cargo install agentis-ctx</CodeBlock>
+        </div>
         <div className={styles.buttons}>
-          <Link
-            className="button button--secondary button--lg"
-            to="/docs/">
-            Get Started
+          <Link className="button button--primary button--lg" to="/docs/getting-started">
+            Get started
+          </Link>
+          <Link className="button button--outline button--secondary button--lg" to="/docs/why-ctx">
+            Why ctx?
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            style={{marginLeft: '1rem'}}
             href="https://github.com/saldestechnology/ctx">
             GitHub
           </Link>
@@ -35,45 +43,71 @@ function HomepageHeader() {
   );
 }
 
+function ProofBand(): ReactNode {
+  return (
+    <section className={styles.statBand}>
+      <div className="container">
+        <div className={styles.stats}>
+          <div className={styles.stat}>
+            <div className={styles.statNum}>~27&times;</div>
+            <div className={styles.statLabel}>
+              smaller context &mdash; 233k &rarr; ~8.7k tokens for a task with <code>ctx smart</code>
+            </div>
+          </div>
+          <div className={styles.stat}>
+            <div className={styles.statNum}>0.36s</div>
+            <div className={styles.statLabel}>
+              to index 870 symbols and 5,463 call edges (measured on this repo)
+            </div>
+          </div>
+          <div className={styles.stat}>
+            <div className={styles.statNum}>100%</div>
+            <div className={styles.statLabel}>
+              local &mdash; one SQLite file, offline embeddings, your code never leaves your machine
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function QuickStart(): ReactNode {
   return (
     <section className={styles.quickStart}>
       <div className="container">
-        <Heading as="h2" className="text--center margin-bottom--lg">
-          Quick Start
+        <Heading as="h2" className={styles.sectionTitle}>
+          Ground and govern every change
         </Heading>
+        <p className={styles.qsIntro}>
+          One world model, two jobs: feed the model the right context going in, and guardrail what it
+          changes coming out.
+        </p>
         <div className="row">
           <div className="col col--6">
-            <div className={styles.codeBlock}>
-              <div className={styles.codeHeader}>Context Generation</div>
-              <pre>
-                <code>{`# Generate context for an LLM
-ctx src/ | pbcopy
+            <div className={styles.codeCard}>
+              <div className={styles.codeCardHeader}>Ground &mdash; the right context, in</div>
+              <CodeBlock language="bash">{`# Build the world model once
+ctx index
 
-# Specific file patterns
-ctx "src/**/*.ts" "lib/**/*.rs"
+# Task-scoped, token-budgeted context
+ctx smart "add rate limiting" --max-tokens 8000
 
-# Markdown format
-ctx --format markdown src/`}</code>
-              </pre>
+# Or just the git changes, with call-graph context
+ctx diff --summary`}</CodeBlock>
             </div>
           </div>
           <div className="col col--6">
-            <div className={styles.codeBlock}>
-              <div className={styles.codeHeader}>Code Intelligence</div>
-              <pre>
-                <code>{`# Build the index
-ctx index
+            <div className={styles.codeCard}>
+              <div className={styles.codeCardHeader}>Govern &mdash; guardrails, on what changes</div>
+              <CodeBlock language="bash">{`# Enforce your architecture rules on the change
+ctx check --against origin/main
 
-# Search for symbols
-ctx search "handleRequest"
+# One gate for the whole change (exit 1 = not done)
+ctx score --fail-on "check_violations>0,new_duplication>0"
 
-# Find callers of a function
-ctx query callers authenticate
-
-# Impact analysis
-ctx query impact validateToken`}</code>
-              </pre>
+# Auto-gate every agent edit via Claude Code hooks
+ctx harness init --target claude`}</CodeBlock>
             </div>
           </div>
         </div>
@@ -83,13 +117,13 @@ ctx query impact validateToken`}</code>
 }
 
 export default function Home(): ReactNode {
-  const {siteConfig} = useDocusaurusContext();
   return (
     <Layout
-      title="AI-ready context from your codebase"
-      description="Fast CLI tool that generates AI-ready context from codebases with built-in code intelligence for understanding symbol relationships and call graphs.">
+      title="The local quality authority for AI-written code"
+      description="ctx is the local quality authority for AI-written code — a queryable model of your codebase that grounds your agent and gates its output every turn, enforcing your architecture rules and quality thresholds as deterministic gates, locally, in the agent's loop.">
       <HomepageHeader />
       <main>
+        <ProofBand />
         <HomepageFeatures />
         <QuickStart />
       </main>

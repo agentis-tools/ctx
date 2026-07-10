@@ -180,11 +180,11 @@ Codebase statistics:
 ```
 
 The indexer accepts include patterns (`-p/--pattern`), ignore patterns
-(`-i/--ignore`), and a parallelism setting (`-j/--parallel`):
+(`-i/--ignore`), and a flag to enable parallel parsing (`-j/--parallel`):
 
 ```bash
-# Only index TypeScript sources, using 8 threads
-ctx index -p "src/**/*.ts" -j 8
+# Only index TypeScript sources, with parallel parsing
+ctx index -p "src/**/*.ts" --parallel
 ```
 
 ### Search Your Code

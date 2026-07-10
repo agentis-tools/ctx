@@ -605,9 +605,6 @@ __mocks__/
 Create a standard `.contextignore` for your team:
 
 ```bash
-# Copy from existing project
+# Copy from an existing project
 cp path/to/good/.contextignore .contextignore
-
-# Or use a template
-curl -o .contextignore https://example.com/contextignore-templates/typescript
 ```
