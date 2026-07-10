@@ -21,6 +21,7 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 
 ## Guides
 
+- [Index & embed first](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/guides/indexing.md): build the index (and embeddings) before anything else; run as background watchers
 - [Using ctx with agents](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/guides/using-ctx-with-agents.md): the index → embed → query loop, MCP, and JSON output
 - [Context generation](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/context-generation.md): file selection, formats, ignores, token budgeting
 - [Code intelligence](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/code-intelligence.md): indexing, search, callers/deps, impact
@@ -33,19 +34,19 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 
 ## Governance
 
-- [Quality gates overview](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/overview.md): the suite, exit-code contract, CI + agent usage
-- [Architecture rules (ctx check)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/check.md): rules over .ctx/rules.toml
-- [Quality score (ctx score)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/score.md): composite --fail-on gate
-- [Hotspots](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/hotspots.md): churn × complexity ranking
-- [Duplicates](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/duplicates.md): MinHash near-duplicate detection
-- [SQL gates (preview)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/governance/sql-gates.md): planned repo-committed SQL gates (not yet shipped)
+- [Quality gates overview](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/integrations/quality-gates.md): the suite, exit-code contract, CI + agent usage
+- [Architecture rules (ctx check)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/check.md): rules over .ctx/rules.toml
+- [Quality score (ctx score)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/score.md): composite --fail-on gate
+- [Hotspots](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/hotspots.md): churn × complexity ranking
+- [Duplicates](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/duplicates.md): MinHash near-duplicate detection
+- [SQL gates (ctx sql)](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/sql.md): raw read-only SQL over the v1 schema, with `--fail-on-rows` for repo-committed gates
 
 ## Reference
 
 - [Configuration](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/configuration.md): .contextignore and settings
 - [Language support](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/language-support.md): what is extracted per language
 - [MCP server](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/commands/serve.md): the eight agent tools
-- [JSON output](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/reference/json-output.md): the --json envelope and per-command payloads
+- [JSON output](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/json-output.md): the --json envelope and per-command payloads
 - [Exit codes](https://raw.githubusercontent.com/saldestechnology/ctx/main/docs/website/docs/reference/exit-codes.md): the 0/1/2 gate contract
 
 ## Integrations

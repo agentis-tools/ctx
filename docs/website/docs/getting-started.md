@@ -157,6 +157,13 @@ ctx includes a powerful code intelligence system for understanding your codebase
 ctx index
 ```
 
+:::tip Run this first — everything below needs it
+`ctx index` is the prerequisite for every intelligence and governance command (`query`, `search`,
+`map`, `check`, `score`, …). Run it once; re-runs are incremental. Keep it live in the background
+with `ctx index --watch` (and `ctx embed --watch` for semantic search). See
+**[Index & embed first](guides/indexing.md)** for the full workflow.
+:::
+
 This creates `.ctx/codebase.sqlite` containing:
 - **Symbols** - Functions, classes, interfaces, structs, enums, traits
 - **Edges** - Call relationships, imports, extends, implements

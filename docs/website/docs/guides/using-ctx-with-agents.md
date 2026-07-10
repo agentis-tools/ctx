@@ -46,9 +46,9 @@ ctx score --against origin/main --fail-on "check_violations>0,new_duplication>0"
 ```
 
 You don't have to wire this by hand. `ctx harness init --target claude` installs Claude Code hooks
-that run [`ctx map`](../commands/map.md) at session start, [`ctx check`](../governance/check.md) after
-every edit, and [`ctx score`](../governance/score.md) as a Stop-gate — see
-[Quality gates](../governance/overview.md) and [Claude integration](../integrations/claude.md).
+that run [`ctx map`](../commands/map.md) at session start, [`ctx check`](../commands/check.md) after
+every edit, and [`ctx score`](../commands/score.md) as a Stop-gate — see
+[Quality gates](../integrations/quality-gates.md) and [Claude integration](../integrations/claude.md).
 
 ## Over MCP
 

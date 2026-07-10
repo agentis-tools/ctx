@@ -30,9 +30,9 @@ reserved exclusively for "ran fine, found issues". Update any script that treate
 
 | Command | Exit behavior |
 |---------|---------------|
-| [`ctx check`](../governance/check.md) | `1` when any architecture rule is violated |
-| [`ctx score --fail-on`](../governance/score.md) | `1` when any `--fail-on` condition is met |
-| [`ctx duplicates --fail-on-found`](../governance/duplicates.md) | `1` when any near-duplicate pair is reported |
+| [`ctx check`](../commands/check.md) | `1` when any architecture rule is violated |
+| [`ctx score --fail-on`](../commands/score.md) | `1` when any `--fail-on` condition is met |
+| [`ctx duplicates --fail-on-found`](../commands/duplicates.md) | `1` when any near-duplicate pair is reported |
 | [`ctx audit --min-score`](../commands/audit.md) | `1` when the score is below the threshold |
 | `ctx hotspots`, `ctx similar`, `ctx map` | Informational — `0` unless an operational error (`2`) |
 | `ctx harness compat --require <semver>` | `3` when the binary is below the required floor (hooks fail **open**) |
@@ -54,5 +54,5 @@ they are never confused.
 
 ## See also
 
-- [JSON output](json-output.md) — the `--json` envelope for tools that want the details
-- [Quality gates](../governance/overview.md) — wiring the suite into CI and agents
+- [JSON output](../json-output.md) — the `--json` envelope for tools that want the details
+- [Quality gates](../integrations/quality-gates.md) — wiring the suite into CI and agents
