@@ -412,9 +412,11 @@ mod tests {
     }
 
     #[test]
-    fn test_changed_files_not_a_repo() {
+    fn test_not_a_repo_errors() {
         let dir = tempfile::tempdir().unwrap();
         let err = changed_files_against_in(dir.path(), "main").unwrap_err();
+        assert!(matches!(err, CtxError::NotGitRepo));
+        let err = churn_since_in(dir.path(), "1 week ago").unwrap_err();
         assert!(matches!(err, CtxError::NotGitRepo));
     }
 
@@ -429,13 +431,6 @@ mod tests {
         let churn = churn_since_in(&repo.root, "2000-01-01").unwrap();
         assert_eq!(churn.get("src/a.rs"), Some(&2));
         assert_eq!(churn.get("src/b.rs"), Some(&1));
-    }
-
-    #[test]
-    fn test_churn_since_not_a_repo() {
-        let dir = tempfile::tempdir().unwrap();
-        let err = churn_since_in(dir.path(), "1 week ago").unwrap_err();
-        assert!(matches!(err, CtxError::NotGitRepo));
     }
 
     #[test]

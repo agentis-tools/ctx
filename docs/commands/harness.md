@@ -36,7 +36,7 @@ Wires the current project's `.claude/` directory:
 |------|---------|
 | `.claude/hooks/ctx/session-start.sh` | `SessionStart` hook: prints `ctx map --budget 2000` for the model |
 | `.claude/hooks/ctx/post-tool-use.sh` | `PostToolUse` (Edit\|Write) hook: `ctx index`, then `ctx check --against HEAD --json` |
-| `.claude/hooks/ctx/stop.sh` | `Stop` hook: `ctx score --against <default branch>` scorecard (non-blocking) |
+| `.claude/hooks/ctx/stop.sh` | `Stop` hook: `ctx score --against <default branch>` scorecard (non-blocking by default; see [Blocking gates](#blocking-gates-ctx_gate_blocking)) |
 | `.ctx/rules.toml` | Commented starter rules file (only when absent) |
 | `.ctx/harness.lock` | Manifest of generated files and their checksums |
 
@@ -69,6 +69,23 @@ ctx harness compat --require "<version baked at generation>"
 ```
 
 If the installed binary is older than the templates (exit code 3), the script prints a warning to **stderr** and exits 0 without performing its action — the session is never blocked, but you are told why. Model-bound content (map, check JSON, scorecard) goes to stdout; human-facing notices always go to stderr.
+
+## Blocking gates (`CTX_GATE_BLOCKING`)
+
+The generated Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0,new_duplication>0"`. By default a failed gate only prints the scorecard and a stderr note — the session stops normally. Set `CTX_GATE_BLOCKING=1` (exactly `1`) in the environment Claude Code runs in to turn gate failures into a **blocking stop**: the hook exits 2, which Claude Code treats as "keep working", so the session continues until the failed conditions in the scorecard are addressed.
+
+Only a genuine gate failure ever blocks. Everything else fails open:
+
+| `ctx score` result | `CTX_GATE_BLOCKING` | Hook exit | Effect |
+|--------------------|---------------------|-----------|--------|
+| Gates pass (exit 0) | any | 0 | Session stops normally |
+| Gate condition fired (exit 1) | unset / anything but `1` | 0 | Non-blocking; a stderr note points at the scorecard |
+| Gate condition fired (exit 1) | `1` | 2 | Blocking stop; Claude keeps working on the findings |
+| Operational error (exit 2, compat mismatch, ctx not on PATH) | any | 0 | Fail open with a stderr warning |
+
+Pair it with `CTX_GATE_LOG` (consumed by `ctx score` itself, not the hook) to record every gate evaluation — including whether blocking mode was on — in a local JSONL log; see [ctx score — Gate logging](./score.md#gate-logging).
+
+> **Upgrading:** hook scripts are generated files. If your `.claude/hooks/ctx/stop.sh` predates `CTX_GATE_BLOCKING`, re-run `ctx harness init` after updating ctx to regenerate it (`ctx harness doctor`'s `templates_stale` check tells you when this is due).
 
 ## `compat --require <SEMVER>`
 

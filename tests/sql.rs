@@ -458,21 +458,7 @@ const TREND_DUPLICATION: &str = "SELECT commit_sha, min(committed_at) AS committ
 const TREND_VIOLATIONS: &str = "SELECT commit_sha, min(committed_at) AS committed_at, sum(violation_count) AS violations FROM snap.files GROUP BY commit_sha ORDER BY committed_at;";
 const TREND_HOTSPOT_MASS: &str = "WITH ranked AS (SELECT commit_sha, committed_at, churn_commits * total_complexity AS mass, percent_rank() OVER (PARTITION BY commit_sha ORDER BY total_complexity) AS pr FROM snap.files) SELECT commit_sha, min(committed_at) AS committed_at, sum(mass) AS hotspot_mass FROM ranked WHERE pr >= 0.9 GROUP BY commit_sha ORDER BY committed_at;";
 
-/// Run a git command in `dir` and return its trimmed stdout.
-fn git_stdout(dir: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to spawn git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
+use ctx::testutil::git_stdout;
 
 /// A repo with two dated commits, an index, and one snapshot partition per
 /// commit (via `ctx snapshot backfill`). Returns the commit shas oldest-first.
@@ -627,7 +613,7 @@ fn snapshots_do_not_weaken_the_sandbox() {
 }
 
 #[test]
-fn snapshots_missing_dir_is_an_operational_error() {
+fn snapshots_missing_or_empty_dir_is_an_operational_error() {
     // Indexed project, but `ctx snapshot` never ran: the default dir is absent.
     let temp = indexed_fixture();
     sql(temp.path())
@@ -637,12 +623,9 @@ fn snapshots_missing_dir_is_an_operational_error() {
         .code(2)
         .stderr(predicate::str::contains("no snapshots found"))
         .stderr(predicate::str::contains("ctx snapshot"));
-}
 
-#[test]
-fn snapshots_empty_dir_is_an_operational_error() {
-    // The directory exists but holds no `sha=*` partitions.
-    let temp = indexed_fixture();
+    // The directory existing but holding no `sha=*` partitions is the same
+    // operational error.
     std::fs::create_dir_all(temp.path().join(".ctx").join("snapshots")).unwrap();
     sql(temp.path())
         .arg("--snapshots")

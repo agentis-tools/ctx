@@ -7,24 +7,7 @@ use std::process::{Command, Output};
 
 use ctx::fixture::{apply_change_set, generate, FixtureSpec};
 use ctx::index::open_database;
-
-/// Run git in `dir` and return stdout (trailing whitespace stripped),
-/// panicking on failure. Leading whitespace is preserved because
-/// `status --porcelain` lines start with a significant space.
-fn git_stdout(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to spawn git");
-    assert!(
-        out.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim_end().to_string()
-}
+use ctx::testutil::git_stdout;
 
 /// Recursive snapshot of a tree as sorted (relative path, bytes) pairs,
 /// skipping `.git`. Two identical snapshots mean byte-identical trees.

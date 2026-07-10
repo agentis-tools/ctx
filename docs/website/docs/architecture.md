@@ -534,16 +534,20 @@ pub fn stream_context(
 
 ## Performance Characteristics
 
-### Indexing
-- ~2000 files in less than 10 seconds
-- Incremental updates: under 1 second for changed files
-- Memory: ~100MB for large codebases
+### Enforced latency budgets
 
-### Queries
-- Symbol search: under 10ms
-- Call graph (depth 5): under 50ms
-- Impact analysis: under 100ms
-- Semantic search: ~100ms (depends on embedding count)
+These are not aspirations: each number is a budget enforced by the operational perf harness ([`perf/README.md`](https://github.com/agentis-tools/ctx/blob/main/perf/README.md)), which CI runs as an advisory `perf` job on every PR. Each scenario spawns a prebuilt `ctx` binary against a deterministic synthetic fixture of 2,000 files and takes the median of 5 timed runs:
+
+| Operation | Fixture | Budget |
+|-----------|---------|--------|
+| `ctx index`, incremental (1 changed file) | 2,000 files | 300 ms |
+| `ctx score --against HEAD` (3 changed files) | 2,000 files | 2 s |
+| `ctx check --against HEAD` (3 changed files) | 2,000 files | 1 s |
+| `ctx map --budget 2000` (warm rank cache) | 2,000 files | 500 ms |
+| `ctx sql` (aggregate query over `v1`) | 2,000 files | 500 ms |
+| `ctx index`, cold (full suite only) | ~150k LOC | 60 s |
+
+Peak memory (`ru_maxrss`) across the incremental-index, score, check, and map runs must stay below **300 MB**. CI runners get a 1.5x budget allowance (`CTX_PERF_BUDGET_SCALE`) because hosted runners are slower and noisier, and medians are additionally gated at 1.20x a committed per-runner-class baseline (`perf/baselines/`).
 
 ### Storage
 - Symbols: ~500 bytes each (uncompressed)

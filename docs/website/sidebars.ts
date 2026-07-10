@@ -27,6 +27,7 @@ const sidebars: SidebarsConfig = {
         'commands/diff',
         'commands/smart',
         'commands/sql',
+        'commands/snapshot',
         'commands/shell',
         'commands/serve',
       ],

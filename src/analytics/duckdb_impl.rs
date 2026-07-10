@@ -891,6 +891,22 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
             .unwrap_or(J::Null),
         ValueRef::Text(bytes) => J::String(String::from_utf8_lossy(bytes).into_owned()),
         ValueRef::Blob(bytes) => J::String(format!("<blob: {} bytes>", bytes.len())),
+        ValueRef::Timestamp(unit, raw) => {
+            use duckdb::types::TimeUnit;
+            let nanos = match unit {
+                TimeUnit::Second => (raw as i128) * 1_000_000_000,
+                TimeUnit::Millisecond => (raw as i128) * 1_000_000,
+                TimeUnit::Microsecond => (raw as i128) * 1_000,
+                TimeUnit::Nanosecond => raw as i128,
+            };
+            let formatted = time::OffsetDateTime::from_unix_timestamp_nanos(nanos)
+                .ok()
+                .and_then(|dt| {
+                    dt.format(&time::format_description::well_known::Rfc3339)
+                        .ok()
+                });
+            J::String(formatted.unwrap_or_else(|| format!("Timestamp({unit:?}, {raw})")))
+        }
         other => J::String(format!("{:?}", other)),
     }
 }

@@ -14,7 +14,7 @@
 use std::path::Path;
 
 use assert_cmd::Command;
-use ctx::testutil::GitRepo;
+use ctx::testutil::{git_stdout, GitRepo};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -62,22 +62,6 @@ fn ctx(dir: &Path) -> Command {
     let mut cmd = Command::cargo_bin("ctx").unwrap();
     cmd.current_dir(dir);
     cmd
-}
-
-/// Run a git command in `dir` and return its trimmed stdout.
-fn git_stdout(dir: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to spawn git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 /// The snapshot partition directory for a sha.
@@ -159,15 +143,25 @@ fn second_capture_skips_and_force_rewrites() {
 }
 
 #[test]
-fn capture_outside_a_git_repo_is_an_error() {
+fn outside_a_git_repo_is_an_error() {
     let temp = TempDir::new().unwrap();
+
+    // Capture and backfill both need a repository; neither may leave
+    // partitions behind on failure.
     ctx(temp.path())
         .arg("snapshot")
         .assert()
         .code(2)
         .stderr(predicate::str::contains("git"));
+    ctx(temp.path())
+        .args(["snapshot", "backfill", "--since", "HEAD"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("git"));
+
+    let snapshots = temp.path().join(".ctx").join("snapshots");
     assert!(
-        !temp.path().join(".ctx").join("snapshots").exists(),
+        !snapshots.exists(),
         "a failed snapshot must not create partitions"
     );
 }

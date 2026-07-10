@@ -132,6 +132,42 @@ ctx score --against main --json
 }
 ```
 
+## Gate logging
+
+Set the `CTX_GATE_LOG` environment variable to make every `ctx score` run append one record describing the gate evaluation to a local log. This is how you build a paper trail of gate outcomes over time (e.g. from the Claude Code Stop hook) without changing what the command does. Opt-in and local-only — ctx ships no telemetry.
+
+| `CTX_GATE_LOG` value | Effect |
+|----------------------|--------|
+| unset, empty, or `0` | Logging disabled (the default) |
+| `1` or `true` | Append to `.ctx/gate-log.jsonl` under the repo root |
+| anything else | Treated as the log path (joined to the repo root when relative) |
+
+The log is **JSON Lines**: one complete JSON object per line, one line appended per evaluation. It is **not** the standard `--json` envelope — no `command`/`data` wrapper — and it is written regardless of whether `--json` is passed:
+
+```json
+{"schema_version":1,"ts":"2026-07-10T19:25:43.893434Z","ctx_version":"0.3.0","source":"score","against":"HEAD","fail_on":"new_duplication>0","metrics":{"check_violations":0,"complexity_delta":0,"fan_out_delta":0,"files_changed":0,"new_duplication":0,"symbols_added":0,"symbols_removed":0},"failed_conditions":[],"outcome":"pass","blocking":false,"session_id":null}
+```
+
+| Field | Description |
+|-------|-------------|
+| `schema_version` | Version of the line format (currently `1`) |
+| `ts` | Evaluation time, RFC 3339 UTC |
+| `ctx_version` | The ctx version that evaluated the gate |
+| `source` | The command that evaluated the gate (`"score"`) |
+| `against` | The git reference the score was computed against |
+| `fail_on` | The raw `--fail-on` expression, or `null` when none was given |
+| `metrics` | The same seven-key metrics object the `--json` payload emits under `metrics` |
+| `failed_conditions` | Rendered `--fail-on` conditions that fired (empty on pass) |
+| `outcome` | `"pass"` or `"fail"` |
+| `blocking` | Whether blocking mode was requested (`CTX_GATE_BLOCKING=1`; see [ctx harness](./harness.md)) |
+| `session_id` | Claude Code session id (`CLAUDE_SESSION_ID`), or `null` |
+
+Logging is best-effort: an IO failure prints a warning to stderr and **never changes the command's exit code**. Query the log with standard JSONL tooling:
+
+```bash
+jq -r 'select(.outcome == "fail") | [.ts, .failed_conditions[]] | @tsv' .ctx/gate-log.jsonl
+```
+
 ## Caveats
 
 - **Fan-in approximation:** the baseline side is parsed in isolation, so cross-file callers are unknowable there. Fan-in is therefore counted as *same-file* callers on **both** sides, keeping the delta comparable. This is surfaced as a note in every run.

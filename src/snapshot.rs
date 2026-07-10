@@ -520,34 +520,30 @@ mod engine {
     // Git plumbing local to backfill
     // ========================================================================
 
-    /// Resolve `rev` to a full commit sha, or `None` if it doesn't resolve.
-    fn resolve_commit(root: &Path, rev: &str) -> Option<String> {
+    /// Run git in `root` and return its trimmed stdout when the command
+    /// succeeds with non-empty output; `None` otherwise.
+    fn git_trimmed(root: &Path, args: &[&str]) -> Option<String> {
         let output = Command::new("git")
-            .args(["rev-parse", "--verify", "--quiet"])
-            .arg(format!("{}^{{commit}}", rev))
+            .args(args)
             .current_dir(root)
             .output()
             .ok()?;
         if !output.status.success() {
             return None;
         }
-        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        (!sha.is_empty()).then_some(sha)
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Resolve `rev` to a full commit sha, or `None` if it doesn't resolve.
+    fn resolve_commit(root: &Path, rev: &str) -> Option<String> {
+        let spec = format!("{}^{{commit}}", rev);
+        git_trimmed(root, &["rev-parse", "--verify", "--quiet", &spec])
     }
 
     /// Committer date (`%cI`) of a commit, for skipped-partition reports.
     fn commit_date(root: &Path, sha: &str) -> Option<String> {
-        let output = Command::new("git")
-            .args(["log", "-1", "--format=%cI"])
-            .arg(sha)
-            .current_dir(root)
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let date = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        (!date.is_empty()).then_some(date)
+        git_trimmed(root, &["log", "-1", "--format=%cI", sha])
     }
 
     /// Keep every Nth sha counting backwards from the newest (the last
