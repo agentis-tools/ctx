@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "profile": "perf",
+    "fixture_format_version": 1,
+    "budget_scale_at_capture": 1.5,
+    "commit": "98e06386afcf0ec02df8ba13208bdf9444050bf3"
+  },
+  "scenarios": {
+    "check_against_head": {
+      "median_ms": 162.8,
+      "max_rss_kb": 55812
+    },
+    "index_cold_150k": {
+      "median_ms": 13641.7,
+      "max_rss_kb": 93652
+    },
+    "index_cold_2k": {
+      "median_ms": 8043.8,
+      "max_rss_kb": 67500
+    },
+    "index_incremental_1": {
+      "median_ms": 209.7,
+      "max_rss_kb": 47616
+    },
+    "map_cached": {
+      "median_ms": 46.2,
+      "max_rss_kb": 42552
+    },
+    "score_3_changed": {
+      "median_ms": 5965.1,
+      "max_rss_kb": 280368
+    },
+    "sql_v1_query": {
+      "median_ms": 266.2,
+      "max_rss_kb": 93080
+    }
+  }
+}
