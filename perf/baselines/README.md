@@ -6,10 +6,13 @@ specific** — a number captured on a MacBook is meaningless for
 `ubuntu-latest` — so each file is named after the runner class it was
 captured on (`ubuntu-latest.json`).
 
-There is intentionally **no baseline committed yet**: the harness was
-developed on macOS, and fabricating Linux numbers would make the gate either
-useless or flaky. Until a baseline lands, the regression gate warn-passes
-(missing entry => warn) and only the absolute budgets and the RSS gate apply.
+`ubuntu-latest.json` was captured from CI run
+[29126075011](https://github.com/agentis-tools/ctx/actions/runs/29126075011)
+(2026-07-10, commit `98e06386`, suite `full`, budget scale 1.5, perf
+profile). All seven scenarios are included — `index_cold_2k` (budget-less,
+informational) and `score_3_changed` (currently over its absolute budget,
+tracked separately) too: the baseline is the regression reference and is
+independent of the budget gate.
 
 ## Capturing / updating `ubuntu-latest.json`
 
