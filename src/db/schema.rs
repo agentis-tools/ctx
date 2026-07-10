@@ -586,14 +586,18 @@ impl Database {
         let file_like = file_pattern.map(glob_to_like_pattern);
 
         // Build dynamic SQL based on filters
-        // We use separate parameters for exact match (?1), like match (?2), and starts_with (?3)
+        // We use separate parameters for exact match (?1), like match (?2), and starts_with (?3).
+        // The like/starts_with patterns are produced by escape_like_pattern, which escapes the
+        // LIKE metacharacters (`%`, `_`, `\`) with a backslash, so every LIKE that consumes them
+        // must declare `ESCAPE '\'` — otherwise the escaped `\_`/`\%` are treated literally and
+        // names containing underscores (e.g. `run_sql`) never match.
         let mut sql = String::from(
             r#"
             SELECT id, file_path, name, qualified_name, kind, visibility,
                    signature, brief, docstring, line_start, line_end,
                    col_start, col_end, parent_id, source
             FROM symbols
-            WHERE (name LIKE ?2 OR qualified_name LIKE ?2)
+            WHERE (name LIKE ?2 ESCAPE '\' OR qualified_name LIKE ?2 ESCAPE '\')
             "#,
         );
 
@@ -603,7 +607,9 @@ impl Database {
         // Add file pattern filter if provided
         let file_param_pos = if file_pattern.is_some() {
             let pos = next_param;
-            sql.push_str(&format!(" AND file_path LIKE ?{}", pos));
+            // file_path patterns come from glob_to_like_pattern, which also backslash-escapes
+            // literal `%`/`_`/`\`, so this LIKE needs the same ESCAPE clause.
+            sql.push_str(&format!(" AND file_path LIKE ?{} ESCAPE '\\'", pos));
             next_param += 1;
             Some(pos)
         } else {
@@ -627,7 +633,7 @@ impl Database {
             r#"
             ORDER BY
                 CASE WHEN name = ?1 THEN 0
-                     WHEN name LIKE ?3 THEN 1
+                     WHEN name LIKE ?3 ESCAPE '\' THEN 1
                      ELSE 2 END,
                 name
             LIMIT ?{}
@@ -2476,6 +2482,82 @@ mod tests {
             .unwrap();
         assert_eq!(filtered.len(), 1);
         assert!(filtered[0].file_path.contains("embeddings"));
+    }
+
+    #[test]
+    fn test_find_symbols_with_underscore_name() {
+        // Regression: escape_like_pattern turns `_` into `\_`, and the LIKE clauses must
+        // declare `ESCAPE '\'` for that to match. Without it, any snake_case name (the
+        // dominant style in Rust/Go/Python) was unreachable by exact name via
+        // find_symbols_filtered — silently returning zero rows for query find/explain/
+        // source/callers/deps/impact.
+        let db = Database::open_in_memory().unwrap();
+
+        // symbols.file_path is a FK into files.path, so register the file first.
+        db.upsert_file(
+            &FileRecord {
+                path: "src/commands/sql.rs".to_string(),
+                content_hash: "abc123".to_string(),
+                size_bytes: 100,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+
+        for (id, name) in &[
+            ("a::run_sql", "run_sql"),
+            ("b::run_sql_duckdb", "run_sql_duckdb"),
+            ("c::runsql", "runsql"),
+        ] {
+            let symbol = Symbol {
+                id: id.to_string(),
+                file_path: "src/commands/sql.rs".to_string(),
+                name: name.to_string(),
+                qualified_name: None,
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                signature: None,
+                brief: None,
+                docstring: None,
+                line_start: 1,
+                line_end: 5,
+                col_start: 0,
+                col_end: 1,
+                parent_id: None,
+                source: None,
+            };
+            db.insert_symbol(&symbol).unwrap();
+        }
+
+        // Exact snake_case name must be found (this returned zero rows before the fix).
+        let exact = db.find_symbols_filtered("run_sql", 10, None, None).unwrap();
+        assert!(
+            exact.iter().any(|s| s.name == "run_sql"),
+            "exact underscore name 'run_sql' must be found"
+        );
+
+        // The underscore must be treated literally, not as the LIKE single-char wildcard:
+        // searching "run_sql" must NOT match "runsql".
+        assert!(
+            !exact.iter().any(|s| s.name == "runsql"),
+            "'_' must be literal, not a wildcard matching 'runsql'"
+        );
+
+        // Exact match ranks ahead of the longer prefix match.
+        assert_eq!(
+            exact.first().map(|s| s.name.as_str()),
+            Some("run_sql"),
+            "exact match should sort before 'run_sql_duckdb'"
+        );
+
+        // Substring search across the underscore still works.
+        let prefix = db.find_symbols_filtered("run_sql", 10, None, None).unwrap();
+        assert!(
+            prefix.iter().any(|s| s.name == "run_sql_duckdb"),
+            "substring search should still surface 'run_sql_duckdb'"
+        );
     }
 
     #[test]
