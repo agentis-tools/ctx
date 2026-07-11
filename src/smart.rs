@@ -15,7 +15,7 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::analytics::{Analytics, CallGraphNode, ImpactNode};
@@ -23,6 +23,7 @@ use crate::db::Database;
 use crate::embeddings::{semantic_search, Embedding, EmbeddingProvider, SearchResult};
 use crate::error::{CtxError, Result};
 use crate::tokens::{count_file_tokens, select_by_token_budget, Encoding, HasTokenCount};
+use crate::utils::lexical_tokens;
 
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
@@ -126,6 +127,10 @@ pub struct FileSelection {
     pub reasons: Vec<SelectionReason>,
     /// Token count for this file
     pub token_count: usize,
+    /// Number of distinct task tokens that appear in this file's path or in the
+    /// names of the symbols that selected it (see [`FileSelection::compute_lexical_score`]).
+    /// A high-precision relevance signal layered on top of the semantic/graph tiers.
+    pub lexical_score: f32,
 }
 
 impl HasTokenCount for FileSelection {
@@ -143,6 +148,7 @@ impl FileSelection {
             relevance_score: score,
             reasons: vec![reason],
             token_count: 0,
+            lexical_score: 0.0,
         }
     }
 
@@ -172,6 +178,25 @@ impl FileSelection {
                 _ => None,
             })
             .reduce(f32::max)
+    }
+
+    /// Count the distinct `task_tokens` that appear in this file's **path**.
+    ///
+    /// This is the lexical relevance signal: when a task word ("openai",
+    /// "solidity", "sql") is literally present in a candidate's path, that is
+    /// strong, high-precision evidence the file is on-topic even if the embedding
+    /// ranked it low. Returns 0.0 when there is no overlap.
+    ///
+    /// Path only — deliberately *not* symbol names. Matching symbol names is
+    /// low-precision: ubiquitous identifiers (notably `ctx`, the tool's own name,
+    /// which appears as a test helper across `tests/*_cli.rs`) would score a hit
+    /// on nearly every file and drown out the genuinely on-topic one.
+    fn compute_lexical_score(&self, task_tokens: &BTreeSet<String>) -> f32 {
+        if task_tokens.is_empty() {
+            return 0.0;
+        }
+        let path_tokens = lexical_tokens(&self.path);
+        task_tokens.intersection(&path_tokens).count() as f32
     }
 }
 
@@ -264,11 +289,21 @@ pub fn smart_context_with_embedding(
         selection.token_count = count_file_token_safe(&selection.path, config.encoding);
     }
 
+    // 4b. Lexical relevance: reward candidates whose path or matched symbol names
+    // contain the task's own tokens. This rescues on-topic files the embedding
+    // ranked low (e.g. `embeddings/openai.rs` for "…openai") without any tunable
+    // float weight — the score is a plain distinct-token-hit count.
+    let task_tokens = lexical_tokens(task);
+    for selection in &mut selections {
+        selection.lexical_score = selection.compute_lexical_score(&task_tokens);
+    }
+
     // 5. Rank files by relevance
     rank_files(&mut selections);
 
-    // 6. Apply token limit
-    let (selected, total_tokens, omitted) = select_by_token_budget(selections, config.max_tokens);
+    // 6. Apply token limit, but never silently drop the single most-relevant file.
+    let (selected, total_tokens, omitted) =
+        select_with_guaranteed_top(selections, config.max_tokens);
 
     Ok(SmartContext {
         task: task.to_string(),
@@ -277,6 +312,36 @@ pub fn smart_context_with_embedding(
         truncated: omitted > 0,
         omitted_count: omitted,
     })
+}
+
+/// Apply the token budget while guaranteeing the top-ranked file is always
+/// included — even when that file alone exceeds the budget.
+///
+/// The greedy first-fit selector would otherwise skip an oversized rank-1 file
+/// (e.g. a 9k-token parser larger than the whole 8k budget) and backfill with
+/// smaller, less-relevant files, so the command returns everything *except* the
+/// file the task is really about. Here the top file is force-included, then the
+/// remainder is first-fit against the leftover budget via the shared
+/// [`select_by_token_budget`].
+fn select_with_guaranteed_top(
+    ranked: Vec<FileSelection>,
+    max_tokens: usize,
+) -> (Vec<FileSelection>, usize, usize) {
+    let mut iter = ranked.into_iter();
+    let Some(top) = iter.next() else {
+        return (Vec::new(), 0, 0);
+    };
+    let top_tokens = top.token_count;
+    let rest: Vec<FileSelection> = iter.collect();
+    // Budget the remainder against whatever is left after the guaranteed top file
+    // (saturating: an oversized top file leaves a zero budget for the rest).
+    let remaining_budget = max_tokens.saturating_sub(top_tokens);
+    let (mut selected_rest, rest_tokens, omitted) = select_by_token_budget(rest, remaining_budget);
+
+    let mut selected = Vec::with_capacity(selected_rest.len() + 1);
+    selected.push(top);
+    selected.append(&mut selected_rest);
+    (selected, top_tokens + rest_tokens, omitted)
 }
 
 /// Add a file to the selection map, merging reasons if already present.
@@ -363,33 +428,49 @@ fn add_file_from_call_graph(
     let _ = caller_name; // Suppress unused warning
 }
 
+/// Ranking key for a file: `(is_low_relevance, lexical_score, tier_score)`.
+///
+/// - **Relevance tier** (`is_low_relevance`): a file is in the top tier if it has
+///   a direct semantic match **or** a lexical hit (a task token in its path/name).
+///   Graph-only files with no lexical hit sort last, so a generic call-graph hub
+///   (flat weight 0.8) never displaces an on-topic file.
+/// - **`lexical_score`**: within a tier, more task-token hits rank first — this is
+///   what surfaces `embeddings/openai.rs` for "…openai" over a higher-scored but
+///   off-topic semantic match.
+/// - **`tier_score`**: the semantic score for semantic matches, else
+///   `relevance_score`; scores are only ever compared within the same scale.
+fn rank_key(f: &FileSelection) -> (bool, f32, f32) {
+    let sem = f.best_semantic_score();
+    let is_low_relevance = sem.is_none() && f.lexical_score == 0.0;
+    let tier_score = sem.unwrap_or(f.relevance_score);
+    (is_low_relevance, f.lexical_score, tier_score)
+}
+
 /// Rank files for selection. The ordering is tiered and fully deterministic:
 ///
-/// 1. Files with a direct semantic match rank above files pulled in only through
-///    call-graph expansion. Without this, a graph neighbour's flat weight (0.8 for
-///    `CalledBy`, 0.7 for `Calls`) outranks the compressed semantic score (~0.4–0.6)
-///    of the very seed that expanded it, so generic hubs displace the on-topic file.
-/// 2. Within the semantic tier, higher semantic score first; within the graph-only
-///    tier, higher `relevance_score` first.
+/// 1. Relevant files (semantic match or lexical hit) rank above files pulled in
+///    only through call-graph expansion.
+/// 2. Within a tier: more lexical hits first, then higher tier score.
 /// 3. Ties break by `path` ascending. Because the input is collected from a
 ///    `HashMap`, this tie-break is what makes the command deterministic across runs
-///    (many files share the same 0.5/0.7/0.8 weight).
+///    (many files share the same 0.5/0.7/0.8 weight and the same lexical score).
 fn rank_files(files: &mut [FileSelection]) {
     files.sort_by(|a, b| {
-        let a_sem = a.best_semantic_score();
-        let b_sem = b.best_semantic_score();
-        // Tier: semantic matches (Some) sort before graph-only (None).
-        // Score compared within a tier only: semantic score for the semantic tier,
-        // relevance_score for the graph-only tier — never across scales.
-        let a_key = (a_sem.is_none(), a_sem.unwrap_or(a.relevance_score));
-        let b_key = (b_sem.is_none(), b_sem.unwrap_or(b.relevance_score));
+        let a_key = rank_key(a);
+        let b_key = rank_key(b);
         a_key
             .0
-            .cmp(&b_key.0)
+            .cmp(&b_key.0) // false (relevant) sorts before true (low-relevance)
             .then_with(|| {
                 b_key
                     .1
-                    .partial_cmp(&a_key.1)
+                    .partial_cmp(&a_key.1) // lexical_score descending
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                b_key
+                    .2
+                    .partial_cmp(&a_key.2) // tier_score descending
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .then_with(|| a.path.cmp(&b.path))
@@ -546,18 +627,21 @@ mod tests {
                 relevance_score: 1.0,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 100,
+                lexical_score: 0.0,
             },
             FileSelection {
                 path: "b.rs".to_string(),
                 relevance_score: 0.8,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 200,
+                lexical_score: 0.0,
             },
             FileSelection {
                 path: "c.rs".to_string(),
                 relevance_score: 0.5,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 150,
+                lexical_score: 0.0,
             },
         ];
 
@@ -593,6 +677,7 @@ mod tests {
                         score: 0.9,
                     }],
                     token_count: 500,
+                    lexical_score: 0.0,
                 },
                 FileSelection {
                     path: "src/lib.rs".to_string(),
@@ -602,6 +687,7 @@ mod tests {
                         depth: 1,
                     }],
                     token_count: 300,
+                    lexical_score: 0.0,
                 },
             ],
             total_tokens: 800,
@@ -662,18 +748,21 @@ mod tests {
                 relevance_score: 0.3,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 100,
+                lexical_score: 0.0,
             },
             FileSelection {
                 path: "high.rs".to_string(),
                 relevance_score: 0.9,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 100,
+                lexical_score: 0.0,
             },
             FileSelection {
                 path: "mid.rs".to_string(),
                 relevance_score: 0.5,
                 reasons: vec![SelectionReason::Explicit],
                 token_count: 100,
+                lexical_score: 0.0,
             },
         ];
 
@@ -699,6 +788,7 @@ mod tests {
                     depth: 1,
                 }],
                 token_count: 100,
+                lexical_score: 0.0,
             },
             FileSelection {
                 path: "on_topic.rs".to_string(),
@@ -708,6 +798,7 @@ mod tests {
                     score: 0.5,
                 }],
                 token_count: 100,
+                lexical_score: 0.0,
             },
         ];
 
@@ -732,6 +823,7 @@ mod tests {
                 score,
             }],
             token_count: 100,
+            lexical_score: 0.0,
         };
         // Two files tie at 0.6; "a.rs" must precede "b.rs" by path.
         let mut files = vec![mk("b.rs", 0.6), mk("c.rs", 0.4), mk("a.rs", 0.6)];
@@ -759,6 +851,7 @@ mod tests {
                         depth: 1,
                     }],
                     token_count: 100,
+                    lexical_score: 0.0,
                 },
                 FileSelection {
                     path: "a_graph.rs".to_string(),
@@ -768,6 +861,7 @@ mod tests {
                         depth: 1,
                     }],
                     token_count: 100,
+                    lexical_score: 0.0,
                 },
                 FileSelection {
                     path: "seed.rs".to_string(),
@@ -777,6 +871,7 @@ mod tests {
                         score: 0.5,
                     }],
                     token_count: 100,
+                    lexical_score: 0.0,
                 },
             ]
         };
@@ -794,6 +889,171 @@ mod tests {
         assert_eq!(order_a, order_b);
         // Semantic seed first, then graph files tie-broken by path.
         assert_eq!(order_a, vec!["seed.rs", "a_graph.rs", "z_graph.rs"]);
+    }
+
+    /// A graph-only file whose path/name matches a task token (lexical_score > 0)
+    /// is promoted into the relevant tier, above a semantic match that shares no
+    /// task token. This is what surfaces `embeddings/openai.rs` for "…openai".
+    #[test]
+    fn test_lexical_promotes_graph_only_file() {
+        let mut files = vec![
+            FileSelection {
+                path: "off_topic_semantic.rs".to_string(),
+                relevance_score: 0.6,
+                reasons: vec![SelectionReason::SemanticMatch {
+                    symbol: "unrelated".to_string(),
+                    score: 0.6,
+                }],
+                token_count: 100,
+                lexical_score: 0.0,
+            },
+            FileSelection {
+                path: "embeddings/openai.rs".to_string(),
+                relevance_score: 0.7, // Calls, graph-only
+                reasons: vec![SelectionReason::Calls {
+                    callee: "embed".to_string(),
+                    depth: 1,
+                }],
+                token_count: 100,
+                lexical_score: 2.0, // "embeddings" + "openai"
+            },
+        ];
+
+        rank_files(&mut files);
+
+        assert_eq!(
+            files[0].path, "embeddings/openai.rs",
+            "a lexical hit must outrank a semantic match with no task-token overlap"
+        );
+    }
+
+    /// Within the relevant tier, more lexical hits rank first; equal lexical scores
+    /// fall back to tier score, then path.
+    #[test]
+    fn test_lexical_orders_within_tier() {
+        let mk = |path: &str, score: f32, lex: f32| FileSelection {
+            path: path.to_string(),
+            relevance_score: score,
+            reasons: vec![SelectionReason::SemanticMatch {
+                symbol: "s".to_string(),
+                score,
+            }],
+            token_count: 100,
+            lexical_score: lex,
+        };
+        // two_hits has the most lexical overlap and must lead despite a lower score.
+        let mut files = vec![
+            mk("high_score_no_lexical.rs", 0.9, 0.0),
+            mk("two_hits.rs", 0.4, 2.0),
+            mk("one_hit.rs", 0.4, 1.0),
+        ];
+
+        rank_files(&mut files);
+
+        assert_eq!(
+            files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            vec!["two_hits.rs", "one_hit.rs", "high_score_no_lexical.rs"]
+        );
+    }
+
+    /// `compute_lexical_score` counts distinct task tokens present in a file's
+    /// path (only), and does not count symbol names — so ubiquitous identifiers
+    /// like `ctx` cannot inflate the score.
+    #[test]
+    fn test_compute_lexical_score() {
+        let sel = FileSelection {
+            path: "src/embeddings/openai.rs".to_string(),
+            relevance_score: 0.5,
+            // Symbol name deliberately contains "ctx"; it must NOT be counted.
+            reasons: vec![SelectionReason::SemanticMatch {
+                symbol: "ctx_embed".to_string(),
+                score: 0.5,
+            }],
+            token_count: 100,
+            lexical_score: 0.0,
+        };
+        // "embeddings" + "openai" from the path overlap the task; "with" is a stopword.
+        let task = lexical_tokens("generate embeddings with openai");
+        assert!((sel.compute_lexical_score(&task) - 2.0).abs() < 0.001);
+        // "ctx" appears in the symbol but not the path, so it does not match.
+        let ctx_task = lexical_tokens("ctx tooling");
+        assert!((sel.compute_lexical_score(&ctx_task)).abs() < 0.001);
+        // No overlap -> 0.
+        let other = lexical_tokens("parse solidity contracts");
+        assert!((sel.compute_lexical_score(&other)).abs() < 0.001);
+    }
+
+    /// The rank-1 file is always included even when it alone exceeds the budget,
+    /// rather than being silently dropped in favour of smaller lower-ranked files.
+    #[test]
+    fn test_budget_includes_oversized_top_file() {
+        let ranked = vec![
+            FileSelection {
+                path: "huge_top.rs".to_string(),
+                relevance_score: 0.9,
+                reasons: vec![SelectionReason::SemanticMatch {
+                    symbol: "s".to_string(),
+                    score: 0.9,
+                }],
+                token_count: 9000, // larger than the whole budget
+                lexical_score: 1.0,
+            },
+            FileSelection {
+                path: "small_next.rs".to_string(),
+                relevance_score: 0.5,
+                reasons: vec![SelectionReason::SemanticMatch {
+                    symbol: "s".to_string(),
+                    score: 0.5,
+                }],
+                token_count: 500,
+                lexical_score: 0.0,
+            },
+        ];
+
+        let (selected, total, omitted) = select_with_guaranteed_top(ranked, 8000);
+
+        assert_eq!(selected.len(), 1, "only the oversized top file is included");
+        assert_eq!(selected[0].path, "huge_top.rs");
+        assert_eq!(total, 9000);
+        assert_eq!(omitted, 1, "the smaller file is omitted for lack of budget");
+    }
+
+    /// When the top file fits, the remainder is first-fit against the leftover
+    /// budget (same behaviour as before for the non-oversized case).
+    #[test]
+    fn test_budget_first_fits_remainder() {
+        let ranked = vec![
+            FileSelection {
+                path: "top.rs".to_string(),
+                relevance_score: 0.9,
+                reasons: vec![SelectionReason::Explicit],
+                token_count: 3000,
+                lexical_score: 0.0,
+            },
+            FileSelection {
+                path: "mid.rs".to_string(),
+                relevance_score: 0.8,
+                reasons: vec![SelectionReason::Explicit],
+                token_count: 4000,
+                lexical_score: 0.0,
+            },
+            FileSelection {
+                path: "tail.rs".to_string(),
+                relevance_score: 0.7,
+                reasons: vec![SelectionReason::Explicit],
+                token_count: 2000, // would overflow the 8000 budget after top+mid
+                lexical_score: 0.0,
+            },
+        ];
+
+        let (selected, total, omitted) = select_with_guaranteed_top(ranked, 8000);
+
+        assert_eq!(
+            selected.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            vec!["top.rs", "mid.rs"]
+        );
+        assert_eq!(total, 7000);
+        assert_eq!(omitted, 1);
     }
 
     #[test]

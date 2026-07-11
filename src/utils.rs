@@ -2,6 +2,59 @@
 //!
 //! This module contains helper functions used across multiple command modules.
 
+use std::collections::BTreeSet;
+
+/// Stopwords excluded from lexical token matching: articles, prepositions, and
+/// generic task verbs that carry no file-identifying signal (so "add a new X"
+/// matches on "X", not on "add"/"new").
+const LEXICAL_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "of", "in", "on", "to", "for", "with", "and", "or", "by", "as", "at", "is",
+    "are", "be", "it", "this", "that", "from", "into", "via", "add", "new", "make", "use", "using",
+];
+
+/// Split a string into normalized lexical tokens for path / identifier matching.
+///
+/// Lowercases, splits on any non-alphanumeric character **and** on camelCase
+/// boundaries (so `parseSolidity` → `parse`, `solidity`), drops tokens of length
+/// ≤ 1, and removes a small stopword set. Used to score how strongly a task
+/// description lexically overlaps a file path or symbol name — a high-precision
+/// relevance signal that embedding similarity can miss.
+pub fn lexical_tokens(s: &str) -> BTreeSet<String> {
+    let mut tokens = BTreeSet::new();
+    let mut current = String::new();
+    // Was the previous char a lowercase letter or digit? Used to detect the
+    // lower→upper camelCase boundary that starts a new word.
+    let mut prev_lower_or_digit = false;
+
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            if ch.is_uppercase() && prev_lower_or_digit && !current.is_empty() {
+                push_token(&mut tokens, &current);
+                current.clear();
+            }
+            current.extend(ch.to_lowercase());
+            prev_lower_or_digit = ch.is_lowercase() || ch.is_numeric();
+        } else {
+            if !current.is_empty() {
+                push_token(&mut tokens, &current);
+                current.clear();
+            }
+            prev_lower_or_digit = false;
+        }
+    }
+    if !current.is_empty() {
+        push_token(&mut tokens, &current);
+    }
+    tokens
+}
+
+/// Insert a normalized token, dropping length-≤-1 tokens and stopwords.
+fn push_token(tokens: &mut BTreeSet<String>, tok: &str) {
+    if tok.len() > 1 && !LEXICAL_STOPWORDS.contains(&tok) {
+        tokens.insert(tok.to_string());
+    }
+}
+
 /// Truncate a string with ellipsis, respecting UTF-8 char boundaries.
 ///
 /// If the string is longer than `max` characters, it will be truncated
@@ -53,6 +106,47 @@ pub fn truncate_path(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn toks(s: &str) -> Vec<String> {
+        lexical_tokens(s).into_iter().collect()
+    }
+
+    #[test]
+    fn test_lexical_tokens_path_splits_on_separators() {
+        // Path splits on '/' and '.'; tokens are lowercased, deduped, sorted.
+        assert_eq!(
+            toks("src/embeddings/openai.rs"),
+            vec!["embeddings", "openai", "rs", "src"]
+        );
+    }
+
+    #[test]
+    fn test_lexical_tokens_underscore_splits_each_word() {
+        // snake_case splits into individual words (no combined "run_sql" token).
+        assert_eq!(toks("run_sql_duckdb"), vec!["duckdb", "run", "sql"]);
+    }
+
+    #[test]
+    fn test_lexical_tokens_camelcase() {
+        // camelCase and PascalCase split into words, lowercased.
+        assert_eq!(toks("parseSolidity"), vec!["parse", "solidity"]);
+        assert_eq!(toks("SmartConfig"), vec!["config", "smart"]);
+        // digits stay attached to their word
+        assert_eq!(toks("v1Symbols"), vec!["symbols", "v1"]);
+    }
+
+    #[test]
+    fn test_lexical_tokens_stopwords_and_length() {
+        // Stopwords and single chars are dropped; result is deduped + sorted.
+        assert_eq!(
+            toks("add a new output format to ctx sql"),
+            vec!["ctx", "format", "output", "sql"]
+        );
+        assert_eq!(
+            toks("generate embeddings with openai"),
+            vec!["embeddings", "generate", "openai"]
+        );
+    }
 
     #[test]
     fn test_truncate_str_ascii() {
