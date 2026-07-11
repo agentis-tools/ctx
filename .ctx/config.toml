@@ -1,0 +1,5 @@
+# ctx project configuration. Resolution: CLI flag > env var > this file > default.
+
+[embedding]
+provider = "ollama"
+model = "qwen3-embedding:8b"
