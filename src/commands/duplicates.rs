@@ -70,9 +70,9 @@ pub fn run_duplicates(
                 "threshold": threshold,
                 "min_tokens": min_tokens,
                 "against": against,
-                // Solidity is parsed with solang-parser (no tree-sitter
-                // grammar), so its functions are never fingerprinted.
-                "skipped_languages": ["solidity"],
+                // Every supported language is fingerprinted (Solidity via the
+                // solang-parser lexer), so nothing is skipped.
+                "skipped_languages": [],
                 "pairs": json_pairs,
             }),
         )?;
@@ -129,9 +129,6 @@ fn print_human(pairs: &[DuplicatePair], threshold: f64, min_tokens: i64, against
     println!("Found {} near-duplicate pair(s).", pairs.len());
     println!(
         "Note: idiomatic boilerplate can look structurally similar; raise --min-tokens to filter short functions."
-    );
-    println!(
-        "Note: Solidity functions are not fingerprinted (no tree-sitter grammar) and are skipped."
     );
 }
 

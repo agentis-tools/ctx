@@ -362,7 +362,8 @@ internal and unstable. Access is read-only and engine-hardened.
     /// token shingles (identifiers -> ID, literals -> LIT, comments dropped),
     /// so renamed variables and changed literals still match. Fingerprints
     /// are built during `ctx index`; reindex before running this command.
-    /// Solidity functions are skipped (no tree-sitter grammar).
+    /// Solidity functions are fingerprinted too (tokenized with the
+    /// solang-parser lexer).
     ///
     /// Breaking change: this replaces the old line-based detector and its
     /// percent/line-count flags.

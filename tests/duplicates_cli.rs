@@ -57,6 +57,45 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
 }
 "#;
 
+/// A Solidity function with > 50 normalized tokens.
+const SOL_A: &str = r#"
+pragma solidity ^0.8.0;
+
+contract Ledger {
+    function processOrders(uint256[] memory items) public pure returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 0; i < items.length; i++) {
+            if (items[i] > 10) {
+                total += items[i] * 2;
+            } else {
+                total += items[i] + 1;
+            }
+        }
+        return total;
+    }
+}
+"#;
+
+/// A structural copy of `SOL_A` with renamed identifiers and different
+/// number literals.
+const SOL_B: &str = r#"
+pragma solidity ^0.8.0;
+
+contract Register {
+    function sumInvoices(uint256[] memory entries) public pure returns (uint256) {
+        uint256 acc = 0;
+        for (uint256 j = 0; j < entries.length; j++) {
+            if (entries[j] > 99) {
+                acc += entries[j] * 7;
+            } else {
+                acc += entries[j] + 3;
+            }
+        }
+        return acc;
+    }
+}
+"#;
+
 fn ctx(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ctx"))
         .args(args)
@@ -127,10 +166,7 @@ fn test_duplicates_json_output_and_exit_codes() {
     assert_eq!(doc["command"], "duplicates");
     assert_eq!(doc["data"]["threshold"], 0.85);
     assert_eq!(doc["data"]["min_tokens"], 50);
-    assert_eq!(
-        doc["data"]["skipped_languages"],
-        serde_json::json!(["solidity"])
-    );
+    assert_eq!(doc["data"]["skipped_languages"], serde_json::json!([]));
 
     let pairs = doc["data"]["pairs"].as_array().unwrap();
     assert_eq!(pairs.len(), 1, "pairs: {}", doc["data"]["pairs"]);
@@ -156,6 +192,38 @@ fn test_duplicates_json_output_and_exit_codes() {
     assert!(ctx(root, &["index"]).status.success());
     let out = ctx(root, &["duplicates", "--fail-on-found"]);
     assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn test_duplicates_detects_solidity_near_duplicates() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write(root, "contracts/Ledger.sol", SOL_A);
+    write(root, "contracts/Register.sol", SOL_B);
+    assert!(ctx(root, &["index"]).status.success());
+
+    let out = ctx(root, &["duplicates", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "informational run exits 0");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("stdout is a single JSON document");
+
+    // Solidity is fingerprinted now, so nothing is skipped.
+    assert_eq!(doc["data"]["skipped_languages"], serde_json::json!([]));
+
+    // The two structurally identical .sol functions are detected as a pair.
+    let pairs = doc["data"]["pairs"].as_array().unwrap();
+    let found = pairs.iter().any(|p| {
+        let names = [
+            p["a"]["name"].as_str().unwrap_or(""),
+            p["b"]["name"].as_str().unwrap_or(""),
+        ];
+        names.contains(&"processOrders") && names.contains(&"sumInvoices")
+    });
+    assert!(
+        found,
+        "expected the two .sol functions to pair: {}",
+        doc["data"]["pairs"]
+    );
 }
 
 #[test]

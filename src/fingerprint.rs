@@ -18,8 +18,9 @@
 //!    Jaccard similarity over re-derived shingle sets.
 //!
 //! Notes and limitations:
-//! - Solidity is parsed with solang-parser (no tree-sitter grammar), so
-//!   Solidity functions are not fingerprinted and never appear in results.
+//! - Solidity has no tree-sitter grammar in this build; it is tokenized with
+//!   the solang-parser lexer instead (see `tokenize`), so Solidity functions
+//!   are fingerprinted just like the tree-sitter languages.
 //! - Nested functions share tokens with their enclosing function: both are
 //!   fingerprinted over their own line ranges, and the parent's range
 //!   includes the child's tokens.
@@ -101,7 +102,8 @@ pub struct Tok {
 }
 
 /// Map a [`Language`] to its tree-sitter grammar, or `None` for languages
-/// without one (Solidity is parsed with solang-parser and is skipped).
+/// without one. Solidity has no grammar here and returns `None`; it is
+/// tokenized with the solang-parser lexer in [`tokenize`] instead.
 fn ts_language(lang: Language) -> Option<tree_sitter::Language> {
     match lang {
         Language::Rust => Some(tree_sitter_rust::language()),
@@ -151,10 +153,15 @@ fn normalize_leaf(kind: &str, text: &str) -> String {
 
 /// Tokenize a whole source file into a normalized token stream.
 ///
-/// Returns `None` for languages without a tree-sitter grammar (Solidity,
-/// YAML, unknown) or when parsing fails. Tokens are the leaf nodes of the
-/// AST in document order; comments (and their subtrees) are dropped.
+/// Solidity is lexed with the solang-parser lexer; every other supported
+/// language is parsed with tree-sitter and reduced to its leaf nodes in
+/// document order. Comments are dropped in both paths. Returns `None` for
+/// languages without either backend (YAML, unknown) or when parsing fails.
 pub fn tokenize(lang: Language, source: &str) -> Option<Vec<Tok>> {
+    if lang == Language::Solidity {
+        return Some(tokenize_solidity(source));
+    }
+
     let ts_lang = ts_language(lang)?;
 
     PARSERS.with(|cell| {
@@ -200,6 +207,62 @@ pub fn tokenize(lang: Language, source: &str) -> Option<Vec<Tok>> {
 
         Some(tokens)
     })
+}
+
+/// Tokenize Solidity source with the solang-parser lexer.
+///
+/// The lexer yields `(start, token, end)` spans with comments already
+/// excluded, so normalization mirrors [`normalize_leaf`]: identifiers become
+/// `ID`; string/hex/address/number literals become `LIT`; keywords and
+/// punctuation are kept as their verbatim lexeme (via the token's `Display`).
+/// Each token's 1-indexed line is derived from its start byte offset, matching
+/// the line numbers the solang parser records for symbols.
+fn tokenize_solidity(source: &str) -> Vec<Tok> {
+    use solang_parser::lexer::{Lexer, Token};
+
+    let line_starts = line_start_offsets(source);
+
+    // The lexer collects comments and lexical errors out-of-band; we only
+    // consume the token stream, so both sinks are discarded.
+    let mut comments = Vec::new();
+    let mut errors = Vec::new();
+    let lexer = Lexer::new(source, 0, &mut comments, &mut errors);
+
+    lexer
+        .map(|(start, token, _end)| {
+            let text = match token {
+                Token::Identifier(_) => "ID".to_string(),
+                Token::StringLiteral(..)
+                | Token::AddressLiteral(_)
+                | Token::HexLiteral(_)
+                | Token::Number(..)
+                | Token::RationalNumber(..)
+                | Token::HexNumber(_) => "LIT".to_string(),
+                other => other.to_string(),
+            };
+            Tok {
+                text,
+                line: offset_to_line(&line_starts, start),
+            }
+        })
+        .collect()
+}
+
+/// Byte offset of the first character of each source line (line 1 at index 0).
+fn line_start_offsets(source: &str) -> Vec<usize> {
+    let mut starts = vec![0usize];
+    for (i, b) in source.bytes().enumerate() {
+        if b == b'\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts
+}
+
+/// Map a byte offset to its 1-indexed source line via the precomputed
+/// line-start table (the count of line starts at or before the offset).
+fn offset_to_line(line_starts: &[usize], offset: usize) -> u32 {
+    line_starts.partition_point(|&s| s <= offset) as u32
 }
 
 /// Build the set of k-shingle hashes for a token stream.
@@ -306,8 +369,8 @@ pub fn band_keys(sig: &[u64; NUM_PERMS]) -> [u64; LSH_BANDS] {
 /// `symbols` are the parser-produced symbols (pre-id-rewrite); `id_map`
 /// translates their ids to the stored `path::[parent::]name@line` form.
 /// Symbols with fewer than [`SHINGLE_K`] tokens (no shingles) get no
-/// fingerprint. Returns an empty vec for languages without a tree-sitter
-/// grammar (e.g. Solidity).
+/// fingerprint. Returns an empty vec for languages [`tokenize`] cannot handle
+/// (e.g. YAML).
 pub fn file_fingerprints(
     lang: Language,
     source: &str,
@@ -546,9 +609,29 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_solidity_normalization() {
+        let src = "contract C {\n    function add(uint256 first) public pure returns (uint256) {\n        // a helpful remark\n        return first + 42;\n    }\n}\n";
+        let toks = texts(Language::Solidity, src);
+
+        // Identifiers -> ID, numeric literals -> LIT, keywords/punctuation kept.
+        assert!(toks.contains(&"ID".to_string()));
+        assert!(toks.contains(&"LIT".to_string()));
+        assert!(toks.contains(&"function".to_string()));
+        assert!(toks.contains(&"+".to_string()));
+        // Raw identifier/literal text is gone.
+        assert!(!toks.contains(&"first".to_string()));
+        assert!(!toks.contains(&"42".to_string()));
+        // Comments are dropped entirely (the solang lexer excludes them).
+        assert!(!toks.iter().any(|t| t.contains("remark")));
+
+        // Renamed identifiers + changed literals produce the same stream.
+        let renamed = "contract C {\n    function add(uint256 second) public pure returns (uint256) {\n        return second + 7;\n    }\n}\n";
+        assert_eq!(toks, texts(Language::Solidity, renamed));
+    }
+
+    #[test]
     fn test_tokenize_unsupported_languages() {
-        // Solidity is parsed with solang-parser, not tree-sitter: skipped.
-        assert!(tokenize(Language::Solidity, "contract C {}").is_none());
+        // Languages with neither a tree-sitter grammar nor a lexer path.
         assert!(tokenize(Language::Yaml, "a: 1").is_none());
         assert!(tokenize(Language::Unknown, "whatever").is_none());
     }

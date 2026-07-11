@@ -1046,7 +1046,7 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
     }
 
     #[test]
-    fn test_solidity_files_produce_no_fingerprints() {
+    fn test_solidity_files_produce_fingerprints() {
         let temp = TempDir::new().unwrap();
         fs::write(
             temp.path().join("Token.sol"),
@@ -1058,8 +1058,8 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
         let result = indexer.index().unwrap();
         assert_eq!(result.files_indexed, 1);
 
-        // Solidity has no tree-sitter grammar: indexed, but zero
-        // fingerprint rows and no error.
-        assert!(indexer.database().get_fingerprints(0).unwrap().is_empty());
+        // Solidity is tokenized with the solang-parser lexer, so its
+        // functions are fingerprinted like any other language.
+        assert!(!indexer.database().get_fingerprints(0).unwrap().is_empty());
     }
 }
