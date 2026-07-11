@@ -1062,4 +1062,98 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
         // fingerprint rows and no error.
         assert!(indexer.database().get_fingerprints(0).unwrap().is_empty());
     }
+
+    /// AGE-5: a Solidity qualified call `ChessPureLib.isKingInCheck(...)` must
+    /// resolve to the library's method even when the bare name `isKingInCheck`
+    /// is ambiguous (also defined in another file). Before the fix the resolver
+    /// bailed on the ambiguous bare name and left `target_id` NULL, silently
+    /// zeroing the callee's fan-in/complexity/reachability metrics.
+    #[test]
+    fn test_solidity_qualified_call_resolves_across_ambiguous_bare_name() {
+        let temp = TempDir::new().unwrap();
+
+        // Library whose method we expect the qualified call to resolve to.
+        fs::write(
+            temp.path().join("ChessPureLib.sol"),
+            r#"pragma solidity ^0.8.0;
+library ChessPureLib {
+    function isKingInCheck(uint256 tb, bool forBlack) internal pure returns (bool) {
+        return tb > 0 && forBlack;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        // A second library defining a colliding bare name, so a plain
+        // name lookup for `isKingInCheck` is ambiguous (COUNT > 1).
+        fs::write(
+            temp.path().join("OtherLib.sol"),
+            r#"pragma solidity ^0.8.0;
+library OtherLib {
+    function isKingInCheck(uint256 tb, bool forBlack) internal pure returns (bool) {
+        return tb < 0 || forBlack;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        // Caller making the qualified call `ChessPureLib.isKingInCheck(...)`.
+        fs::write(
+            temp.path().join("Game.sol"),
+            r#"pragma solidity ^0.8.0;
+contract Game {
+    function check(uint256 tb, bool forBlack) public pure returns (bool) {
+        return ChessPureLib.isKingInCheck(tb, forBlack);
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        indexer.index().unwrap();
+
+        let db = indexer.database();
+
+        // The bare name is ambiguous: two library methods share it.
+        let candidates: Vec<_> = db
+            .find_symbols("isKingInCheck", 50)
+            .unwrap()
+            .into_iter()
+            .filter(|s| s.kind == crate::db::SymbolKind::Function)
+            .collect();
+        assert!(
+            candidates.len() >= 2,
+            "expected the bare name to be ambiguous, got {} candidate(s)",
+            candidates.len()
+        );
+
+        // The intended target: ChessPureLib.isKingInCheck.
+        let chess_lib_method = candidates
+            .iter()
+            .find(|s| s.qualified_name.as_deref() == Some("ChessPureLib.isKingInCheck"))
+            .expect("expected a ChessPureLib.isKingInCheck symbol");
+
+        // The edge for the qualified call must resolve to the ChessPureLib method,
+        // not be left NULL and not point at the OtherLib method.
+        let call_edge = db
+            .get_incoming_edges("isKingInCheck")
+            .unwrap()
+            .into_iter()
+            .find(|e| e.kind == crate::db::EdgeKind::Calls)
+            .expect("expected a calls edge for isKingInCheck");
+
+        assert_eq!(
+            call_edge.context.as_deref(),
+            Some("ChessPureLib.isKingInCheck"),
+            "qualifier should be captured on the edge context"
+        );
+        assert_eq!(
+            call_edge.target_id.as_deref(),
+            Some(chess_lib_method.id.as_str()),
+            "qualified call must resolve to ChessPureLib.isKingInCheck, not NULL or the OtherLib symbol"
+        );
+    }
 }

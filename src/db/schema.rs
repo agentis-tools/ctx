@@ -1610,6 +1610,9 @@ impl Database {
     ///
     /// This performs cross-file symbol resolution by matching target_name to symbols
     /// in the database. Resolution priority:
+    /// 0. Qualified match: the edge `context` equals a symbol's `qualified_name`
+    ///    exactly (e.g., "ChessPureLib.isKingInCheck"), disambiguating a bare name
+    ///    shared across files/languages.
     /// 1. Context match: the call context contains the type name (e.g., "TypeScriptParser::new()")
     /// 2. Unique: only one symbol with that name exists in the codebase
     /// 3. Same file unique: only one symbol with that name exists in the same file
@@ -1619,6 +1622,32 @@ impl Database {
     ///
     /// Returns the number of edges that were resolved.
     pub fn resolve_edge_targets(&self) -> Result<usize> {
+        // Step 0: Resolve edges whose `context` holds a fully qualified name by an
+        // EXACT match on a symbol's `qualified_name` (e.g. Solidity qualified calls
+        // like `ChessPureLib.isKingInCheck`). This must run BEFORE the substring
+        // LIKE match in Step 1: exact equality disambiguates the intended target
+        // even when the bare `target_name` collides across files/languages, and it
+        // sets `target_id` so the later `target_id IS NULL` steps skip the row.
+        let qualified_resolved = self.conn.execute(
+            r#"
+            UPDATE edges
+            SET target_id = (
+                SELECT id FROM symbols
+                WHERE qualified_name = edges.context
+                  AND kind IN ('function', 'method')
+                LIMIT 1
+            )
+            WHERE target_id IS NULL
+              AND context IS NOT NULL
+              AND (
+                SELECT COUNT(*) FROM symbols
+                WHERE qualified_name = edges.context
+                  AND kind IN ('function', 'method')
+              ) = 1
+            "#,
+            [],
+        )?;
+
         // Step 1: Resolve edges where the context contains the qualified name
         // e.g., context "TypeScriptParser::new()" matches symbol with qualified_name "TypeScriptParser::new"
         // Only resolve if exactly one symbol matches to avoid ambiguous resolution
@@ -1715,7 +1744,7 @@ impl Database {
             [],
         )?;
 
-        Ok(context_resolved + unique_resolved + same_file_unique)
+        Ok(qualified_resolved + context_resolved + unique_resolved + same_file_unique)
     }
 
     /// Insert (or replace) a batch of MinHash fingerprints in one transaction.

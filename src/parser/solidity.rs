@@ -960,11 +960,21 @@ fn extract_calls_from_expr(
         Expression::FunctionCall(loc, func_expr, _args) => {
             let (line, _, col, _) = loc_to_lines(loc, source);
 
-            // Get the function name
-            let func_name = match func_expr.as_ref() {
-                Expression::Variable(id) => Some(id.name.clone()),
-                Expression::MemberAccess(_, _, member) => Some(member.name.clone()),
-                _ => None,
+            // Get the function name and, for qualified calls like
+            // `LibraryName.fn(...)`, the fully qualified name so the resolver can
+            // disambiguate a bare name shared across files/languages.
+            let (func_name, context) = match func_expr.as_ref() {
+                Expression::Variable(id) => (Some(id.name.clone()), None),
+                Expression::MemberAccess(_, object, member) => {
+                    // Only capture the qualifier for a simple `Name.member` call;
+                    // chained/complex receivers stay unqualified (context: None).
+                    let context = match object.as_ref() {
+                        Expression::Variable(id) => Some(format!("{}.{}", id.name, member.name)),
+                        _ => None,
+                    };
+                    (Some(member.name.clone()), context)
+                }
+                _ => (None, None),
             };
 
             if let Some(name) = func_name {
@@ -988,7 +998,7 @@ fn extract_calls_from_expr(
                         kind: EdgeKind::Calls,
                         line: Some(line),
                         col: Some(col),
-                        context: None,
+                        context,
                     });
                 }
             }
@@ -1002,7 +1012,19 @@ fn extract_calls_from_expr(
         Expression::FunctionCallBlock(loc, func_expr, _) => {
             // Handle block-style function calls (used with modifiers)
             let (line, _, col, _) = loc_to_lines(loc, source);
-            if let Expression::Variable(id) = func_expr.as_ref() {
+            let (func_name, context) = match func_expr.as_ref() {
+                Expression::Variable(id) => (Some(id.name.clone()), None),
+                Expression::MemberAccess(_, object, member) => {
+                    let context = match object.as_ref() {
+                        Expression::Variable(id) => Some(format!("{}.{}", id.name, member.name)),
+                        _ => None,
+                    };
+                    (Some(member.name.clone()), context)
+                }
+                _ => (None, None),
+            };
+
+            if let Some(name) = func_name {
                 let source_id = func_ranges
                     .iter()
                     .find(|(start, end, _)| line >= *start && line <= *end)
@@ -1011,17 +1033,17 @@ fn extract_calls_from_expr(
                 if let Some(source_id) = source_id {
                     let target_id = symbols
                         .iter()
-                        .find(|s| s.name == id.name && s.kind == SymbolKind::Function)
+                        .find(|s| s.name == name && s.kind == SymbolKind::Function)
                         .map(|s| s.id.clone());
 
                     edges.push(Edge {
                         source_id,
                         target_id,
-                        target_name: id.name.clone(),
+                        target_name: name,
                         kind: EdgeKind::Calls,
                         line: Some(line),
                         col: Some(col),
-                        context: None,
+                        context,
                     });
                 }
             }
