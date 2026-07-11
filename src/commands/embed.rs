@@ -18,7 +18,13 @@ fn local_model_hint(provider: Provider) {
 }
 
 /// Generate embeddings for all symbols.
-pub fn run_embed(force: bool, verbose: bool, batch_size: usize, provider: Provider) -> Result<()> {
+pub fn run_embed(
+    force: bool,
+    verbose: bool,
+    batch_size: usize,
+    provider: Provider,
+    serial: bool,
+) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -72,6 +78,7 @@ pub fn run_embed(force: bool, verbose: bool, batch_size: usize, provider: Provid
         &db,
         provider.as_ref(),
         batch_size,
+        serial,
         Some(&progress_callback),
     )?;
 
@@ -91,7 +98,12 @@ pub fn run_embed(force: bool, verbose: bool, batch_size: usize, provider: Provid
 }
 
 /// Watch for index changes and auto-embed new symbols.
-pub fn run_embed_watch(verbose: bool, batch_size: usize, provider: Provider) -> Result<()> {
+pub fn run_embed_watch(
+    verbose: bool,
+    batch_size: usize,
+    provider: Provider,
+    serial: bool,
+) -> Result<()> {
     use notify::RecursiveMode;
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
     use std::sync::mpsc::channel;
@@ -122,8 +134,13 @@ pub fn run_embed_watch(verbose: bool, batch_size: usize, provider: Provider) -> 
                 "Initial embedding: {} symbols missing embeddings...",
                 total_symbols - existing
             );
-            let embedded =
-                embeddings::embed_missing_symbols(&db, provider.as_ref(), batch_size, None)?;
+            let embedded = embeddings::embed_missing_symbols(
+                &db,
+                provider.as_ref(),
+                batch_size,
+                serial,
+                None,
+            )?;
             println!("Embedded {} symbols", embedded);
         } else {
             println!("All {} symbols already have embeddings", total_symbols);
@@ -177,6 +194,7 @@ pub fn run_embed_watch(verbose: bool, batch_size: usize, provider: Provider) -> 
                                     &db,
                                     provider.as_ref(),
                                     batch_size,
+                                    serial,
                                     None,
                                 ) {
                                     Ok(embedded) => {

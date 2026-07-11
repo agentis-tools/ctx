@@ -30,6 +30,8 @@ pub use local::LocalProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 
+use rayon::prelude::*;
+
 use crate::error::{CtxError, Result};
 
 /// Embedding dimension for different models
@@ -327,11 +329,44 @@ fn semantic_search_slow(
     Ok(scored)
 }
 
+/// Compute embeddings for a batch of texts, splitting the work across rayon
+/// threads. The batch is divided into chunks and each chunk's `embed_batch`
+/// call runs concurrently.
+///
+/// Ordering is preserved: rayon's parallel `collect` keeps the chunks in
+/// source order, and each chunk keeps its own internal order, so flattening
+/// yields a `Vec<Embedding>` that lines up 1:1 with `texts`. Each chunk goes
+/// through the provider's normal `embed_batch`, so the provider's retry/backoff
+/// (e.g. the OpenAI rate-limit handling) is fully preserved.
+fn embed_texts_parallel<P: EmbeddingProvider + ?Sized>(
+    provider: &P,
+    texts: &[&str],
+) -> Result<Vec<Embedding>> {
+    // One chunk per worker thread (at least one), so provider calls run
+    // concurrently without over-splitting small batches.
+    let num_chunks = rayon::current_num_threads().max(1);
+    let chunk_size = texts.len().div_ceil(num_chunks).max(1);
+
+    let per_chunk: Vec<Vec<Embedding>> = texts
+        .par_chunks(chunk_size)
+        .map(|chunk| provider.embed_batch(chunk))
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(per_chunk.into_iter().flatten().collect())
+}
+
 /// Embed all symbols that don't have embeddings yet.
+///
+/// Embedding computation is parallelized across rayon threads by default; pass
+/// `serial = true` for the single-threaded path. Regardless of mode, every
+/// `db.store_embedding` call happens serially on the owning thread (the
+/// `Database` connection is not shared for writes), and embeddings are stored
+/// in symbol order.
 pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
     db: &crate::db::Database,
     provider: &P,
     batch_size: usize,
+    serial: bool,
     progress_callback: Option<&dyn Fn(usize, usize)>,
 ) -> Result<usize> {
     let mut total_embedded = 0;
@@ -349,10 +384,15 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
 
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
 
-        // Generate embeddings
-        let embeddings = provider.embed_batch(&text_refs)?;
+        // Generate embeddings (parallel compute by default, serial on opt-out).
+        // Both paths return embeddings in the same order as `text_refs`.
+        let embeddings = if serial {
+            provider.embed_batch(&text_refs)?
+        } else {
+            embed_texts_parallel(provider, &text_refs)?
+        };
 
-        // Store embeddings
+        // Store embeddings serially on the owning thread, in symbol order.
         for (symbol, embedding) in symbols.iter().zip(embeddings.iter()) {
             db.store_embedding(&symbol.id, provider.name(), "default", &embedding.vector)?;
         }
@@ -394,6 +434,46 @@ mod tests {
         normalize(&mut v);
         assert!((v[0] - 0.6).abs() < 1e-6);
         assert!((v[1] - 0.8).abs() < 1e-6);
+    }
+
+    /// Deterministic provider: embeds each text as a 1-dim vector holding the
+    /// byte length of the text. Lets us assert ordering without any network.
+    struct LenProvider;
+
+    impl EmbeddingProvider for LenProvider {
+        fn name(&self) -> &str {
+            "len"
+        }
+        fn dimension(&self) -> usize {
+            1
+        }
+        fn embed(&self, text: &str) -> Result<Embedding> {
+            Ok(Embedding::new(vec![text.len() as f32]))
+        }
+    }
+
+    #[test]
+    fn test_embed_texts_parallel_preserves_order() {
+        // Distinct lengths so each text has a unique embedding.
+        let texts = ["a", "bb", "ccc", "dddd", "eeeee", "ffffff", "g", "hh"];
+        let refs: Vec<&str> = texts.to_vec();
+
+        let serial = LenProvider.embed_batch(&refs).unwrap();
+        let parallel = embed_texts_parallel(&LenProvider, &refs).unwrap();
+
+        assert_eq!(serial.len(), texts.len());
+        assert_eq!(parallel.len(), texts.len());
+        for (i, text) in texts.iter().enumerate() {
+            let expected = text.len() as f32;
+            assert_eq!(serial[i].vector, vec![expected]);
+            assert_eq!(parallel[i].vector, vec![expected], "order mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn test_embed_texts_parallel_empty() {
+        let parallel = embed_texts_parallel(&LenProvider, &[]).unwrap();
+        assert!(parallel.is_empty());
     }
 
     #[test]

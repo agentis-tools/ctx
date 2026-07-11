@@ -132,9 +132,13 @@ pub enum Command {
         #[arg(long)]
         force: bool,
 
-        /// Use parallel parsing for faster indexing on multi-core systems
-        #[arg(long, short = 'j')]
+        /// (deprecated: parallel indexing is now the default; this flag is a no-op)
+        #[arg(long, short = 'j', hide = true)]
         parallel: bool,
+
+        /// Disable parallel indexing (single-threaded)
+        #[arg(long)]
+        serial: bool,
 
         /// Disable .gitignore pattern matching
         #[arg(long)]
@@ -286,6 +290,10 @@ internal and unstable. Access is read-only and engine-hardened.
         /// Watch for index changes and auto-embed new symbols
         #[arg(long, short)]
         watch: bool,
+
+        /// Disable parallel embedding (single-threaded)
+        #[arg(long)]
+        serial: bool,
     },
 
     /// Semantic search using embeddings (requires embeddings to be generated)

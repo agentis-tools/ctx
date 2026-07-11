@@ -17,8 +17,8 @@ pub struct IndexConfig {
     pub verbose: bool,
     /// Force full reindex
     pub force: bool,
-    /// Use parallel indexing
-    pub parallel: bool,
+    /// Disable parallel indexing (single-threaded). Parallel is the default.
+    pub serial: bool,
     /// Walker configuration
     pub walker: walker::WalkerConfig,
 }
@@ -30,7 +30,7 @@ impl IndexConfig {
         watch: bool,
         verbose: bool,
         force: bool,
-        parallel: bool,
+        serial: bool,
         no_gitignore: bool,
         no_default_ignores: bool,
         ignore_patterns: Vec<String>,
@@ -40,7 +40,7 @@ impl IndexConfig {
             watch,
             verbose,
             force,
-            parallel,
+            serial,
             walker: walker::WalkerConfig {
                 use_gitignore: !no_gitignore,
                 use_default_ignores: !no_default_ignores,
@@ -72,17 +72,17 @@ pub fn run_index(config: IndexConfig) -> Result<()> {
         }
     }
 
-    if config.parallel {
-        eprintln!("Indexing codebase (parallel mode)...");
+    if config.serial {
+        eprintln!("Indexing codebase (serial mode)...");
     } else {
         eprintln!("Indexing codebase...");
     }
 
     let mut indexer = index::Indexer::with_config(&root, config.verbose, config.walker.clone())?;
-    let result = if config.parallel {
-        indexer.index_parallel()?
-    } else {
+    let result = if config.serial {
         indexer.index()?
+    } else {
+        indexer.index_parallel()?
     };
 
     eprintln!(

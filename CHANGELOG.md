@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `ctx index` and `ctx embed` now run in parallel by default; pass `--serial` for single-threaded execution. `ctx embed` parallelizes embedding computation across rayon threads (chunked provider calls, preserving order and the provider's retry/backoff) while storing serially. The `-j`/`--parallel` flag on `ctx index` is now a no-op (kept for backward compatibility)
+
 ## [0.3.2] - 2026-07-11
 
 ### Added

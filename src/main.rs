@@ -89,7 +89,9 @@ fn run(args: Args) -> Result<Outcome> {
             watch,
             verbose,
             force,
-            parallel,
+            // Deprecated no-op: parallel indexing is now the default.
+            parallel: _,
+            serial,
             no_gitignore,
             no_default_ignores,
             ignore_patterns,
@@ -99,7 +101,7 @@ fn run(args: Args) -> Result<Outcome> {
                 watch,
                 verbose,
                 force,
-                parallel,
+                serial,
                 no_gitignore,
                 no_default_ignores,
                 ignore_patterns,
@@ -154,12 +156,13 @@ fn run(args: Args) -> Result<Outcome> {
             provider,
             openai,
             watch,
+            serial,
         }) => {
             let provider = resolve_embed_provider(provider, openai);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, provider)
+                commands::run_embed_watch(verbose, batch_size, provider, serial)
             } else {
-                commands::run_embed(force, verbose, batch_size, provider)
+                commands::run_embed(force, verbose, batch_size, provider, serial)
             }
         }
         Some(Command::Semantic {
