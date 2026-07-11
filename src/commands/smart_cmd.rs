@@ -92,6 +92,18 @@ pub fn run_smart(
         }
     );
 
+    // If the single most-relevant file alone exceeds the budget it is included
+    // anyway (rather than silently dropped); tell the user why little else fits.
+    if let Some(top) = result.selected_files.first() {
+        if top.token_count > max_tokens {
+            eprintln!(
+                "note: {} ({} tokens) exceeds the {}-token budget; included alone \
+                 — raise --max-tokens to include more",
+                top.path, top.token_count, max_tokens
+            );
+        }
+    }
+
     // Convert selected files to FileEntry format for context generation
     let entries: Vec<walker::FileEntry> = result
         .selected_files
