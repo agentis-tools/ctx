@@ -727,6 +727,7 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                 SourceUnitPart::ContractDefinition(def) => {
                     for cpart in &def.parts {
                         if let ContractPart::FunctionDefinition(func) = cpart {
+                            extract_modifier_edges(func, source, &func_ranges, symbols, edges);
                             if let Some(ref body) = func.body {
                                 extract_calls_from_statement(
                                     body,
@@ -742,6 +743,7 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                 }
                 SourceUnitPart::FunctionDefinition(func) => {
                     // Handle free functions (top-level functions outside contracts)
+                    extract_modifier_edges(func, source, &func_ranges, symbols, edges);
                     if let Some(ref body) = func.body {
                         extract_calls_from_statement(
                             body,
@@ -754,6 +756,56 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+/// Emit `calls` edges for each modifier (or base-contract) invocation applied to
+/// a function via `FunctionAttribute::BaseOrModifier`.
+///
+/// This also covers constructor base-contract invocations
+/// (e.g. `constructor() Ownable(msg.sender)`); those are treated the same way -
+/// an edge to the base name is emitted, resolving `target_id` when a matching
+/// symbol exists and leaving it `None` otherwise (mirroring unresolved calls).
+fn extract_modifier_edges(
+    func: &pt::FunctionDefinition,
+    source: &str,
+    func_ranges: &[(u32, u32, String)],
+    symbols: &[Symbol],
+    edges: &mut Vec<Edge>,
+) {
+    for attr in &func.attributes {
+        if let FunctionAttribute::BaseOrModifier(_, base) = attr {
+            // The modifier/base name is the last segment of the identifier path.
+            let name = match base.name.identifiers.last() {
+                Some(id) => id.name.clone(),
+                None => continue,
+            };
+
+            let (line, _, col, _) = loc_to_lines(&base.loc, source);
+
+            // Find which function this attribute is on.
+            let source_id = func_ranges
+                .iter()
+                .find(|(start, end, _)| line >= *start && line <= *end)
+                .map(|(_, _, id)| id.clone());
+
+            if let Some(source_id) = source_id {
+                let target_id = symbols
+                    .iter()
+                    .find(|s| s.name == name && s.kind == SymbolKind::Function)
+                    .map(|s| s.id.clone());
+
+                edges.push(Edge {
+                    source_id,
+                    target_id,
+                    target_name: name,
+                    kind: EdgeKind::Calls,
+                    line: Some(line),
+                    col: Some(col),
+                    context: None,
+                });
             }
         }
     }
@@ -1236,6 +1288,20 @@ contract Ownable {
 
         let modifier = result.symbols.iter().find(|s| s.name == "onlyOwner");
         assert!(modifier.is_some());
+
+        // Applying the `onlyOwner` modifier to `transferOwnership` should produce a
+        // `calls` edge to the modifier, with `target_id` resolved to its symbol.
+        let modifier_edge = result
+            .edges
+            .iter()
+            .find(|e| e.target_name == "onlyOwner")
+            .expect("expected a calls edge to the onlyOwner modifier");
+        assert_eq!(modifier_edge.kind, EdgeKind::Calls);
+        assert_eq!(
+            modifier_edge.target_id.as_deref(),
+            Some(modifier.unwrap().id.as_str()),
+            "modifier edge target_id must resolve to the onlyOwner symbol"
+        );
     }
 
     #[test]
