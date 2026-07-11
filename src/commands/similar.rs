@@ -8,7 +8,7 @@
 use std::env;
 
 use ctx::db::{Database, Symbol, SymbolKind};
-use ctx::embeddings::{self, Embedding, EmbeddingProvider};
+use ctx::embeddings::{self, Embedding, Provider};
 use ctx::error::{CtxError, Result};
 use ctx::exit::Outcome;
 use ctx::index;
@@ -36,7 +36,7 @@ pub fn run_similar(
     query: &str,
     limit: usize,
     keyword: bool,
-    use_openai: bool,
+    provider: Provider,
     json: bool,
 ) -> Result<Outcome> {
     let root = env::current_dir()?;
@@ -46,7 +46,8 @@ pub fn run_similar(
         (keyword_hits(&db, query, limit)?, "keyword")
     } else {
         ensure_embeddings(&db)?;
-        let provider = build_provider(use_openai)?;
+        let provider = embeddings::build_provider(provider)?;
+        embeddings::warn_index_mismatch(&db, provider.as_ref());
         let query_embedding = provider.embed(query)?;
         (semantic_hits(&db, &query_embedding, limit)?, "semantic")
     };
@@ -76,20 +77,6 @@ fn ensure_embeddings(db: &Database) -> Result<()> {
         ));
     }
     Ok(())
-}
-
-/// Build the embedding provider (local fastembed by default, OpenAI on flag).
-fn build_provider(use_openai: bool) -> Result<Box<dyn EmbeddingProvider>> {
-    if use_openai {
-        let p = embeddings::openai::OpenAIProvider::from_env().map_err(|_| {
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        })?;
-        Ok(Box::new(p))
-    } else {
-        let p = embeddings::local::LocalProvider::new()?;
-        Ok(Box::new(p))
-    }
 }
 
 /// Is this symbol kind in scope for `ctx similar`?

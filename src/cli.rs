@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::commands::hotspots::HotspotBy;
+use ctx::embeddings::Provider;
 
 /// CLI output format (with clap integration).
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
@@ -261,7 +262,9 @@ internal and unstable. Access is read-only and engine-hardened.
     /// Generate embeddings for semantic search
     Embed {
         /// Force re-embedding of all symbols
-        #[arg(long, short)]
+        // No `short`: `-f` is the global `--format` flag (other subcommands'
+        // `--force` are also long-only). Use `--force`.
+        #[arg(long)]
         force: bool,
 
         /// Show verbose output
@@ -272,7 +275,11 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long, default_value = "50")]
         batch_size: usize,
 
-        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        /// Embedding backend: local (default), openai, or ollama
+        #[arg(long, value_enum)]
+        provider: Option<Provider>,
+
+        /// Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)
         #[arg(long)]
         openai: bool,
 
@@ -294,7 +301,11 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long, default_value = "table")]
         output: String,
 
-        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        /// Embedding backend: local (default), openai, or ollama
+        #[arg(long, value_enum)]
+        provider: Option<Provider>,
+
+        /// Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)
         #[arg(long)]
         openai: bool,
     },
@@ -321,7 +332,11 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long)]
         keyword: bool,
 
-        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        /// Embedding backend: local (default), openai, or ollama
+        #[arg(long, value_enum)]
+        provider: Option<Provider>,
+
+        /// Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)
         #[arg(long)]
         openai: bool,
     },
@@ -442,7 +457,11 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long)]
         dry_run: bool,
 
-        /// Use OpenAI API instead of local model (requires OPENAI_API_KEY)
+        /// Embedding backend: local (default), openai, or ollama
+        #[arg(long, value_enum)]
+        provider: Option<Provider>,
+
+        /// Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)
         #[arg(long)]
         openai: bool,
 

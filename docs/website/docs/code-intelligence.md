@@ -211,23 +211,33 @@ This finds symbols based on **meaning**, not just keywords. For example, "authen
 ctx search "query" --limit 10       # Limit results
 ctx search "query" --output json    # JSON output
 
-ctx semantic "query" --limit 20     # Semantic search with limit
-ctx semantic "query" --output json  # JSON output
-ctx semantic "query" --openai       # Use OpenAI embeddings
+ctx semantic "query" --limit 20            # Semantic search with limit
+ctx semantic "query" --output json         # JSON output
+ctx semantic "query" --provider ollama     # Use an Ollama embedding model
 ```
 
 ## Generating Embeddings
 
 ### Basic Embedding Generation
 
+Choose a backend with `--provider <local|openai|ollama>` (default `local`):
+
 ```bash
-# Local embeddings (no API key required)
+# Local embeddings (fastembed, no API key; ~90 MB model on first run)
 ctx embed
+
+# Ollama embeddings (fully offline, free; start `ollama serve` + pull a model)
+ollama pull nomic-embed-text
+ctx embed --provider ollama
+OLLAMA_EMBED_MODEL=qwen3-embedding:8b ctx embed --provider ollama
 
 # OpenAI embeddings (requires OPENAI_API_KEY)
 export OPENAI_API_KEY=sk-...
-ctx embed --openai
+ctx embed --provider openai        # `--openai` is a deprecated alias
 ```
+
+Embeddings from different providers/models live in different vector spaces, so
+switching providers requires re-embedding (`--force`); ctx warns on a mismatch.
 
 This generates embeddings for all symbols. Embeddings are stored in SQLite and only need to be generated once (or when new symbols are added).
 

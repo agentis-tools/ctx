@@ -22,17 +22,105 @@
 //! ```
 
 pub mod local;
+pub mod ollama;
 pub mod openai;
 
 // Re-export providers for convenience
 pub use local::LocalProvider;
+pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 
-use crate::error::Result;
+use crate::error::{CtxError, Result};
 
 /// Embedding dimension for different models
 pub const OPENAI_EMBEDDING_DIM: usize = 1536; // text-embedding-3-small
 pub const LOCAL_EMBEDDING_DIM: usize = 384; // all-MiniLM-L6-v2
+
+/// Which embedding backend to use.
+///
+/// `local` (fastembed) is the zero-config default; `openai` needs `OPENAI_API_KEY`;
+/// `ollama` talks to a local/remote Ollama server (`OLLAMA_HOST`,
+/// `OLLAMA_EMBED_MODEL`). Embeddings from different providers/models live in
+/// different vector spaces, so switching provider requires re-embedding.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[value(rename_all = "lowercase")]
+pub enum Provider {
+    /// fastembed, local + offline (all-MiniLM-L6-v2, 384-dim).
+    #[default]
+    Local,
+    /// OpenAI API (text-embedding-3-small, 1536-dim). Requires `OPENAI_API_KEY`.
+    Openai,
+    /// Ollama server (model-dependent dimension). Local + offline.
+    Ollama,
+}
+
+impl Provider {
+    /// Resolve the effective provider from the `--provider` flag and the
+    /// deprecated `--openai` boolean alias. Explicit `--provider` wins; otherwise
+    /// `--openai` maps to [`Provider::Openai`]; otherwise the default.
+    pub fn resolve(provider: Option<Provider>, openai_flag: bool) -> Provider {
+        match provider {
+            Some(p) => p,
+            None if openai_flag => Provider::Openai,
+            None => Provider::default(),
+        }
+    }
+
+    /// Human-readable name matching `EmbeddingProvider::name()`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Provider::Local => "local",
+            Provider::Openai => "openai",
+            Provider::Ollama => "ollama",
+        }
+    }
+}
+
+/// Build the embedding provider for the given backend, with actionable errors
+/// when a backend is unavailable. This is the single place providers are
+/// constructed, so a new backend wires in once.
+pub fn build_provider(provider: Provider) -> Result<Box<dyn EmbeddingProvider>> {
+    match provider {
+        Provider::Local => Ok(Box::new(local::LocalProvider::new()?)),
+        Provider::Openai => {
+            let p = openai::OpenAIProvider::from_env().map_err(|_| {
+                CtxError::embedding(
+                    "OPENAI_API_KEY environment variable not set.\n\
+                     Set it with: export OPENAI_API_KEY=sk-...",
+                )
+            })?;
+            Ok(Box::new(p))
+        }
+        Provider::Ollama => Ok(Box::new(ollama::OllamaProvider::from_env()?)),
+    }
+}
+
+/// Warn (to stderr) when the query provider/dimension differs from what the index
+/// was embedded with. Embeddings from different providers/models occupy different
+/// vector spaces, so mixing them yields meaningless similarities — the fix is to
+/// re-embed. No-op when the index is empty or consistent.
+pub fn warn_index_mismatch(db: &crate::db::Database, provider: &dyn EmbeddingProvider) {
+    let query_dim = provider.dimension();
+    let query_name = provider.name();
+    if let Ok(metadata) = db.get_embedding_metadata() {
+        for (stored_provider, _model, stored_dim, count) in &metadata {
+            let stored_dim = *stored_dim as usize;
+            if stored_dim != query_dim || stored_provider != query_name {
+                eprintln!("Warning: embedding provider/dimension mismatch with the index!");
+                eprintln!(
+                    "  Index: {count} embeddings from '{stored_provider}' (dim {stored_dim})"
+                );
+                eprintln!("  Query: '{query_name}' (dim {query_dim})");
+                eprintln!(
+                    "  Results may be inaccurate. Re-run `ctx embed --provider {query_name}` \
+                     to regenerate embeddings."
+                );
+                eprintln!();
+                break;
+            }
+        }
+    }
+}
 
 /// A vector embedding.
 #[derive(Debug, Clone)]

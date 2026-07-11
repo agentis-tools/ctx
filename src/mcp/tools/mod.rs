@@ -132,7 +132,10 @@ pub struct SmartContextParams {
     /// Number of initial semantic matches (default: 10).
     #[serde(default = "default_top")]
     pub top: Option<usize>,
-    /// Use OpenAI embeddings instead of local (requires OPENAI_API_KEY).
+    /// Embedding backend: "local" (default), "openai", or "ollama".
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Deprecated: use `provider: "openai"`. Kept for backward compatibility.
     #[serde(default)]
     pub use_openai: Option<bool>,
 }

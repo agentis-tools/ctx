@@ -98,7 +98,8 @@ ctx --max-tokens 8000 "src/**/*.rs"
 ```
 
 Semantic search and `ctx smart`/`ctx similar` need embeddings first. Generate them with
-`ctx embed` (a ~90 MB local model by default, or `--openai` with `OPENAI_API_KEY`). See
+`ctx embed` — `--provider local` (default, a ~90 MB fastembed model), `--provider ollama`
+(any local Ollama model, offline and free), or `--provider openai` (needs `OPENAI_API_KEY`). See
 [Index & embed first](https://docs.agentis.tools/docs/guides/indexing).
 
 ### Govern: guardrails on what changes
@@ -253,7 +254,7 @@ token counting, and output formatting.
 - **Tree-sitter** parses every supported language into symbols and relationship edges.
 - **SQLite** (with FTS5 and `sqlite-vec`) is the persistent, single-file store.
 - **DuckDB** runs the recursive graph and analytical queries (default-on; not available on Windows).
-- **fastembed** generates local embeddings offline (all-MiniLM-L6-v2, 384-dim); OpenAI is optional.
+- **fastembed** generates local embeddings offline (all-MiniLM-L6-v2, 384-dim); **Ollama** (any local model) and **OpenAI** are optional via `--provider`.
 
 Indexing respects `.gitignore`, an optional `.contextignore`, and 170+ built-in patterns. See
 [Configuration](https://docs.agentis.tools/docs/configuration) and
@@ -261,7 +262,9 @@ Indexing respects `.gitignore`, an optional `.contextignore`, and 170+ built-in 
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required for the `--openai` flag on `embed` / `semantic` / `smart` / `similar` |
+| `OPENAI_API_KEY` | Required for `--provider openai` on `embed` / `semantic` / `smart` / `similar` |
+| `OLLAMA_HOST` | Ollama server URL for `--provider ollama` (default `http://localhost:11434`) |
+| `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) |
 | `GITHUB_TOKEN` | Optional for `review` (uses `gh` CLI auth by default) |
 | `CTX_NO_UPDATE_CHECK` | Silence the passive "new release available" notice |
 

@@ -139,33 +139,39 @@ fn run(args: Args) -> Result<Outcome> {
             force,
             verbose,
             batch_size,
+            provider,
             openai,
             watch,
         }) => {
+            let provider = ctx::embeddings::Provider::resolve(provider, openai);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, openai)
+                commands::run_embed_watch(verbose, batch_size, provider)
             } else {
-                commands::run_embed(force, verbose, batch_size, openai)
+                commands::run_embed(force, verbose, batch_size, provider)
             }
         }
         Some(Command::Semantic {
             query,
             limit,
             output,
+            provider,
             openai,
         }) => {
+            let provider = ctx::embeddings::Provider::resolve(provider, openai);
             let output = if json { "json".to_string() } else { output };
-            commands::run_semantic(&query, limit, &output, openai)
+            commands::run_semantic(&query, limit, &output, provider)
         }
         Some(Command::Similar {
             query,
             limit,
             keyword,
+            provider,
             openai,
         }) => {
+            let provider = ctx::embeddings::Provider::resolve(provider, openai);
             // `similar` participates in the Outcome convention directly:
             // Clean on success, Err (exit 2) when embeddings are missing.
-            return commands::run_similar(&query, limit, keyword, openai, json);
+            return commands::run_similar(&query, limit, keyword, provider, json);
         }
         Some(Command::Complexity {
             threshold,
@@ -221,13 +227,18 @@ fn run(args: Args) -> Result<Outcome> {
             top,
             explain,
             dry_run,
+            provider,
             openai,
             format,
             show_sizes,
             no_tree,
-        }) => commands::run_smart(
-            &task, max_tokens, depth, top, explain, dry_run, openai, format, show_sizes, no_tree,
-        ),
+        }) => {
+            let provider = ctx::embeddings::Provider::resolve(provider, openai);
+            commands::run_smart(
+                &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
+                no_tree,
+            )
+        }
         Some(Command::Diff {
             revision,
             max_tokens,

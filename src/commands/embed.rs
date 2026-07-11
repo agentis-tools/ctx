@@ -5,30 +5,25 @@
 use std::env;
 use std::time::Instant;
 
-use ctx::embeddings::{self, EmbeddingProvider};
+use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
 use ctx::utils::{truncate_path, truncate_str};
 
+/// Emit the one-time hint before the local model is (down)loaded.
+fn local_model_hint(provider: Provider) {
+    if provider == Provider::Local {
+        eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
+    }
+}
+
 /// Generate embeddings for all symbols.
-pub fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool) -> Result<()> {
+pub fn run_embed(force: bool, verbose: bool, batch_size: usize, provider: Provider) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
-    // Create provider based on flag
-    let provider: Box<dyn EmbeddingProvider> = if use_openai {
-        use embeddings::openai::OpenAIProvider;
-        let p = OpenAIProvider::from_env().map_err(|_| {
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        })?;
-        Box::new(p)
-    } else {
-        use embeddings::local::LocalProvider;
-        eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
-        let p = LocalProvider::new()?;
-        Box::new(p)
-    };
+    local_model_hint(provider);
+    let provider = embeddings::build_provider(provider)?;
 
     if verbose {
         println!(
@@ -95,7 +90,7 @@ pub fn run_embed(force: bool, verbose: bool, batch_size: usize, use_openai: bool
 }
 
 /// Watch for index changes and auto-embed new symbols.
-pub fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Result<()> {
+pub fn run_embed_watch(verbose: bool, batch_size: usize, provider: Provider) -> Result<()> {
     use notify::RecursiveMode;
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
     use std::sync::mpsc::channel;
@@ -105,20 +100,8 @@ pub fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Re
     let ctx_dir = root.join(".ctx");
     let _db_path = ctx_dir.join("codebase.sqlite");
 
-    // Create provider based on flag
-    let provider: Box<dyn EmbeddingProvider> = if use_openai {
-        use embeddings::openai::OpenAIProvider;
-        let p = OpenAIProvider::from_env().map_err(|_| {
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        })?;
-        Box::new(p)
-    } else {
-        use embeddings::local::LocalProvider;
-        eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
-        let p = LocalProvider::new()?;
-        Box::new(p)
-    };
+    local_model_hint(provider);
+    let provider = embeddings::build_provider(provider)?;
 
     println!(
         "Using embedding provider: {} (dim={})",
@@ -231,7 +214,7 @@ pub fn run_embed_watch(verbose: bool, batch_size: usize, use_openai: bool) -> Re
 }
 
 /// Run semantic search using embeddings.
-pub fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -> Result<()> {
+pub fn run_semantic(query: &str, limit: usize, output: &str, provider: Provider) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -245,44 +228,11 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, use_openai: bool) -
         return Ok(());
     }
 
-    // Create provider based on flag
-    let provider: Box<dyn EmbeddingProvider> = if use_openai {
-        use embeddings::openai::OpenAIProvider;
-        let p = OpenAIProvider::from_env().map_err(|_| {
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        })?;
-        Box::new(p)
-    } else {
-        use embeddings::local::LocalProvider;
-        let p = LocalProvider::new()?;
-        Box::new(p)
-    };
+    local_model_hint(provider);
+    let provider = embeddings::build_provider(provider)?;
 
-    // Check for embedding dimension mismatch
-    let query_dim = provider.dimension();
-    if let Ok(metadata) = db.get_embedding_metadata() {
-        for (stored_provider, _model, stored_dim, count) in &metadata {
-            let stored_dim = *stored_dim as usize;
-            if stored_dim != query_dim {
-                eprintln!("Warning: Embedding dimension mismatch detected!");
-                eprintln!(
-                    "  Stored: {} embeddings from '{}' with dimension {}",
-                    count, stored_provider, stored_dim
-                );
-                eprintln!(
-                    "  Query:  Using '{}' with dimension {}",
-                    provider.name(),
-                    query_dim
-                );
-                eprintln!(
-                    "  Results may be inaccurate. Re-run 'ctx embed{}' to regenerate embeddings.",
-                    if use_openai { " --openai" } else { "" }
-                );
-                eprintln!();
-            }
-        }
-    }
+    // Warn if the query provider/dimension differs from the index.
+    embeddings::warn_index_mismatch(&db, provider.as_ref());
 
     // Embed the query
     let query_embedding = provider.embed(query)?;

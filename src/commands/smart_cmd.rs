@@ -7,7 +7,7 @@ use std::env;
 use crate::cli::OutputFormat;
 use crate::commands::format_token_count;
 use ctx::analytics;
-use ctx::embeddings::EmbeddingProvider;
+use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
 use ctx::output;
@@ -24,13 +24,11 @@ pub fn run_smart(
     top: usize,
     explain: bool,
     dry_run: bool,
-    use_openai: bool,
+    provider: Provider,
     format: OutputFormat,
     show_sizes: bool,
     no_tree: bool,
 ) -> Result<()> {
-    use ctx::embeddings;
-
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -41,44 +39,13 @@ pub fn run_smart(
         return Ok(());
     }
 
-    // Create embedding provider
-    let provider: Box<dyn EmbeddingProvider> = if use_openai {
-        use embeddings::openai::OpenAIProvider;
-        let p = OpenAIProvider::from_env().map_err(|_| {
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        })?;
-        Box::new(p)
-    } else {
-        use embeddings::local::LocalProvider;
-        let p = LocalProvider::new()?;
-        Box::new(p)
-    };
-
-    // Check for embedding dimension mismatch
-    let query_dim = provider.dimension();
-    if let Ok(metadata) = db.get_embedding_metadata() {
-        for (stored_provider, _model, stored_dim, count) in &metadata {
-            let stored_dim = *stored_dim as usize;
-            if stored_dim != query_dim {
-                eprintln!("Warning: Embedding dimension mismatch detected!");
-                eprintln!(
-                    "  Stored: {} embeddings from '{}' with dimension {}",
-                    count, stored_provider, stored_dim
-                );
-                eprintln!(
-                    "  Query:  Using '{}' with dimension {}",
-                    provider.name(),
-                    query_dim
-                );
-                eprintln!(
-                    "  Results may be inaccurate. Re-run 'ctx embed{}' to regenerate embeddings.",
-                    if use_openai { " --openai" } else { "" }
-                );
-                eprintln!();
-            }
-        }
+    if provider == Provider::Local {
+        eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
     }
+    let provider = embeddings::build_provider(provider)?;
+
+    // Warn if the query provider/dimension differs from the index.
+    embeddings::warn_index_mismatch(&db, provider.as_ref());
 
     // Open analytics for call graph expansion
     let analytics = analytics::Analytics::open(&root)?;
