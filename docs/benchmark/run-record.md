@@ -32,6 +32,14 @@ against [`run-record.schema.json`](./run-record.schema.json)
 | `metrics.gate_blocks` | integer >= 0 | no | Number of gate evaluations that blocked the agent. |
 | `metrics.gate_block_recovered` | boolean | no | Whether the agent recovered (eventually passed the gate) after at least one block. |
 | `metrics.wall_clock_seconds` | number >= 0 | yes | Total wall-clock duration of the run in seconds. |
+| `metrics.duplication` | object | no | Production near-duplicate accounting for the run's diff. Pair counts consider only production code: a pair is excluded iff both endpoints' files are under `tests/`; `delta` = final − base (signed -- negative rewards dedup). |
+| `metrics.duplication.base_pairs` | integer >= 0 | yes (within `duplication`) | Production near-duplicate pairs at the base commit. |
+| `metrics.duplication.final_pairs` | integer >= 0 | yes (within `duplication`) | Production near-duplicate pairs in the run's final tree. |
+| `metrics.duplication.delta` | integer (signed) | yes (within `duplication`) | `final_pairs - base_pairs`; negative values reward deduplication. |
+| `metrics.duplication.new_pairs` | integer >= 0 | yes (within `duplication`) | Pairs present in the final tree but not at base. |
+| `metrics.duplication.removed_pairs` | integer >= 0 | yes (within `duplication`) | Pairs present at base but not in the final tree. |
+| `metrics.duplication.threshold` | number | yes (within `duplication`) | Jaccard similarity threshold used to count a pair as a near-duplicate. |
+| `metrics.duplication.min_tokens` | integer >= 0 | yes (within `duplication`) | Minimum normalized token count for a symbol to participate in pairing. |
 | `agent` | object | no | Agent-side accounting reported by the agent harness (e.g. `claude -p`); see below. |
 | `agent.session_id` | string | yes (within `agent`) | Agent session identifier, for exact joins against gate logs and transcripts. |
 | `agent.total_cost_usd` | number >= 0 | yes (within `agent`) | Total model cost of the run in USD. |
@@ -51,6 +59,7 @@ against [`run-record.schema.json`](./run-record.schema.json)
 | `generator_version` | string | no | Version of the task generator that produced the task instance. |
 | `scorer_ctx_version` | string | no | Version of the ctx build used by the offline scorer; `ctx_version` remains the harness build. |
 | `retry_attempt` | integer >= 0 | no | Zero-based retry attempt number when a run was retried after an infrastructure error. |
+| `max_budget_usd` | number >= 0 | no | Effective per-run budget ceiling in USD: the per-task override when one is configured, otherwise the study default. |
 | `notes` | string | no | Free-form operator notes. |
 
 The top-level object rejects unknown keys (`additionalProperties: false`).
@@ -72,7 +81,9 @@ The optional `agent`, `acceptance`, and `normalization` objects and the
 `study_id`, `task_seed`, `generator_version`, `scorer_ctx_version`,
 `retry_attempt`, `metrics.gate_blocks`, and `metrics.gate_block_recovered`
 fields arrived additively (per the policy above) for the ctx-bench pilot
-runner; `schema_version` remains `1`.
+runner; `schema_version` remains `1`. The optional `metrics.duplication`
+object and `max_budget_usd` field arrived additively for ctx-bench Phase 3;
+`schema_version` still remains `1`.
 
 ## Example record
 
@@ -108,7 +119,16 @@ runner; `schema_version` remains `1`.
     "gate_evaluations": 12,
     "gate_blocks": 1,
     "gate_block_recovered": true,
-    "wall_clock_seconds": 2323.4
+    "wall_clock_seconds": 2323.4,
+    "duplication": {
+      "base_pairs": 7,
+      "final_pairs": 4,
+      "delta": -3,
+      "new_pairs": 0,
+      "removed_pairs": 3,
+      "threshold": 0.85,
+      "min_tokens": 50
+    }
   },
   "agent": {
     "session_id": "8b2f4a1c-0d3e-4f6a-b7c8-9e0d1f2a3b4c",
@@ -132,6 +152,7 @@ runner; `schema_version` remains `1`.
   "generator_version": "0.1.0",
   "scorer_ctx_version": "0.9.2",
   "retry_attempt": 0,
+  "max_budget_usd": 5.0,
   "notes": "One gate evaluation flagged a transient duplication warning."
 }
 ```

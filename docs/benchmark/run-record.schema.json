@@ -139,6 +139,55 @@
           "type": "number",
           "minimum": 0,
           "description": "Total wall-clock duration of the run in seconds."
+        },
+        "duplication": {
+          "type": "object",
+          "description": "Optional: production near-duplicate accounting for the run's diff. Pair counts consider only production code: a pair is excluded iff both endpoints' files are under tests/; delta = final - base (signed -- negative rewards dedup).",
+          "additionalProperties": false,
+          "required": [
+            "base_pairs",
+            "final_pairs",
+            "delta",
+            "new_pairs",
+            "removed_pairs",
+            "threshold",
+            "min_tokens"
+          ],
+          "properties": {
+            "base_pairs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of production near-duplicate pairs at the base commit."
+            },
+            "final_pairs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of production near-duplicate pairs in the run's final tree."
+            },
+            "delta": {
+              "type": "integer",
+              "description": "Signed change in production near-duplicate pairs: final_pairs - base_pairs. Negative values reward deduplication."
+            },
+            "new_pairs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Production near-duplicate pairs present in the final tree but not at base."
+            },
+            "removed_pairs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Production near-duplicate pairs present at base but not in the final tree."
+            },
+            "threshold": {
+              "type": "number",
+              "description": "Jaccard similarity threshold used to count a pair as a near-duplicate."
+            },
+            "min_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Minimum normalized token count for a symbol to participate in pairing."
+            }
+          }
         }
       }
     },
@@ -237,6 +286,11 @@
       "type": "integer",
       "minimum": 0,
       "description": "Optional zero-based retry attempt number when a run was retried after an infrastructure error."
+    },
+    "max_budget_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Optional effective per-run budget ceiling in USD: the per-task override when one is configured, otherwise the study default."
     },
     "notes": {
       "type": "string",
