@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-11
+
+### Added
+- Ollama embedding provider: `--provider ollama` on `ctx embed`/`semantic`/`smart`/`similar` (and the MCP `smart_context` tool) talks to a local or remote Ollama server via `/api/embed` -- host from `OLLAMA_HOST` (default `http://localhost:11434`, bare `host:port` normalized), model from `OLLAMA_EMBED_MODEL` (default `nomic-embed-text`), optional `OLLAMA_API_KEY` bearer for remote hosts -- with the embedding dimension probed from the model rather than hardcoded. Provider selection is unified behind a single `--provider <local|openai|ollama>` flag and factory (the old `--openai` stays as a deprecated alias), and a provider/dimension mismatch against the existing index is detected and warned. Fully offline and free (#28)
+- Project configuration `.ctx/config.toml`: an optional, committed file that sets per-project defaults under `[embedding]` (`provider`, `model`, `host`); resolution is always CLI flag > environment variable > this file > built-in default, so it never overrides an explicit request. `.ctx/` stays git-ignored while `config.toml` is kept tracked so the default is shared with the team (#28)
+
 ### Changed
-- `ctx index` and `ctx embed` now run in parallel by default; pass `--serial` for single-threaded execution. `ctx embed` parallelizes embedding computation across rayon threads (chunked provider calls, preserving order and the provider's retry/backoff) while storing serially. The `-j`/`--parallel` flag on `ctx index` is now a no-op (kept for backward compatibility)
+- `ctx index` and `ctx embed` now run in parallel by default; pass `--serial` for single-threaded execution. `ctx embed` parallelizes embedding computation across rayon threads (chunked provider calls, preserving order and the provider's retry/backoff) while storing serially. The `-j`/`--parallel` flag on `ctx index` is now a no-op (kept for backward compatibility) (#31)
+- `ctx smart` file ranking: a lexical path boost promotes candidates whose path contains the task's own tokens (surfacing on-topic files the embedding ranked low, e.g. `embeddings/openai.rs` for "...openai"), and the single most-relevant file is always included even when it alone exceeds the `--max-tokens` budget rather than being dropped in favour of smaller, less-relevant files. Selection stays deterministic (#25)
+
+### Fixed
+- Solidity modifier invocations (`function f() onlyOwner`) now emit `calls` edges, so `ctx query callers`/`impact` and `v1.edges` can answer access-control questions; also covers constructor base-contract invocations (#29)
+- Solidity qualified library calls `Lib.fn()` now resolve to the library function instead of remaining unresolved in the call graph (#32)
+- `ctx duplicates` no longer silently skips Solidity: functions are tokenized via the solang-parser lexer (identifiers -> ID, string/hex/address/number literals -> LIT, keywords/punctuation verbatim) and participate in MinHash near-duplicate detection, matching the normalization used for tree-sitter languages (#30)
+- MCP `smart_context` failed to compile under `--all-features` because a `.ctx/config.toml` variable shadowed the `SmartConfig`; renamed so the `mcp`/`--all-features` build works (#25)
 
 ## [0.3.2] - 2026-07-11
 
