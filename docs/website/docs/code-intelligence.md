@@ -145,7 +145,7 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files (can be repeated)
-  -j, --parallel                 Use parallel parsing for faster indexing
+      --serial                   Disable parallel indexing (parallel is the default)
 ```
 
 ## Searching
@@ -246,17 +246,22 @@ This generates embeddings for all symbols. Embeddings are stored in SQLite and o
 | Provider | Model | Dimensions | Requirements |
 |----------|-------|------------|--------------|
 | Local (default) | all-MiniLM-L6-v2 | 384 | ~90MB download on first run |
-| OpenAI | text-embedding-3-small | 1536 | OPENAI_API_KEY env var |
+| OpenAI | text-embedding-3-small | 1536 | `OPENAI_API_KEY` env var |
+| Ollama | `nomic-embed-text` (default) | probed from model | local/remote Ollama server (`OLLAMA_HOST`, default `http://localhost:11434`) |
+
+Select with `--provider <local|openai|ollama>`; see [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults.
 
 ### Embedding Options
 
 ```bash
-ctx embed                   # Local model (default)
-ctx embed --openai          # Use OpenAI API
-ctx embed --verbose         # Show progress
-ctx embed --force           # Re-embed all symbols
-ctx embed --batch-size 100  # Process in batches of 100
-ctx embed --watch           # Watch for index changes and auto-embed
+ctx embed                        # Local model (default)
+ctx embed --provider openai      # Use OpenAI API (`--openai` is a deprecated alias)
+ctx embed --provider ollama      # Use a local/remote Ollama server
+ctx embed --serial               # Compute single-threaded (parallel is the default)
+ctx embed --verbose              # Show progress
+ctx embed --force                # Re-embed all symbols
+ctx embed --batch-size 100       # Process in batches of 100
+ctx embed --watch                # Watch for index changes and auto-embed
 ```
 
 ### Watch Mode for Embeddings
@@ -578,13 +583,13 @@ Total: 94 functions analyzed
 ### Duplicate Detection
 
 Find structurally similar functions using MinHash over normalized token
-shingles. During `ctx index`, every function/method is tokenized with
-tree-sitter and normalized (identifiers -> `ID`, string/number literals ->
-`LIT`, comments dropped), then fingerprinted with a 128-permutation MinHash
-signature. At query time, LSH banding proposes candidate pairs, which are
-verified with the exact Jaccard similarity -- so renamed variables and
-changed literals do not hide duplicates. Solidity functions are skipped
-(no tree-sitter grammar).
+shingles. During `ctx index`, every function/method is tokenized and
+normalized (identifiers -> `ID`, string/number literals -> `LIT`, comments
+dropped), then fingerprinted with a 128-permutation MinHash signature. At
+query time, LSH banding proposes candidate pairs, which are verified with the
+exact Jaccard similarity -- so renamed variables and changed literals do not
+hide duplicates. All indexed languages participate, including Solidity
+(tokenized via the solang-parser lexer).
 
 ```bash
 # Default: Jaccard >= 0.85 over 5-token shingles, functions >= 50 tokens
@@ -723,7 +728,7 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files
-  -j, --parallel                 Use parallel parsing for faster indexing
+      --serial                   Disable parallel indexing (parallel is the default)
 ```
 
 ### Query
@@ -744,12 +749,12 @@ ctx search <QUERY> [--limit N] [--output FORMAT]
 
 ### Semantic Search
 ```
-ctx semantic <QUERY> [--limit N] [--output FORMAT] [--openai]
+ctx semantic <QUERY> [--limit N] [--output FORMAT] [--provider <local|openai|ollama>]
 ```
 
 ### Embeddings
 ```
-ctx embed [--force] [--verbose] [--batch-size N] [--openai] [--watch]
+ctx embed [--force] [--verbose] [--batch-size N] [--serial] [--provider <local|openai|ollama>] [--watch]
 ```
 
 ### Code Analysis

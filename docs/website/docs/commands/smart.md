@@ -38,7 +38,7 @@ Before using `ctx smart`, you must:
 | `--top <N>` | Top semantic matches to consider | 10 |
 | `--explain` | Show why each file was selected | false |
 | `--dry-run` | Show selection without file contents | false |
-| `--openai` | Use OpenAI embeddings instead of the local model | false |
+| `--provider <local\|openai\|ollama>` | Embedding backend for the query (must match how the index was embedded); `--openai` is a deprecated alias for `--provider openai` | `local` |
 | `-f, --format <FORMAT>` | Output format (xml, markdown, md, plain, json) | xml |
 | `--show-sizes` | Show file sizes in the project tree | false |
 | `--no-tree` | Disable the project tree in output | false |

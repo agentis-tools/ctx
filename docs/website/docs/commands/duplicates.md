@@ -20,6 +20,8 @@ The `duplicates` command compares MinHash fingerprints (built during `ctx index`
 
 Tokens are normalized before comparison - identifiers become `ID`, string and number literals become `LIT`, comments are dropped - so **renamed variables and changed literals still match**. Candidate pairs are found with LSH banding over 128-permutation MinHash signatures, then verified with the exact Jaccard similarity.
 
+All indexed languages participate, **including Solidity** (tokenized via the solang-parser lexer — identifiers → `ID`; string, hex, address, and number literals → `LIT`; keywords and punctuation verbatim — matching the normalization used for the tree-sitter languages).
+
 > **Breaking change:** this replaces the old line-based detector. `--threshold` is a 0.0-1.0 Jaccard similarity over normalized 5-token shingles, **not** a percentage of matching lines; the old `--similarity <PERCENT>` / `--min-lines <N>` flags are gone. Existing indexes lack fingerprints: rebuild once with `ctx index --force` after upgrading.
 
 ## Prerequisites
@@ -96,7 +98,7 @@ ctx duplicates --json
     "threshold": 0.85,
     "min_tokens": 50,
     "against": null,
-    "skipped_languages": ["solidity"],
+    "skipped_languages": [],
     "pairs": [
       {
         "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
@@ -112,7 +114,6 @@ ctx duplicates --json
 
 ## Caveats
 
-- **Solidity functions are skipped** - they are parsed with solang-parser (no tree-sitter grammar) and never fingerprinted.
 - **Idiomatic boilerplate** (builders, trait impls, small CRUD handlers) can legitimately look structurally similar; raise `--min-tokens` to filter short functions.
 - Nested functions share tokens with their enclosing function, so both can appear in results.
 - Fingerprints are built at index time: reindex before running this command after code changes.

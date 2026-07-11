@@ -421,6 +421,10 @@ contract Token {
 - `Transfer` (event)
 - `InsufficientBalance` (error)
 
+**Extracted edges:**
+- `Token.transfer` -> `Token.onlyPositive` (calls) — **modifier applications emit `calls` edges**, so `ctx query callers`/`impact` and `v1.edges` answer access-control questions; constructor base-contract invocations are covered too.
+- Qualified library calls (`Lib.fn()`) resolve to the library function instead of remaining unresolved in the call graph.
+
 ### NatSpec Extraction
 
 NatSpec comments (`///` and `/** */`) are extracted:

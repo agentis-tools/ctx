@@ -342,7 +342,7 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
   "threshold": 0.85,
   "min_tokens": 50,
   "against": null,
-  "skipped_languages": ["solidity"],
+  "skipped_languages": [],
   "pairs": [
     {
       "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
@@ -355,7 +355,7 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 }
 ```
 
-`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
+`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted; all currently supported languages (including Solidity) are fingerprinted, so it is normally empty. With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
 
 ### `score`
 

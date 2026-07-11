@@ -172,7 +172,7 @@ jq -r 'select(.outcome == "fail") | [.ts, .failed_conditions[]] | @tsv' .ctx/gat
 
 - **Fan-in approximation:** the baseline side is parsed in isolation, so cross-file callers are unknowable there. Fan-in is therefore counted as *same-file* callers on **both** sides, keeping the delta comparable. This is surfaced as a note in every run.
 - Symbols are matched across sides by `(file, parent, name)` - never by symbol id, since ids embed line numbers that shift. A renamed function counts as one removal plus one addition.
-- `new_duplication` inherits the [`ctx duplicates`](./duplicates.md) caveats: Solidity functions are not fingerprinted, and idiomatic boilerplate can look structurally similar.
+- `new_duplication` inherits the [`ctx duplicates`](./duplicates.md) caveats: idiomatic boilerplate can look structurally similar.
 - Changed files that are excluded from the index (ignore patterns) are not scored.
 
 ## See Also

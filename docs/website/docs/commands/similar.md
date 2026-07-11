@@ -26,7 +26,7 @@ By default the search is semantic (embedding-based, requires `ctx embed`); `--ke
 |--------|-------------|---------|
 | `--limit <N>` | Maximum number of results | 10 |
 | `--keyword` | Use keyword (FTS5) search instead of embeddings | false |
-| `--openai` | Use OpenAI embeddings instead of the local model (requires `OPENAI_API_KEY`) | false |
+| `--provider <local\|openai\|ollama>` | Embedding backend for the query (must match how the index was embedded); `--openai` is a deprecated alias for `--provider openai` | `local` |
 | `--json` | Machine-readable output (global flag) | false |
 
 ## Exit Codes
@@ -46,7 +46,7 @@ ctx similar "retry an operation with exponential backoff"
 ctx similar "parse config file" --keyword
 
 # More candidates, OpenAI embeddings
-ctx similar "validate user input" --limit 20 --openai
+ctx similar "validate user input" --limit 20 --provider openai
 
 # Machine-readable (standard envelope: ctx_version, command, generated_at, data)
 ctx similar "token counting" --json
@@ -54,7 +54,7 @@ ctx similar "token counting" --json
 
 ## Caveats
 
-- Semantic mode requires embeddings: run `ctx embed` (local model) or `ctx embed --openai` first; without them, use `--keyword`.
+- Semantic mode requires embeddings: run `ctx embed` (local model, or `--provider openai`/`--provider ollama`) first; the query provider must match how the index was embedded. Without embeddings, use `--keyword`.
 - Results rank by meaning, not correctness - always read the candidate before reusing it.
 
 ## See Also

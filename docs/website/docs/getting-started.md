@@ -186,12 +186,13 @@ Codebase statistics:
   Edges:     2664
 ```
 
-The indexer accepts include patterns (`-p/--pattern`), ignore patterns
-(`-i/--ignore`), and a flag to enable parallel parsing (`-j/--parallel`):
+The indexer parses in parallel across CPU cores by default; pass `--serial` for
+single-threaded parsing. It also accepts include patterns (`-p/--pattern`) and
+ignore patterns (`-i/--ignore`):
 
 ```bash
-# Only index TypeScript sources, with parallel parsing
-ctx index -p "src/**/*.ts" --parallel
+# Only index TypeScript sources
+ctx index -p "src/**/*.ts"
 ```
 
 ### Search Your Code

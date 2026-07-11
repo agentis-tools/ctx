@@ -22,18 +22,23 @@ This parses your code with tree-sitter and writes a single SQLite file at `.ctx/
 every symbol, call/import/inheritance edge, and complexity metric. Re-running is **incremental**: it
 only re-parses files that changed.
 
+Parsing runs **in parallel across CPU cores by default**. Pass `--serial` for single-threaded
+execution.
+
 | Flag | What it does |
 |------|--------------|
 | `-w`, `--watch` | Keep running and **reindex automatically** as files change |
-| `-j`, `--parallel` | Parse in parallel across CPU cores (faster on large repos) |
+| `--serial` | Parse single-threaded (parallel is the default) |
 | `--force` | Full rebuild — clears the database and re-parses everything |
 | `-p`, `--pattern <GLOB>` | Only index matching files (repeatable) |
 | `-i`, `--ignore <GLOB>` | Extra ignore patterns (repeatable) |
 | `-v`, `--verbose` | Print each file as it's indexed |
 
+The `-j`/`--parallel` flag is retained as a no-op for backward compatibility.
+
 ```bash
-ctx index -j                       # parallel parse
 ctx index --force                  # rebuild from scratch after big changes
+ctx index --serial                 # force single-threaded parse
 ctx index -p "src/**/*.rs"         # index only Rust sources
 ```
 
@@ -45,14 +50,17 @@ ctx embed
 
 `semantic`, `smart`, and `similar` rank code by *meaning*, which needs vector embeddings. The first
 run **downloads a local model (~90 MB)** and embeds every indexed symbol; later runs only embed
-what's new. It runs fully locally — no API key required.
+what's new. It runs fully locally — no API key required. Embedding computation runs **in parallel by
+default** (chunked across rayon threads, preserving order); pass `--serial` for single-threaded.
 
 | Flag | What it does |
 |------|--------------|
 | `-w`, `--watch` | Auto-embed new symbols as the index changes |
 | `--force` | Re-embed every symbol from scratch |
+| `--serial` | Compute embeddings single-threaded (parallel is the default) |
 | `--batch-size <N>` | Symbols per batch (default 50) |
-| `--openai` | Use the OpenAI API instead of the local model (needs `OPENAI_API_KEY`) |
+| `--provider <local\|openai\|ollama>` | Embedding backend (default `local`); see [Configuration](../configuration.md#embedding-providers) |
+| `--openai` | Deprecated alias for `--provider openai` (needs `OPENAI_API_KEY`) |
 
 ## Run them as background watchers
 
