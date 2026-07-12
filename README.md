@@ -28,14 +28,41 @@ leaves your machine.
 
 ## Install
 
+From crates.io:
+
 ```bash
-cargo install agentis-ctx        # crate is `agentis-ctx`; it installs the `ctx` binary
+cargo install agentis-ctx
+cargo binstall agentis-ctx
 ```
 
-Prebuilt binaries for Linux (x86_64), macOS (Intel + Apple Silicon), and Windows (x86_64) are
-attached to each [GitHub release](https://github.com/agentis-tools/ctx/releases). Once installed,
-`ctx self-update` upgrades in place (every download is checksum-verified against the release's
-`SHA256SUMS` before replacing the binary).
+Package managers:
+
+```bash
+brew install agentis-tools/tap/ctx   # macOS (Intel or Apple Silicon), Linux x86-64
+yay -S ctx-bin                       # Arch Linux x86-64
+```
+
+```powershell
+scoop bucket add agentis-tools https://github.com/agentis-tools/scoop-bucket
+scoop install ctx
+```
+
+Debian and RPM packages are attached to each
+[GitHub release](https://github.com/agentis-tools/ctx/releases) and can be installed directly:
+
+```bash
+sudo apt install ./ctx_VERSION_amd64.deb
+sudo dnf install ./ctx-VERSION-1.x86_64.rpm
+```
+
+The Homebrew tap, Scoop bucket, and AUR package are published from separate package-index
+repositories. Prebuilt release binaries support Linux GNU x86-64, macOS Intel and Apple Silicon,
+and Windows x86-64. Linux ARM64 and musl binaries are not currently published.
+
+`ctx self-update` is only for binaries installed directly from GitHub Releases. Cargo, Homebrew,
+Scoop, Arch, Debian, and RPM installations must be upgraded through their package manager; ctx
+detects these installations and refuses to overwrite package-owned files. Direct downloads are
+verified against the release's `SHA256SUMS` before the executable is replaced.
 
 ```bash
 # On Windows (MSVC), DuckDB analytics aren't available, so skip the default feature:
