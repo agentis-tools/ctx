@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-12
+
+### Added
+- Codex harness support: `ctx harness init --target codex` installs trusted project hooks under `.codex/`, prints durable `AGENTS.md` guidance, and supports the same session map, post-edit architecture checks, and opt-in blocking stop-time quality gate as the Claude integration (#36)
+- Distributable Codex plugin scaffolding via `ctx harness init --target codex --mode plugin`, including lifecycle hooks, the ctx skill, local marketplace metadata, optional MCP wiring, release packaging, JSON output, doctor diagnostics, and integration documentation (#36)
+
+### Fixed
+- Removed a generated ctx index accidentally committed beneath the documentation site and ignored nested `.ctx` directories (#34)
+
+### Documentation
+- Refreshed the whole-repository token estimate after the recent feature and documentation growth (#35)
+
 ## [0.3.3] - 2026-07-11
 
 ### Added
@@ -147,7 +159,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File size display option (`--show-sizes`)
 - Binary file detection and exclusion
 
-[Unreleased]: https://github.com/agentis-tools/ctx/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/agentis-tools/ctx/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/agentis-tools/ctx/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/agentis-tools/ctx/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/agentis-tools/ctx/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/agentis-tools/ctx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/agentis-tools/ctx/compare/v0.2.1...v0.3.0
