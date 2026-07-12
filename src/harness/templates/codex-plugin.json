@@ -1,0 +1,8 @@
+{
+  "name": "ctx",
+  "version": "{{CTX_VERSION}}",
+  "description": "Code intelligence, architecture checks, and quality gates for Codex",
+  "author": { "name": "{{AUTHOR_NAME}}" },
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}

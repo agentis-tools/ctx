@@ -572,7 +572,10 @@ Exit codes: 0 = snapshot written or partition already existed, 2 = operational e
 
 ### `harness.init`
 
-`ctx harness init [--mode local|plugin] [--force] --json`
+`ctx harness init [--target claude|codex] [--mode local|plugin] [--force] --json`
+
+Codex local mode uses `"target": "codex"` and returns `agents_md_block` in place
+of the Claude-specific `settings_snippet` and `claude_md_block` fields.
 
 ```json
 {

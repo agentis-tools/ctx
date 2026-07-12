@@ -1,4 +1,4 @@
-//! `ctx harness` -- Claude Code integration packaging CLI.
+//! `ctx harness` -- Claude Code and Codex integration packaging CLI.
 //!
 //! Thin wrapper around the [`ctx::harness`] library: `init` scaffolds
 //! generated files (local hooks or a full plugin), `compat` is the version
@@ -30,14 +30,15 @@ pub fn run_harness(cmd: HarnessCommand, json: bool) -> Result<Outcome> {
             force,
         } => {
             let root = std::env::current_dir()?;
-            // Single-variant enum today; keep the match so adding a target
-            // forces a decision here.
-            let HarnessTarget::Claude = target;
+            let target = match target {
+                HarnessTarget::Claude => harness::Target::Claude,
+                HarnessTarget::Codex => harness::Target::Codex,
+            };
             let mode = match mode {
                 HarnessMode::Local => Mode::Local,
                 HarnessMode::Plugin => Mode::Plugin,
             };
-            run_init(&root, mode, force, json)
+            run_init(&root, target, mode, force, json)
         }
         HarnessCommand::Compat { require } => run_compat(&require),
         HarnessCommand::Doctor => {
@@ -51,10 +52,18 @@ pub fn run_harness(cmd: HarnessCommand, json: bool) -> Result<Outcome> {
 // init
 // ============================================================================
 
-fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Outcome> {
-    let plan = match mode {
-        Mode::Local => harness::plan_local(root),
-        Mode::Plugin => harness::plan_plugin(root),
+fn run_init(
+    root: &Path,
+    target: harness::Target,
+    mode: Mode,
+    force: bool,
+    json_mode: bool,
+) -> Result<Outcome> {
+    let plan = match (target, mode) {
+        (harness::Target::Claude, Mode::Local) => harness::plan_local(root),
+        (harness::Target::Claude, Mode::Plugin) => harness::plan_plugin(root),
+        (harness::Target::Codex, Mode::Local) => harness::plan_codex_local(root),
+        (harness::Target::Codex, Mode::Plugin) => harness::plan_codex_plugin(root),
     };
     let actions = harness::write_plan(root, &plan, force)?;
 
@@ -78,12 +87,15 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
     }
 
     let snippet = harness::render_settings_snippet();
-    let guidance = harness::render_claude_md_block(root);
+    let guidance = match target {
+        harness::Target::Claude => harness::render_claude_md_block(root),
+        harness::Target::Codex => harness::render_agents_md_block(root),
+    };
 
     // In local mode, merge the ctx hooks + permissions into
     // .claude/settings.json ourselves (additive + idempotent). Plugin mode
     // is unaffected.
-    let settings_action = if mode == Mode::Local {
+    let settings_action = if mode == Mode::Local && target == harness::Target::Claude {
         Some(harness::wire_local_settings(root)?)
     } else {
         None
@@ -96,13 +108,17 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
             .collect();
         let mut data = serde_json::json!({
             "mode": match mode { Mode::Local => "local", Mode::Plugin => "plugin" },
-            "target": "claude",
+            "target": match target { harness::Target::Claude => "claude", harness::Target::Codex => "codex" },
             "force": force,
             "files": files,
         });
         if mode == Mode::Local {
-            data["settings_snippet"] = serde_json::Value::String(snippet);
-            data["claude_md_block"] = serde_json::Value::String(guidance);
+            if target == harness::Target::Claude {
+                data["settings_snippet"] = serde_json::Value::String(snippet);
+                data["claude_md_block"] = serde_json::Value::String(guidance);
+            } else {
+                data["agents_md_block"] = serde_json::Value::String(guidance);
+            }
             if let Some(action) = &settings_action {
                 data["settings_action"] =
                     serde_json::Value::String(settings_action_str(action).to_string());
@@ -112,8 +128,8 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
         return Ok(Outcome::Clean);
     }
 
-    match mode {
-        Mode::Local => {
+    match (target, mode) {
+        (harness::Target::Claude, Mode::Local) => {
             eprintln!();
             match settings_action.expect("local mode always wires settings") {
                 harness::SettingsWireAction::Created => {
@@ -140,7 +156,7 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
             println!("{guidance}");
             eprintln!("Then verify the integration with 'ctx harness doctor'.");
         }
-        Mode::Plugin => {
+        (harness::Target::Claude, Mode::Plugin) => {
             eprintln!();
             eprintln!("Plugin scaffold ready. Install it locally with:");
             eprintln!("  claude");
@@ -154,6 +170,22 @@ fn run_init(root: &Path, mode: Mode, force: bool, json_mode: bool) -> Result<Out
                      feature. Install one with 'cargo install agentis-ctx --features mcp' and \
                      rerun 'ctx harness init --mode plugin' to wire the MCP server."
                 );
+            }
+        }
+        (harness::Target::Codex, Mode::Local) => {
+            eprintln!();
+            eprintln!("Add this block to your AGENTS.md so Codex knows about ctx:");
+            eprintln!();
+            println!("{guidance}");
+            eprintln!("Review and trust the generated hooks with '/hooks', then run 'ctx harness doctor'.");
+        }
+        (harness::Target::Codex, Mode::Plugin) => {
+            eprintln!();
+            eprintln!("Codex plugin scaffold ready. Add its marketplace with:");
+            eprintln!("  codex plugin marketplace add ./");
+            eprintln!("Install the ctx plugin, then review and trust its hooks with '/hooks'.");
+            if !cfg!(feature = "mcp") {
+                eprintln!("note: .mcp.json was not generated because this ctx build lacks the mcp feature.");
             }
         }
     }

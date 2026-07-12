@@ -18,6 +18,8 @@ use serde::Serialize;
 use super::checksum::{content_checksum, generated_version, recorded_checksum};
 use super::templates::CTX_VERSION;
 use super::{read_lock, HOOK_NAMES, LOCAL_HOOKS_DIR, RULES_PATH};
+
+const CODEX_LOCAL_HOOKS_DIR: &str = ".codex/hooks/ctx";
 use crate::db::SCHEMA_VERSION;
 use crate::walker::{discover_files, WalkerConfig};
 
@@ -101,13 +103,26 @@ fn plugin_scaffold(root: &Path) -> bool {
     root.join(".claude-plugin/plugin.json").exists()
 }
 
+fn codex_local_scaffold(root: &Path) -> bool {
+    root.join(CODEX_LOCAL_HOOKS_DIR).is_dir()
+}
+
+fn codex_plugin_scaffold(root: &Path) -> bool {
+    root.join(".codex-plugin/plugin.json").exists()
+}
+
 fn check_scaffold(root: &Path, findings: &mut Vec<Finding>) {
-    if !local_scaffold(root) && !plugin_scaffold(root) && read_lock(root).is_none() {
+    if !local_scaffold(root)
+        && !plugin_scaffold(root)
+        && !codex_local_scaffold(root)
+        && !codex_plugin_scaffold(root)
+        && read_lock(root).is_none()
+    {
         findings.push(Finding::new(
             Severity::Info,
             "harness_not_initialized",
             "no harness files found (nothing scaffolded)".to_string(),
-            Some("run 'ctx harness init' to wire ctx into Claude Code"),
+            Some("run 'ctx harness init --target claude|codex' to wire ctx into an agent"),
         ));
     }
 }
@@ -127,7 +142,7 @@ fn check_templates_stale(root: &Path, findings: &mut Vec<Finding>) {
 
     // In-file headers cover files generated before the manifest existed (or
     // with a deleted manifest).
-    for dir in [LOCAL_HOOKS_DIR, "hooks"] {
+    for dir in [LOCAL_HOOKS_DIR, CODEX_LOCAL_HOOKS_DIR, "hooks"] {
         for name in HOOK_NAMES {
             let rel = format!("{dir}/{name}.sh");
             if stale.iter().any(|s| s.starts_with(&rel)) {
@@ -271,6 +286,12 @@ fn check_hooks(root: &Path, findings: &mut Vec<Finding>) {
     if plugin_scaffold(root) {
         dirs.push("hooks");
     }
+    if codex_local_scaffold(root) {
+        dirs.push(CODEX_LOCAL_HOOKS_DIR);
+    }
+    if codex_plugin_scaffold(root) && !dirs.contains(&"hooks") {
+        dirs.push("hooks");
+    }
 
     let lock = read_lock(root);
     let mut missing: Vec<String> = Vec::new();
@@ -324,6 +345,7 @@ fn check_hooks(root: &Path, findings: &mut Vec<Finding>) {
 }
 
 fn check_settings_wiring(root: &Path, findings: &mut Vec<Finding>) {
+    check_codex_wiring(root, findings);
     if !local_scaffold(root) {
         return;
     }
@@ -337,6 +359,31 @@ fn check_settings_wiring(root: &Path, findings: &mut Vec<Finding>) {
             ".claude/settings.json does not reference the generated hooks under .claude/hooks/ctx/"
                 .to_string(),
             Some("add the settings snippet printed by 'ctx harness init' to .claude/settings.json"),
+        ));
+    }
+}
+
+fn check_codex_wiring(root: &Path, findings: &mut Vec<Finding>) {
+    if !codex_local_scaffold(root) {
+        return;
+    }
+    let path = root.join(".codex/hooks.json");
+    let wired = fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .ok()
+                .map(|_| content)
+        })
+        .map(|content| content.contains(".codex/hooks/ctx/"))
+        .unwrap_or(false);
+    if !wired {
+        findings.push(Finding::new(
+            Severity::Warning,
+            "codex_hooks_not_wired",
+            ".codex/hooks.json is missing, invalid, or does not reference .codex/hooks/ctx/"
+                .to_string(),
+            Some("rerun 'ctx harness init --target codex' to regenerate it"),
         ));
     }
 }
@@ -357,7 +404,10 @@ fn check_mcp(root: &Path, findings: &mut Vec<Finding>) {
         ));
     }
 
-    if cfg!(feature = "mcp") && plugin_scaffold(root) && mcp_json.is_none() {
+    if cfg!(feature = "mcp")
+        && (plugin_scaffold(root) || codex_plugin_scaffold(root))
+        && mcp_json.is_none()
+    {
         findings.push(Finding::new(
             Severity::Info,
             "mcp_not_wired",
@@ -414,6 +464,23 @@ mod tests {
         let invalid = find(&findings, "rules_invalid");
         assert_eq!(invalid.severity, Severity::Error);
         assert!(invalid.message.contains(".ctx/rules.toml"));
+    }
+
+    #[test]
+    fn test_codex_scaffold_checks_hook_wiring() {
+        let temp = TempDir::new().unwrap();
+        let plan = super::super::plan_codex_local(temp.path());
+        super::super::write_plan(temp.path(), &plan, false).unwrap();
+
+        let findings = run_doctor_checks(temp.path());
+        assert!(!codes(&findings).contains(&"codex_hooks_not_wired"));
+
+        std::fs::write(temp.path().join(".codex/hooks.json"), "{}\n").unwrap();
+        let findings = run_doctor_checks(temp.path());
+        assert_eq!(
+            find(&findings, "codex_hooks_not_wired").severity,
+            Severity::Warning
+        );
     }
 
     #[test]

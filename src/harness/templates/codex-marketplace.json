@@ -1,0 +1,10 @@
+{
+  "name": "ctx-local",
+  "interface": { "displayName": "ctx Local Plugins" },
+  "plugins": [{
+    "name": "ctx",
+    "source": { "source": "local", "path": "./" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Productivity"
+  }]
+}

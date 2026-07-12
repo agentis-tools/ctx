@@ -136,6 +136,7 @@ suite into Claude Code as hooks, with the guardrails already set:
 
 ```bash
 ctx harness init --target claude          # local hooks in .claude/ (or --mode plugin for a shareable plugin)
+ctx harness init --target codex           # local hooks in .codex/ (also supports --mode plugin)
 ```
 
 This scaffolds three hooks and a starter `.ctx/rules.toml`:

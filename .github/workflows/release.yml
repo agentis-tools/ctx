@@ -99,7 +99,7 @@ jobs:
             ctx-*.zip*
 
   # Plugin/binary version lockstep: plugin.json is generated from the crate
-  # version by `ctx harness init --mode plugin`, so it matches the tag by
+  # version by `ctx harness init --mode plugin`, so both target plugins match the tag by
   # construction -- this job asserts that (failing the release otherwise)
   # and packages the plugin scaffold as a release artifact.
   plugin:
@@ -114,11 +114,13 @@ jobs:
       - name: Verify plugin version lockstep and package plugin
         run: ./scripts/release-plugin-check.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Upload plugin artifact
+      - name: Upload plugin artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ctx-claude-plugin
-          path: ctx-claude-plugin-*.zip
+          name: ctx-agent-plugins
+          path: |
+            ctx-claude-plugin-*.zip
+            ctx-codex-plugin-*.zip
 
   github-release:
     needs: [build, plugin]

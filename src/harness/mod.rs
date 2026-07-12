@@ -52,6 +52,7 @@ pub const HOOK_NAMES: [&str; 3] = ["session-start", "post-tool-use", "stop"];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Claude,
+    Codex,
 }
 
 /// Scaffolding mode.
@@ -238,6 +239,80 @@ pub fn plan_plugin(root: &Path) -> Vec<GeneratedFile> {
     }
     plan.push(generated(RULES_PATH, templates::RULES_TOML, &vars));
     plan
+}
+
+fn codex_hook_files(dir: &str, vars: &[(&str, &str)]) -> Vec<GeneratedFile> {
+    vec![
+        generated(
+            &format!("{dir}/session-start.sh"),
+            templates::CODEX_SESSION_START_SH,
+            vars,
+        ),
+        generated(
+            &format!("{dir}/post-tool-use.sh"),
+            templates::CODEX_POST_TOOL_USE_SH,
+            vars,
+        ),
+        generated(&format!("{dir}/stop.sh"), templates::CODEX_STOP_SH, vars),
+    ]
+}
+
+pub fn plan_codex_local(root: &Path) -> Vec<GeneratedFile> {
+    let branch = templates::default_branch(root);
+    let author = templates::author_name();
+    let vars = templates::standard_vars(&branch, &author);
+    let mut plan = vec![generated(
+        ".codex/hooks.json",
+        templates::CODEX_HOOKS_JSON,
+        &vars,
+    )];
+    plan.extend(codex_hook_files(".codex/hooks/ctx", &vars));
+    plan.push(generated(RULES_PATH, templates::RULES_TOML, &vars));
+    plan
+}
+
+pub fn plan_codex_plugin(root: &Path) -> Vec<GeneratedFile> {
+    let branch = templates::default_branch(root);
+    let author = templates::author_name();
+    let vars = templates::standard_vars(&branch, &author);
+    let manifest = if cfg!(feature = "mcp") {
+        templates::CODEX_PLUGIN_MCP_JSON
+    } else {
+        templates::CODEX_PLUGIN_JSON
+    };
+    let mut plan = vec![
+        generated(".codex-plugin/plugin.json", manifest, &vars),
+        generated(
+            ".agents/plugins/marketplace.json",
+            templates::CODEX_MARKETPLACE_JSON,
+            &vars,
+        ),
+        generated(
+            "hooks/hooks.json",
+            templates::CODEX_PLUGIN_HOOKS_JSON,
+            &vars,
+        ),
+    ];
+    plan.extend(codex_hook_files("hooks", &vars));
+    plan.push(generated("skills/ctx/SKILL.md", templates::SKILL_MD, &vars));
+    plan.push(generated(
+        "README.md",
+        templates::CODEX_PLUGIN_README_MD,
+        &vars,
+    ));
+    if cfg!(feature = "mcp") {
+        plan.push(generated(".mcp.json", templates::MCP_JSON, &vars));
+    }
+    plan.push(generated(RULES_PATH, templates::RULES_TOML, &vars));
+    plan
+}
+
+pub fn render_agents_md_block(root: &Path) -> String {
+    let branch = templates::default_branch(root);
+    templates::render(
+        templates::AGENTS_MD_BLOCK_MD,
+        &[("DEFAULT_BRANCH", branch.as_str())],
+    )
 }
 
 /// Render the settings snippet printed to stdout in local mode.
@@ -586,6 +661,28 @@ mod tests {
         assert!(deny.contains(&serde_json::json!("Edit(.ctx/rules.toml)")));
         assert!(deny.contains(&serde_json::json!("Edit(.claude/hooks/ctx/**)")));
         assert!(deny.contains(&serde_json::json!("Edit(.claude/settings.json)")));
+    }
+
+    #[test]
+    fn test_codex_plans_render_valid_files() {
+        let temp = TempDir::new().unwrap();
+        for plan in [
+            plan_codex_local(temp.path()),
+            plan_codex_plugin(temp.path()),
+        ] {
+            for file in plan {
+                assert!(
+                    !file.content.contains("{{"),
+                    "unrendered token in {}",
+                    file.rel_path
+                );
+                if file.rel_path.ends_with(".json") {
+                    serde_json::from_str::<serde_json::Value>(&file.content)
+                        .unwrap_or_else(|e| panic!("{}: {e}", file.rel_path));
+                }
+            }
+        }
+        assert!(render_agents_md_block(temp.path()).contains("ctx map"));
     }
 
     #[test]

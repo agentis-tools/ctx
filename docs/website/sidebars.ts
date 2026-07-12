@@ -49,6 +49,7 @@ const sidebars: SidebarsConfig = {
       label: 'Integrations',
       items: [
         'integrations/claude',
+        'integrations/codex',
         'integrations/ci-cd',
         'integrations/vscode',
       ],

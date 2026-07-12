@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Plugin/binary version lockstep check + plugin packaging for releases.
 #
-# The Claude Code plugin manifest is *generated* from the crate version by
-# `ctx harness init --mode plugin`, so plugin and binary versions agree by
+# The Claude Code and Codex plugin manifests are generated from the crate version by
+# `ctx harness init --mode plugin`, so plugins and binary versions agree by
 # construction. This script asserts that invariant for a release: it builds
 # the binary, scaffolds the plugin into a scratch directory, and fails when
 # `plugin.json`'s version differs from the expected release version. On
@@ -28,25 +28,24 @@ ctx_bin="$repo_root/target/debug/ctx"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-(cd "$scratch" && "$ctx_bin" harness init --mode plugin >/dev/null)
+for target in claude codex; do
+  target_scratch="$scratch/$target"
+  mkdir -p "$target_scratch"
+  (cd "$target_scratch" && "$ctx_bin" harness init --target "$target" --mode plugin >/dev/null)
+  plugin_json="$target_scratch/.$target-plugin/plugin.json"
+  if [ ! -f "$plugin_json" ]; then
+    echo "ERROR: harness init did not generate .$target-plugin/plugin.json" >&2
+    exit 1
+  fi
+  actual="$(jq -r '.version' "$plugin_json")"
+  if [ "$actual" != "$expected" ]; then
+    echo "ERROR: $target plugin version '$actual' does not match '$expected'" >&2
+    exit 1
+  fi
+  zip_name="ctx-$target-plugin-$expected.zip"
+  rm -f "$repo_root/$zip_name"
+  (cd "$target_scratch" && zip -qr "$repo_root/$zip_name" .)
+  echo "Packaged $zip_name"
+done
 
-plugin_json="$scratch/.claude-plugin/plugin.json"
-if [ ! -f "$plugin_json" ]; then
-  echo "ERROR: harness init did not generate .claude-plugin/plugin.json" >&2
-  exit 1
-fi
-
-actual="$(jq -r '.version' "$plugin_json")"
-if [ "$actual" != "$expected" ]; then
-  echo "ERROR: plugin.json version '$actual' does not match release version '$expected'" >&2
-  echo "       (plugin.json is generated from the crate version; tag, Cargo.toml," >&2
-  echo "       and the generated manifest must agree)" >&2
-  exit 1
-fi
-
-zip_name="ctx-claude-plugin-$expected.zip"
-rm -f "$repo_root/$zip_name"
-(cd "$scratch" && zip -qr "$repo_root/$zip_name" .)
-
-echo "OK: plugin.json version $actual matches release version $expected"
-echo "Packaged $zip_name"
+echo "OK: Claude and Codex plugin versions match $expected"

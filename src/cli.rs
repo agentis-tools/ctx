@@ -769,7 +769,7 @@ EXAMPLES:
         churn_window: String,
     },
 
-    /// Package ctx as an AI coding harness integration (Claude Code)
+    /// Package ctx as an AI coding harness integration (Claude Code or Codex)
     ///
     /// `init` scaffolds hook scripts, settings, and (in plugin mode) a full
     /// Claude Code plugin from templates embedded in this binary. `compat`
@@ -863,17 +863,17 @@ pub enum HarnessTarget {
     /// Claude Code (hooks, settings, skills, plugin manifest)
     #[default]
     Claude,
+    /// Codex (project hooks, AGENTS.md guidance, skills, plugin manifest)
+    Codex,
 }
 
 /// Scaffolding mode for `ctx harness init`.
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq)]
 pub enum HarnessMode {
-    /// Hook scripts under `.claude/hooks/ctx/` plus a settings snippet
-    /// printed for manual inclusion
+    /// Project-local hooks plus target-specific settings or guidance
     #[default]
     Local,
-    /// A distributable Claude Code plugin (`.claude-plugin/`, hooks, skill,
-    /// marketplace manifest)
+    /// A distributable target plugin with hooks, skill, and marketplace
     Plugin,
 }
 

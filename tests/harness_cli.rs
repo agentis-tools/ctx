@@ -88,6 +88,63 @@ fn run_hook(dir: &Path, script: &Path) -> Output {
     run_hook_env(dir, script, &[])
 }
 
+#[cfg(unix)]
+#[test]
+fn test_codex_local_init_and_hooks() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = GitRepo::init(temp.path());
+    repo.commit_file("src/lib.rs", SOURCE, "initial");
+    assert!(ctx(&repo.root, &["index"]).status.success());
+
+    let out = ctx(&repo.root, &["harness", "init", "--target", "codex"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(repo.root.join(".codex/hooks.json").exists());
+    assert!(repo.root.join(".codex/hooks/ctx/stop.sh").exists());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Code intelligence (ctx)"));
+
+    let hooks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(repo.root.join(".codex/hooks.json")).unwrap())
+            .unwrap();
+    assert!(hooks["hooks"]["Stop"].is_array());
+
+    let stop = run_hook(&repo.root, &repo.root.join(".codex/hooks/ctx/stop.sh"));
+    assert_eq!(
+        stop.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    serde_json::from_slice::<serde_json::Value>(&stop.stdout)
+        .expect("Codex Stop hook must emit JSON on successful exit");
+}
+
+#[test]
+fn test_codex_plugin_init_json_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = ctx(
+        temp.path(),
+        &[
+            "--json", "harness", "init", "--target", "codex", "--mode", "plugin",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(temp.path().join(".codex-plugin/plugin.json").exists());
+    assert!(temp
+        .path()
+        .join(".agents/plugins/marketplace.json")
+        .exists());
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["data"]["target"], "codex");
+}
+
 // ============================================================================
 // (1) local init end-to-end: generated hook runs and emits check JSON
 // ============================================================================

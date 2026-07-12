@@ -11,14 +11,22 @@ Package ctx as an AI coding harness integration (Claude Code).
 ## Synopsis
 
 ```bash
-ctx harness init [--target claude] [--mode local|plugin] [--force] [--json]
+ctx harness init [--target claude|codex] [--mode local|plugin] [--force] [--json]
 ctx harness compat --require <SEMVER>
 ctx harness doctor [--json]
 ```
 
 ## Description
 
-The `harness` command wires the ctx quality suite into an AI coding harness. Today the only supported target is **Claude Code** (`--target claude`, the default); unknown targets are rejected with exit code 2 and a list of supported values.
+The `harness` command wires the ctx quality suite into an AI coding harness. Supported targets are **Claude Code** (`--target claude`, the default) and **Codex** (`--target codex`); unknown targets are rejected with exit code 2 and a list of supported values.
+
+## Codex
+
+`ctx harness init --target codex` generates `.codex/hooks.json`, hook scripts under
+`.codex/hooks/ctx/`, a starter `.ctx/rules.toml`, and an `AGENTS.md` guidance block.
+Review and trust the generated hook definitions with `/hooks`. Plugin mode generates
+a `.codex-plugin` bundle, ctx skill, lifecycle hooks, local marketplace, and optional
+MCP wiring.
 
 Everything `init` writes comes from templates embedded in the ctx binary, and every generated file carries a header:
 

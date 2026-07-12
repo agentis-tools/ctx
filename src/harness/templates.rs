@@ -28,6 +28,16 @@ pub const MARKETPLACE_JSON: &str = include_str!("templates/marketplace.json");
 pub const PLUGIN_SETTINGS_JSON: &str = include_str!("templates/plugin-settings.json");
 pub const SKILL_MD: &str = include_str!("templates/SKILL.md");
 pub const PLUGIN_README_MD: &str = include_str!("templates/plugin-README.md");
+pub const CODEX_SESSION_START_SH: &str = include_str!("templates/codex-session-start.sh");
+pub const CODEX_POST_TOOL_USE_SH: &str = include_str!("templates/codex-post-tool-use.sh");
+pub const CODEX_STOP_SH: &str = include_str!("templates/codex-stop.sh");
+pub const CODEX_HOOKS_JSON: &str = include_str!("templates/codex-hooks.json");
+pub const CODEX_PLUGIN_HOOKS_JSON: &str = include_str!("templates/codex-plugin-hooks.json");
+pub const CODEX_PLUGIN_JSON: &str = include_str!("templates/codex-plugin.json");
+pub const CODEX_PLUGIN_MCP_JSON: &str = include_str!("templates/codex-plugin-mcp.json");
+pub const CODEX_MARKETPLACE_JSON: &str = include_str!("templates/codex-marketplace.json");
+pub const AGENTS_MD_BLOCK_MD: &str = include_str!("templates/agents-md-block.md");
+pub const CODEX_PLUGIN_README_MD: &str = include_str!("templates/codex-plugin-README.md");
 
 /// This binary's version (the value baked into `{{CTX_VERSION}}`).
 pub const CTX_VERSION: &str = env!("CARGO_PKG_VERSION");
