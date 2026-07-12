@@ -26,7 +26,7 @@ and nothing verifies what they produce. Two failure modes follow:
 
 - **They read too much.** To "be safe," an agent dumps whole directories into the prompt. That burns
   tokens, fills the context window with noise, and makes the model slower and less accurate. This
-  repo alone is **233,169 tokens** as one dump — past most context windows, and mostly irrelevant to
+  repo alone is **502,856 tokens** as one dump — past most context windows, and mostly irrelevant to
   any single task. *(A grounding failure.)*
 - **They read too little, and nothing checks the change.** An agent greps a couple of files, edits,
   and misses the caller three hops away that it just broke — and no guardrail flagged the blast
@@ -44,7 +44,7 @@ before it lands. There's no model of the world the agent edits — and no guardr
 
 - **Smart context** — `ctx smart "<task>"` combines semantic search with call-graph expansion to
   pull the files a task touches, fit to a token budget. On this repo, a task-scoped request returns
-  **~8,700 tokens instead of 233,169 — about 27× smaller.**
+  **~8,700 tokens instead of 502,856 — about 58× smaller.**
 - **Token control** — `--count-only`, `--max-tokens`, and `--encoding` measure and cap context to
   any model's window, so you never overpay for tokens you didn't need.
 

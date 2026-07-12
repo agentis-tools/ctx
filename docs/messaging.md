@@ -57,7 +57,7 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
 
 **Ground — the right context, in:**
 - **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, fit to a token
-  budget. On this repo: **~8,700 tokens instead of 233,169 — about 27× smaller.**
+  budget. On this repo: **~8,700 tokens instead of 502,856 — about 58× smaller.**
 - **Token control** — `--count-only`, `--max-tokens`, `--encoding` to budget any model's window.
 
 **Govern — guardrails, on what changes:**
@@ -95,8 +95,8 @@ semantic, agent-first, local.*
 
 ## Proof points (REAL — ctx v0.2.1 on the ctx repo; see scratchpad/proof.md)
 
-- **Ground:** whole repo = **233,169 tokens** (`ctx --count-only`); `ctx smart "..." --max-tokens 8000`
-  = **4 files, ~8,700 tokens** — **≈27× smaller**.
+- **Ground:** whole repo = **502,856 tokens** (`ctx --count-only`); `ctx smart "..." --max-tokens 8000`
+  = **4 files, ~8,700 tokens** — **≈58× smaller**.
 - **World model / speed:** `ctx index` builds it in **0.36 s** — 53 files, **870 symbols, 5,463 edges**.
 - **Govern:** `ctx query impact discover_files` shows a change ripples through `index`, `run_context`,
   `run` (the CLI entry point) and the MCP server across 5 hops.

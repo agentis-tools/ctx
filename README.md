@@ -14,7 +14,7 @@ your repo into a queryable model (every symbol, call, and dependency) and uses i
 your agent and **gate** its output on every turn:
 
 - **Ground:** hand the agent a map before it starts, and the right ~8k tokens of context instead of
-  the wrong 233k.
+  the wrong 503k.
 - **Govern:** show the blast radius of every edit, and enforce your architecture rules as
   deterministic gates it can't ship past.
 
@@ -58,7 +58,7 @@ ctx index                        # build the world model (or `ctx index --watch`
 **Ground:** feed the agent the right context, selected by meaning *and* call-graph relevance:
 
 ```bash
-ctx smart "add rate limiting" --max-tokens 8000   # ~8.7k tokens instead of 233k, about 27× smaller
+ctx smart "add rate limiting" --max-tokens 8000   # ~8.7k tokens instead of 503k, about 58× smaller
 ctx diff --summary                                # context for what changed, with dependency expansion
 ctx similar "retry with backoff"                  # reuse before you write: find it if it already exists
 ```

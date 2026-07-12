@@ -105,9 +105,9 @@ ctx smart "<task>" --max-tokens 8000
 ctx --encoding o200k_base --count-only    # o200k_base | cl100k_base | p50k_base
 ```
 
-On a real repo the difference is large: the ctx codebase is **233,169 tokens** as a full dump, but a
+On a real repo the difference is large: the ctx codebase is **502,856 tokens** as a full dump, but a
 task-scoped `ctx smart "..." --max-tokens 8000` returns about **8,700 tokens** — the same answer,
-~27× less to read and pay for.
+~58× less to read and pay for.
 
 ## Next steps
 
