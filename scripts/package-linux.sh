@@ -10,6 +10,7 @@ fi
 version="${1#v}"
 archive="$2"
 output="$3"
+release_epoch="${SOURCE_DATE_EPOCH:-946684800}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 archive="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
 mkdir -p "$output"
@@ -35,15 +36,18 @@ fi
 # dpkg-shlibdeps reads the built ELF and maps its actual NEEDED entries to
 # Debian packages. This avoids stale, manually maintained runtime dependencies.
 mkdir -p "$work/debian"
-cp "$repo_root/packaging/deb/control.template" "$work/debian/control"
-depends="$(cd "$work" && dpkg-shlibdeps -O "$binary" | sed -n 's/^shlibs:Depends=//p')"
-if [ -z "$depends" ]; then
-  echo "ERROR: dpkg-shlibdeps did not determine runtime dependencies" >&2
-  exit 1
-fi
 maintainer="${DEB_MAINTAINER:-$(sed -n 's/^authors = \["\(.*\)"\]/\1/p' "$repo_root/Cargo.toml")}" 
 if [ -z "$maintainer" ]; then
   echo "ERROR: set DEB_MAINTAINER or configure a Cargo package author" >&2
+  exit 1
+fi
+sed -e "s/@VERSION@/$version/g" \
+    -e "s|@MAINTAINER@|$maintainer|g" \
+    -e "s/@DEPENDS@//g" \
+    "$repo_root/packaging/deb/control.template" > "$work/debian/control"
+depends="$(cd "$work" && dpkg-shlibdeps -O "$binary" | sed -n 's/^shlibs:Depends=//p')"
+if [ -z "$depends" ]; then
+  echo "ERROR: dpkg-shlibdeps did not determine runtime dependencies" >&2
   exit 1
 fi
 
@@ -56,8 +60,9 @@ sed -e "s/@VERSION@/$version/g" \
     -e "s|@MAINTAINER@|$maintainer|g" \
     -e "s|@DEPENDS@|$depends|g" \
     "$repo_root/packaging/deb/control.template" > "$debroot/DEBIAN/control"
-find "$debroot" -exec touch -h -d '@0' {} +
-dpkg-deb --root-owner-group --build "$debroot" "$output/ctx_${version}_amd64.deb"
+find "$debroot" -exec touch -h -d "@$release_epoch" {} +
+SOURCE_DATE_EPOCH="$release_epoch" \
+  dpkg-deb --root-owner-group --build "$debroot" "$output/ctx_${version}_amd64.deb"
 
 # rpmbuild's dependency generator likewise inspects the ELF, producing exact
 # shared-library requirements for the RPM ecosystem.
@@ -66,7 +71,7 @@ mkdir -p "$topdir"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 install -m 0755 "$binary" "$topdir/SOURCES/ctx"
 install -m 0644 "$release_root/LICENSE-MIT" "$release_root/LICENSE-APACHE" "$topdir/SOURCES/"
 cp "$repo_root/packaging/rpm/ctx.spec" "$topdir/SPECS/"
-SOURCE_DATE_EPOCH=0 rpmbuild -bb \
+SOURCE_DATE_EPOCH="$release_epoch" rpmbuild -bb \
   --define "_topdir $topdir" \
   --define "ctx_version $version" \
   --define "_build_id_links none" \

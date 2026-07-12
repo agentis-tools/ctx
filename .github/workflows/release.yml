@@ -115,7 +115,7 @@ jobs:
       - name: Install native package tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes rpm
+          sudo apt-get install --yes cpio rpm
 
       - name: Build and validate Debian and RPM packages
         run: |
@@ -136,6 +136,17 @@ jobs:
           else
             echo "rpmlint is unavailable; rpm metadata/content validation completed"
           fi
+
+      - name: Test packaged executables
+        run: |
+          sudo apt-get install --yes "./dist/ctx_${GITHUB_REF_NAME#v}_amd64.deb"
+          ctx --version
+          ctx --help >/dev/null
+          mkdir rpm-root
+          cd rpm-root
+          rpm2cpio "../dist/ctx-${GITHUB_REF_NAME#v}-1.x86_64.rpm" | cpio -idmu
+          ./usr/bin/ctx --version
+          ./usr/bin/ctx --help >/dev/null
 
       - name: Upload native package artifacts
         uses: actions/upload-artifact@v4
@@ -187,6 +198,9 @@ jobs:
       - name: Aggregate SHA256SUMS
         run: |
           cd dist
+          for artifact in ctx-v*.tar.gz ctx-v*.zip; do
+            sha256sum "$artifact" > "$artifact.sha256"
+          done
           find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
             | LC_ALL=C sort \
             | xargs sha256sum > SHA256SUMS
@@ -194,6 +208,23 @@ jobs:
 
       - name: Validate release assets
         run: python3 scripts/validate-release-assets.py "${GITHUB_REF_NAME#v}" dist --complete
+
+      - name: Generate and validate package-manager definitions
+        run: |
+          python3 scripts/update-package-metadata.py \
+            "${GITHUB_REF_NAME#v}" dist/SHA256SUMS
+          python3 scripts/update-package-metadata.py \
+            "${GITHUB_REF_NAME#v}" dist/SHA256SUMS --check
+
+      - name: Upload generated package-manager definitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctx-package-manager-definitions
+          path: |
+            packaging/homebrew/ctx.rb
+            packaging/aur/PKGBUILD
+            packaging/aur/.SRCINFO
+            packaging/scoop/ctx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

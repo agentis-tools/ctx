@@ -41,9 +41,11 @@ The resulting files are ready to copy to the external package-index repositories
 - `packaging/aur/PKGBUILD` and `.SRCINFO` → the `ctx-bin` AUR Git repository
 - `packaging/scoop/ctx.json` → `agentis-tools/scoop-bucket/bucket/ctx.json`
 
-The release workflow may publish to the Homebrew tap only when `HOMEBREW_TAP_TOKEN` is configured.
-External publication is otherwise manual; no credentials belong in this repository. AUR and Scoop
-publication also remain manual unless their repository credentials are explicitly configured.
+The release workflow currently generates these definitions but does not publish to external
+repositories. External publication is manual; no credentials belong in this repository. If
+Homebrew publishing is later enabled, it must be opt-in and use a repository secret named
+`HOMEBREW_TAP_TOKEN`. AUR and Scoop publication likewise require explicit repository credentials.
+The existing crates.io release job uses `CARGO_REGISTRY_TOKEN`.
 
 ## Local validation
 
@@ -99,4 +101,3 @@ RPM         install the newer .rpm with dnf
 `ctx self-update` recognizes Cargo, Homebrew, and Scoop installation layouts. On Linux it also asks
 the local `pacman`, `dpkg`, and RPM databases whether they own the running executable. Detection
 happens before network access or filesystem mutation, and ctx refuses to replace a managed file.
-
