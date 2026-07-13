@@ -44,7 +44,7 @@ jobs:
         run: scripts/release-check.sh "${GITHUB_REF_NAME}"
 
       - name: Check dependency, license, advisory, and source policy
-        uses: EmbarkStudios/cargo-deny-action@43cf000bced7a828a6e01af0596dd7e99b5b4e13 # v2.0.12
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
           arguments: --all-features
