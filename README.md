@@ -290,9 +290,33 @@ token counting, and output formatting.
 
 ```
 .ctx/
-├── codebase.sqlite    # symbols, edges, embeddings, compressed source (FTS5 + sqlite-vec)
-└── rules.toml         # your architecture rules (created by `ctx harness init`)
+├── config.toml        # committed project defaults (optional; edit this)
+├── rules.toml         # committed architecture policy (created by `ctx harness init`; edit this)
+├── harness.lock       # generated harness ownership metadata (do not edit)
+└── codebase.sqlite    # generated symbols, edges, embeddings, and compressed source
 ```
+
+`.ctx/config.toml` currently configures the embedding backend shared by a project:
+
+```toml
+[embedding]
+provider = "ollama"                 # local (default) | openai | ollama
+model = "qwen3-embedding:8b"        # provider-specific model
+# host = "http://localhost:11434"   # Ollama only
+```
+
+Settings resolve in this order: CLI flag, environment variable, `.ctx/config.toml`, built-in
+default. The file affects `ctx embed`, `semantic`, `smart`, and `similar`. Switching embedding
+providers or models requires `ctx embed --force` because their vectors are not interchangeable.
+
+`.ctx/rules.toml` defines the layers, forbidden dependencies, metric limits, and frozen paths used
+by `ctx check` and the `check_violations` metric in `ctx score`. Create a commented starter with
+`ctx harness init`, inspect it with `ctx check --list`, and run it with `ctx check`. See the
+[rules-file reference](https://docs.agentis.tools/docs/commands/check#rules-file) for the complete
+schema.
+
+Commit `config.toml` and `rules.toml` so the team and CI share the same defaults and policy. Ignore
+generated data such as `codebase.sqlite`; ctx can rebuild it with `ctx index`.
 
 - **Tree-sitter** parses every supported language into symbols and relationship edges.
 - **SQLite** (with FTS5 and `sqlite-vec`) is the persistent, single-file store.
