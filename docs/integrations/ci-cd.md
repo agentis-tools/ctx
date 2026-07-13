@@ -148,52 +148,28 @@ Add to `package.json`:
 
 ## PR Context Generation
 
-### Auto-generate PR Context
+This repository dogfoods ctx on every pull request. The reporter is split into
+two workflows so pull requests from forks are supported without running
+untrusted code with a write-capable token:
 
-```yaml
-name: PR Context
+1. [`ctx-pr-analysis.yml`](../../.github/workflows/ctx-pr-analysis.yml) checks
+   out the PR with read-only permissions, runs a pinned ctx release, and
+   uploads the complete JSON result bundle.
+2. [`ctx-pr-comment.yml`](../../.github/workflows/ctx-pr-comment.yml) runs only
+   after analysis, checks out its renderer from the trusted default branch,
+   validates that the analyzed commit is still the PR head, and updates one
+   sticky bot comment.
 
-on:
-  pull_request:
-    types: [opened, synchronize]
+The comment includes the PR quality delta, repository-wide audit and stats,
+new near-duplicates, architecture-rule findings, changed-code hotspots, and a
+token-budgeted architectural map. Long lists are capped to fit GitHub's
+comment limit; the linked workflow artifact retains the full machine-readable
+analysis for 14 days.
 
-jobs:
-  context:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Install ctx
-        run: cargo install agentis-ctx
-      
-      - name: Index codebase
-        run: ctx index
-      
-      - name: Generate change context
-        run: |
-          echo "## Changed Files Context" >> $GITHUB_STEP_SUMMARY
-          ctx diff ${{ github.event.pull_request.base.sha }} --summary >> $GITHUB_STEP_SUMMARY
-```
-
-### Comment on PRs
-
-```yaml
-- name: Comment context
-  uses: actions/github-script@v6
-  with:
-    script: |
-      const { execSync } = require('child_process');
-      const context = execSync('ctx diff origin/main --output markdown').toString();
-      
-      github.rest.issues.createComment({
-        issue_number: context.issue.number,
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        body: `## Code Context\n\n${context}`
-      });
-```
+Do not replace this arrangement with `pull_request_target` plus a checkout of
+the PR head. That would expose a write token to contributor-controlled code.
+The publishing workflow must also download the artifact from the exact
+triggering run and treat every artifact field as untrusted input.
 
 ## Quality Trends
 

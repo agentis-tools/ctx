@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refresh compatible locked dependencies to remediate actionable RustSec advisories and document narrowly scoped, time-bounded transitive exceptions.
 
+### Fixed
+
+- Remove unusable `-f` aliases from `--file` filters that collided with the global `-f`/`--format` option and caused affected command help to abort.
+
 ## [0.3.4] - 2026-07-12
 
 ### Added

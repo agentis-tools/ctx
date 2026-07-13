@@ -14,7 +14,7 @@ ctx --version --check
 `ctx self-update` queries the GitHub Releases API for [`agentis-tools/ctx`](https://github.com/agentis-tools/ctx), downloads the artifact for the current platform, verifies it, and atomically replaces the running executable:
 
 1. Fetch the latest release (or the release pinned with `--version X.Y.Z`).
-2. Pick the artifact matching this binary's compile-time target (`ctx-<tag>-<target>.tar.gz`, `.zip` on Windows).
+2. Pick the artifact matching this binary's compile-time target (`ctx-v<version>-<target>.tar.gz`, `.zip` on Windows).
 3. Download the release's aggregated `SHA256SUMS` file and the artifact, and verify the artifact's sha256 against it. **On mismatch the update aborts with exit code 2 and the installed binary is untouched.**
 4. Extract the `ctx` binary, write it to a temp file *in the same directory as the current executable*, set executable permissions, and `rename` it over the current binary (atomic on the same filesystem).
 
@@ -26,7 +26,15 @@ ctx 0.2.1 → 0.3.0
 
 `--version X.Y.Z` installs that exact release — including downgrades — instead of the latest.
 
-Before any network work, ctx verifies the install location is writable; if not (e.g. a system-wide install), it refuses with guidance (exit 2). If ctx was installed with cargo, prefer `cargo install agentis-ctx`.
+Before any network work, ctx checks whether the executable belongs to a package manager and verifies
+that a direct-download install location is writable. Cargo, Homebrew, Arch, Debian, RPM, and Scoop
+installations are never overwritten: ctx exits 2 and prints the appropriate package-manager update
+command. Path detection covers Cargo, Homebrew, and Scoop layouts; on Linux, read-only queries to
+the local `pacman`, `dpkg`, and RPM package databases identify owned files.
+
+Use `ctx self-update` only for direct GitHub binary installations. Upgrade managed installations
+with `cargo install agentis-ctx`, `brew upgrade ctx`, `yay -Syu ctx-bin`, `scoop update ctx`, or by
+installing a newer `.deb`/`.rpm` through the corresponding system package manager.
 
 On Windows the running `ctx.exe` cannot be overwritten directly, so it is renamed aside to `ctx.exe.old` first; the `.old` file is removed on the next `ctx self-update` (or can be deleted manually).
 

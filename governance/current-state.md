@@ -17,9 +17,11 @@ documentation.
 - `ctx --version`, JSON envelopes, MCP server metadata, snapshots, gate logs,
   generated harness files, plugin manifests, and self-update HTTP headers all
   embed the Cargo package version.
-- There are no committed Homebrew, Scoop, Winget, Nix, or similar
-  package-manager manifests on `main`. Plugin manifests are generated during
-  release and checked against the tag version.
+- During implementation, `main` added committed Homebrew, AUR, Scoop, Debian,
+  and RPM packaging definitions. The committed Homebrew/AUR/Scoop files are a
+  checked historical release snapshot; release CI deterministically generates
+  and validates definitions for the tagged version from `SHA256SUMS`. Plugin
+  manifests are generated during release and checked against the tag version.
 - Rust 1.91 is the declared minimum supported Rust version. The crate uses Rust
   2021 edition.
 
@@ -27,8 +29,8 @@ documentation.
 
 - Releases are triggered only by pushing a `v*` Git tag.
 - The existing release workflow compares the tag with Cargo metadata, tests,
-  builds four target archives, packages Claude/Codex plugins, publishes the
-  crate, and creates a GitHub Release.
+  builds four target archives, packages Claude/Codex plugins and Linux native
+  packages, publishes the crate, and creates a GitHub Release.
 - Archives have per-file checksums and the GitHub Release contains an aggregate
   `SHA256SUMS`, which `ctx self-update` verifies.
 - GitHub-generated notes, rather than the reviewed `CHANGELOG.md` section, were

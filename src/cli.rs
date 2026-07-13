@@ -241,7 +241,7 @@ internal and unstable. Access is read-only and engine-hardened.
         symbol: String,
 
         /// Filter by file path pattern (glob syntax: "src/parser/*.rs")
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         file: Option<String>,
 
         /// Filter by symbol kind (function, method, struct, etc.)
@@ -255,7 +255,7 @@ internal and unstable. Access is read-only and engine-hardened.
         symbol: String,
 
         /// Filter by file path pattern (glob syntax: "src/parser/*.rs")
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         file: Option<String>,
 
         /// Filter by symbol kind (function, method, struct, etc.)
@@ -815,7 +815,9 @@ SECURITY:
 
 NOTES:
     Set CTX_NO_UPDATE_CHECK=1 to silence the passive update notice.
-    If ctx was installed via cargo, prefer 'cargo install agentis-ctx'.
+    Self-update is for direct GitHub installs. Cargo, Homebrew, Arch,
+    Debian, RPM, and Scoop installations must use their package manager;
+    ctx refuses to overwrite package-owned executables.
     On Windows the previous binary is left beside the new one as
     'ctx.exe.old' (removed on the next self-update).
 
@@ -963,7 +965,7 @@ pub enum QueryCommand {
         kind: Option<String>,
 
         /// Filter by file path pattern (glob syntax: "src/parser/*.rs")
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         file: Option<String>,
     },
 
@@ -977,7 +979,7 @@ pub enum QueryCommand {
         depth: i32,
 
         /// Filter by file path pattern (glob syntax: "src/parser/*.rs")
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         file: Option<String>,
     },
 
@@ -991,7 +993,7 @@ pub enum QueryCommand {
         depth: i32,
 
         /// Filter by file path pattern (glob syntax: "src/parser/*.rs")
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         file: Option<String>,
 
         /// Filter by symbol kind (function, method, struct, etc.)

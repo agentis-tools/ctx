@@ -461,7 +461,45 @@ ctx uses minimal environment variables:
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `OPENAI_API_KEY` | OpenAI embeddings via `ctx embed --openai` | Only for OpenAI provider |
+| `OPENAI_API_KEY` | OpenAI embeddings via `ctx embed --provider openai` | Only for the OpenAI provider |
+| `OLLAMA_HOST` | Ollama server URL (default `http://localhost:11434`) | Only for the Ollama provider |
+| `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) | Only for the Ollama provider |
+| `OLLAMA_API_KEY` | Optional bearer token for a remote/authenticated Ollama host | No |
+
+### Project config (`.ctx/config.toml`)
+
+Per-project defaults live in an optional, committed `.ctx/config.toml`. It currently configures
+the embedding backend used by `ctx embed`, `semantic`, `smart`, and `similar`:
+
+```toml
+[embedding]
+provider = "ollama"                 # local (default) | openai | ollama
+model = "qwen3-embedding:8b"        # Ollama/OpenAI model name
+# host = "http://localhost:11434"   # Ollama only
+```
+
+Resolution is **CLI flag > environment variable > `.ctx/config.toml` > built-in default**. A
+malformed optional config is ignored with a warning. After changing provider or model, rebuild
+embeddings because vectors from different models are not interchangeable:
+
+```bash
+ctx embed --force
+```
+
+### Architecture policy (`.ctx/rules.toml`)
+
+This committed file controls `ctx check` and the `check_violations` metric in `ctx score`. Generate
+a commented starter, inspect the parsed policy, then evaluate it:
+
+```bash
+ctx harness init
+ctx check --list
+ctx check --against origin/main
+```
+
+`ctx harness init` never overwrites an existing `rules.toml`, even with `--force`. The complete
+schema for layers, forbidden dependencies, allowed dependents, metric limits, and frozen paths is
+in the [`ctx check` rules-file reference](commands/check.md#rules-file).
 
 ### Setting OPENAI_API_KEY
 
@@ -505,14 +543,16 @@ This single file contains:
 
 Add to `.gitignore`:
 ```gitignore
-.ctx/
+.ctx/*
+!.ctx/config.toml
+!.ctx/rules.toml
 ```
 
 This is recommended because:
 - Database can be rebuilt with `ctx index`
 - Avoids large binary files in git
 - Each developer can have their own index
-- Embedding dimensions may differ between local/OpenAI
+- Project defaults and architecture policy remain shared
 
 **Commit (For shared code intelligence):**
 

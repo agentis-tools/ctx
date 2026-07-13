@@ -487,7 +487,22 @@ model = "qwen3-embedding:8b"   # Ollama/OpenAI model name
 
 Resolution is always **CLI flag > environment variable > `.ctx/config.toml` >
 built-in default**, so the file never overrides an explicit request. `.ctx/` is
-otherwise git-ignored; the repo's `.gitignore` keeps `config.toml` tracked.
+otherwise git-ignored; the repo's `.gitignore` keeps `config.toml` and `rules.toml` tracked.
+
+### Architecture policy (`.ctx/rules.toml`)
+
+This committed file controls `ctx check` and the `check_violations` metric in `ctx score`. Generate
+a commented starter, inspect the parsed policy, then evaluate it:
+
+```bash
+ctx harness init
+ctx check --list
+ctx check --against origin/main
+```
+
+`ctx harness init` never overwrites an existing `rules.toml`, even with `--force`. See the
+[`ctx check` rules-file reference](commands/check.md#rules-file) for layers, forbidden
+dependencies, allowed dependents, metric limits, and frozen paths.
 
 ### Embedding providers
 
@@ -560,14 +575,16 @@ This single file contains:
 
 Add to `.gitignore`:
 ```gitignore
-.ctx/
+.ctx/*
+!.ctx/config.toml
+!.ctx/rules.toml
 ```
 
 This is recommended because:
 - Database can be rebuilt with `ctx index`
 - Avoids large binary files in git
 - Each developer can have their own index
-- Embedding dimensions may differ between local/OpenAI
+- Project defaults and architecture policy remain shared
 
 **Commit (For shared code intelligence):**
 

@@ -16,8 +16,9 @@
 - CI enforces rustfmt, Clippy warnings-as-errors, tests on Linux/macOS/Windows,
   all/minimal feature combinations, version/governance tests, publish dry-runs,
   changelog policy, dependency advisories/licenses/sources, and contract state.
-- Release CI repeats stronger gates, validates generated plugins and artifacts,
-  publishes checksums, and creates GitHub artifact provenance attestations.
+- Release CI repeats stronger gates; validates platform archives, generated
+  plugins, Debian/RPM packages, and generated package-manager definitions;
+  publishes checksums; and creates GitHub artifact provenance attestations.
 - Dependabot proposes weekly Cargo and GitHub Actions updates. `deny.toml`
   permits only approved licenses, denies unknown registries/git sources, and
   checks advisories and duplicate/wildcard dependency policy.

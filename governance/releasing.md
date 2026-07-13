@@ -51,9 +51,12 @@ The tag workflow repeats governance, formatting, Clippy, all-feature and
 minimal-feature tests, CLI/Rust compatibility checks, publish dry-runs, plugin
 lockstep checks, and dependency policy before publishing. It derives reviewed
 GitHub release notes from `CHANGELOG.md`, not commit-title heuristics. It builds
-four target archives, creates per-archive and aggregate SHA-256 checksums,
-publishes `agentis-ctx`, waits for that publication, then creates the GitHub
-Release and provenance attestations.
+four target archives, Debian and RPM packages, and both plugin archives. Before
+any irreversible publication it verifies producer checksums, validates the
+exact artifact allowlist, generates current Homebrew/AUR/Scoop definitions,
+and uploads an immutable release payload with aggregate SHA-256 checksums. It
+then publishes `agentis-ctx`, waits for that publication, and creates the
+GitHub Release and provenance attestations from that validated payload.
 
 If crate publication succeeds but GitHub Release creation fails, rerun the
 failed workflow jobs; do not create a second tag or bump the version. Cargo
@@ -62,17 +65,22 @@ publication is immutable. Never move or reuse a published tag.
 ## Post-release verification
 
 - Verify crates.io shows the exact version and expected feature set.
-- Verify every documented platform archive, both plugin archives,
-  `SHA256SUMS`, and provenance attestations exist.
+- Verify every documented platform archive, both plugin archives, the Debian
+  and RPM packages, `SHA256SUMS`, and provenance attestations exist.
 - Download one archive, verify its checksum, and run `ctx --version`.
 - Verify `ctx self-update --version <version>` on a supported platform.
+- Confirm the generated package-manager definitions passed their workflow
+  checks and are ready for their separately reviewed distribution updates.
 - Confirm the GitHub notes match the reviewed changelog and no embargoed detail
   was disclosed.
 - Leave a fresh empty Unreleased heading; `version.py` already creates it.
 
-Package-manager manifests are not currently committed. If introduced, they
-must be generated or added to `version.py check` before being described as
-release-supported.
+Committed package-manager files record a concrete published release and are not
+a second authoritative project version. Release CI regenerates Homebrew, AUR,
+and Scoop definitions from the authoritative Cargo version and the validated
+release checksums; Debian and RPM packages are built and tested from the Linux
+release archive. Distribution-repository updates remain explicit maintainer
+actions and never run as a side effect of `version.py`.
 
 This is maintainer policy under `governance/`; public usage documentation stays
 under `docs/`.

@@ -1,0 +1,206 @@
+name: ctx PR comment
+
+on:
+  workflow_run:
+    workflows: ["ctx PR analysis"]
+    types: [completed]
+
+# This privileged workflow never checks out or executes pull-request code.
+# Its only inputs from the analysis run are parsed as untrusted JSON.
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ctx-pr-publish-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out trusted renderer from the default branch
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Download this workflow run's analysis only
+        if: github.event.workflow_run.conclusion == 'success'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: ctx-pr-analysis-${{ github.event.workflow_run.id }}
+          path: ctx-pr-analysis
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Render and update the sticky PR comment
+        if: github.event.workflow_run.conclusion == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ANALYSIS_DIR: ctx-pr-analysis
+          EXPECTED_RUN_ID: ${{ github.event.workflow_run.id }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+          EXPECTED_CTX_VERSION: 0.3.4
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { renderComment, MARKER } = require('./.github/scripts/render-ctx-pr-comment.cjs');
+
+            const dir = path.resolve(process.env.ANALYSIS_DIR);
+            const readJson = (name) => {
+              const file = path.join(dir, name);
+              const stat = fs.lstatSync(file);
+              if (!stat.isFile() || stat.size > 10 * 1024 * 1024) {
+                throw new Error(`Rejected invalid analysis file: ${name}`);
+              }
+              return JSON.parse(fs.readFileSync(file, 'utf8'));
+            };
+
+            const metadata = readJson('metadata.json');
+            const expectedRunId = Number(process.env.EXPECTED_RUN_ID);
+            const expectedPrNumber = Number(process.env.EXPECTED_PR_NUMBER);
+            const expectedHeadSha = process.env.EXPECTED_HEAD_SHA;
+            const expectedBaseSha = process.env.EXPECTED_BASE_SHA;
+            if (metadata.schema_version !== 1 ||
+                !Number.isSafeInteger(expectedPrNumber) || expectedPrNumber <= 0 ||
+                metadata.pr_number !== expectedPrNumber ||
+                metadata.head_sha !== expectedHeadSha ||
+                metadata.base_sha !== expectedBaseSha ||
+                metadata.repository !== process.env.EXPECTED_REPOSITORY ||
+                metadata.run_id !== expectedRunId) {
+              throw new Error('Analysis metadata failed validation');
+            }
+
+            const documents = {
+              stats: readJson('stats.json'),
+              score: readJson('score.json'),
+              duplicates: readJson('duplicates.json'),
+              hotspots: readJson('hotspots.json'),
+              check: readJson('check.json'),
+              map: readJson('map.json'),
+            };
+            const expectedCommands = {
+              stats: 'query.stats', score: 'score', duplicates: 'duplicates',
+              hotspots: 'hotspots', check: 'check', map: 'map',
+            };
+            for (const [name, document] of Object.entries(documents)) {
+              if (document.ctx_version !== process.env.EXPECTED_CTX_VERSION ||
+                  document.command !== expectedCommands[name] ||
+                  !document.data || typeof document.data !== 'object') {
+                throw new Error(`Analysis document failed validation: ${name}`);
+              }
+            }
+            const audit = readJson('audit.json');
+            if (!Number.isFinite(audit.overall_score) ||
+                !Array.isArray(audit.categories) || !Array.isArray(audit.issues)) {
+              throw new Error('Audit document failed validation');
+            }
+
+            const { owner, repo } = context.repo;
+            const getCurrentPr = () => github.rest.pulls.get({
+              owner, repo, pull_number: expectedPrNumber,
+            });
+            let pr = await getCurrentPr();
+            if (pr.data.state !== 'open' || pr.data.head.sha !== metadata.head_sha) {
+              core.notice('Skipping stale or closed pull-request analysis.');
+              return;
+            }
+
+            const report = {
+              metadata,
+              audit,
+              ...documents,
+            };
+            const body = renderComment(report, {
+              artifactUrl: `${context.serverUrl}/${owner}/${repo}/actions/runs/${expectedRunId}`,
+              runId: expectedRunId,
+            });
+
+            // Re-check immediately before the write so a newer synchronize run
+            // cannot be overwritten by this run's stale result.
+            pr = await getCurrentPr();
+            if (pr.data.state !== 'open' || pr.data.head.sha !== metadata.head_sha) {
+              core.notice('Skipping analysis that became stale before publishing.');
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: expectedPrNumber, per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.startsWith(MARKER));
+
+            const existingRunId = Number(existing?.body?.match(/ctx-pr-report-run:(\d+)/)?.[1] || 0);
+            if (existingRunId > expectedRunId) {
+              core.notice(`Skipping older run ${expectedRunId}; comment has run ${existingRunId}.`);
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: expectedPrNumber, body,
+              });
+            }
+
+      - name: Report an analysis failure
+        if: github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.conclusion != 'cancelled'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const marker = '<!-- ctx-pr-report -->';
+            const { owner, repo } = context.repo;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+            if (pr.data.state !== 'open' || pr.data.head.sha !== process.env.HEAD_SHA) {
+              core.notice('Skipping stale or closed pull-request analysis failure.');
+              return;
+            }
+            const body = [
+              marker,
+              `<!-- ctx-pr-report-run:${process.env.RUN_ID} -->`,
+              '## ctx analysis',
+              '',
+              `The ctx analysis run ended with **${process.env.CONCLUSION}**.`,
+              '',
+              `[Open the workflow run for diagnostics](${process.env.RUN_URL}).`,
+            ].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pull_number, per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.startsWith(marker));
+            const existingRunId = Number(existing?.body?.match(/ctx-pr-report-run:(\d+)/)?.[1] || 0);
+            if (existingRunId > Number(process.env.RUN_ID)) {
+              core.notice('Skipping an older failed analysis run.');
+              return;
+            }
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pull_number, body,
+              });
+            }

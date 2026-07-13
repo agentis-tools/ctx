@@ -4,10 +4,39 @@ This guide walks you through installing ctx and using it to generate context for
 
 ## Installation
 
-### From Source (Recommended)
+### Package managers (recommended)
+
+The crates.io package is named `agentis-ctx`; every channel installs the `ctx` executable:
 
 ```bash
-git clone https://github.com/yourusername/ctx
+cargo install agentis-ctx
+cargo binstall agentis-ctx
+brew install agentis-tools/tap/ctx
+yay -S ctx-bin
+```
+
+On Windows with Scoop:
+
+```powershell
+scoop bucket add agentis-tools https://github.com/agentis-tools/scoop-bucket
+scoop install ctx
+```
+
+Debian and RPM packages are also attached to GitHub Releases:
+
+```bash
+sudo apt install ./ctx_VERSION_amd64.deb
+sudo dnf install ./ctx-VERSION-1.x86_64.rpm
+```
+
+The Homebrew tap, AUR package, and Scoop bucket are maintained in separate package-index
+repositories. Current prebuilt targets are Linux GNU x86-64, macOS Intel and Apple Silicon, and
+Windows x86-64; Linux ARM64 and musl are not currently published.
+
+### From source
+
+```bash
+git clone https://github.com/agentis-tools/ctx
 cd ctx
 cargo build --release
 
@@ -17,21 +46,14 @@ cp target/release/ctx /usr/local/bin/
 export PATH="$PATH:$(pwd)/target/release"
 ```
 
-### Using Cargo Install
-
-```bash
-# From crates.io (installs the ctx binary)
-cargo install agentis-ctx
-
-# Or from a local checkout
-cargo install --path .
-```
+Only binaries downloaded directly from GitHub Releases should use `ctx self-update`.
+Package-manager installations must be upgraded through the package manager that owns them.
 
 ### Verify Installation
 
 ```bash
 ctx --version
-# ctx 0.2.0
+# ctx 0.3.4
 ```
 
 ## Part 1: Context Generation

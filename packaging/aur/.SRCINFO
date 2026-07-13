@@ -1,0 +1,15 @@
+pkgbase = ctx-bin
+	pkgdesc = Fast CLI tool that generates AI-ready context from your codebase
+	pkgver = 0.3.3
+	pkgrel = 1
+	url = https://github.com/agentis-tools/ctx
+	arch = x86_64
+	license = MIT
+	license = Apache-2.0
+	provides = ctx
+	conflicts = ctx
+	options = !strip
+	source_x86_64 = ctx-v0.3.3-x86_64-unknown-linux-gnu.tar.gz::https://github.com/agentis-tools/ctx/releases/download/v0.3.3/ctx-v0.3.3-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums_x86_64 = 21b9ce79def9fd07b123f30936fe65608679cce3532b6f789313b6bd815b6273
+
+pkgname = ctx-bin

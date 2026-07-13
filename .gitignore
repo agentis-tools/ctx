@@ -27,8 +27,10 @@ tmp/
 # repo root and would miss .ctx dirs nested in subdirectories.
 .ctx/*
 !.ctx/config.toml
+!.ctx/rules.toml
 **/.ctx/*
 !**/.ctx/config.toml
+!**/.ctx/rules.toml
 .fastembed_cache/
 
 # AI specific

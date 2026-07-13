@@ -34,6 +34,8 @@ use std::fs;
 use std::io::IsTerminal;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use semver::Version;
@@ -234,8 +236,9 @@ fn sha256_hex(data: &[u8]) -> String {
 
 /// Extract the ctx binary member from a downloaded release archive.
 ///
-/// Unix artifacts are `.tar.gz` containing `ctx-<tag>-<target>/ctx`; Windows
-/// artifacts are `.zip` containing `ctx-<tag>-<target>/ctx.exe`.
+/// Unix artifacts are `.tar.gz` containing `ctx`; Windows artifacts are
+/// `.zip` containing `ctx.exe`. Extraction by basename also preserves
+/// compatibility with older archives that nested files in a directory.
 fn extract_binary(archive: &[u8], artifact: &str) -> Result<Vec<u8>> {
     if artifact.ends_with(".tar.gz") {
         return extract_from_tar_gz(archive);
@@ -377,6 +380,91 @@ fn old_binary_path(exe: &Path) -> PathBuf {
 // ctx self-update
 // ============================================================================
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManagedInstall {
+    Cargo,
+    Homebrew,
+    Arch,
+    Debian,
+    Rpm,
+    Scoop,
+}
+
+impl ManagedInstall {
+    fn update_guidance(self) -> &'static str {
+        match self {
+            Self::Cargo => "ctx was installed with Cargo. Update it with:\n  cargo install agentis-ctx",
+            Self::Homebrew => "ctx was installed with Homebrew. Update it with:\n  brew upgrade ctx",
+            Self::Arch => "ctx is owned by an Arch package. Update it with your AUR helper, for example:\n  yay -Syu ctx-bin",
+            Self::Debian => "ctx is owned by a Debian package. Update it by installing a newer .deb package",
+            Self::Rpm => "ctx is owned by an RPM package. Update it by installing a newer .rpm package",
+            Self::Scoop => "ctx was installed with Scoop. Update it with:\n  scoop update ctx",
+        }
+    }
+}
+
+fn path_managed_install(exe: &Path) -> Option<ManagedInstall> {
+    let normalized = exe
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let components: Vec<_> = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    if components.windows(2).any(|pair| pair == [".cargo", "bin"]) {
+        return Some(ManagedInstall::Cargo);
+    }
+    if components.contains(&"cellar") {
+        return Some(ManagedInstall::Homebrew);
+    }
+    if components
+        .windows(3)
+        .any(|parts| parts == ["scoop", "apps", "ctx"])
+    {
+        return Some(ManagedInstall::Scoop);
+    }
+    None
+}
+
+#[cfg(unix)]
+fn command_owns_path(program: &str, args: &[&str], exe: &Path) -> bool {
+    Command::new(program)
+        .args(args)
+        .arg(exe)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Identify installations owned by a package manager without relying only on
+/// writability. Package database queries are local and read-only. A failure or
+/// missing command means "not detected", so direct release installs continue
+/// to support self-update.
+fn managed_install(exe: &Path) -> Option<ManagedInstall> {
+    let canonical = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
+    if let Some(manager) = path_managed_install(&canonical) {
+        return Some(manager);
+    }
+
+    #[cfg(unix)]
+    {
+        if command_owns_path("pacman", &["-Qo", "--"], &canonical) {
+            return Some(ManagedInstall::Arch);
+        }
+        if command_owns_path("dpkg-query", &["-S", "--"], &canonical) {
+            return Some(ManagedInstall::Debian);
+        }
+        if command_owns_path("rpm", &["-qf", "--"], &canonical) {
+            return Some(ManagedInstall::Rpm);
+        }
+    }
+    None
+}
+
 /// Result of a [`self_update`] run.
 #[derive(Debug, Clone)]
 pub struct SelfUpdateReport {
@@ -399,6 +487,12 @@ pub fn self_update(pin: Option<&str>) -> Result<SelfUpdateReport> {
     let dir = exe
         .parent()
         .ok_or_else(|| CtxError::Other("cannot locate the running executable".to_string()))?;
+
+    // Refuse before network access or any filesystem mutation. A package
+    // manager's database must remain authoritative for files it owns.
+    if let Some(manager) = managed_install(&exe) {
+        return Err(CtxError::Other(manager.update_guidance().to_string()));
+    }
 
     // Clean up the renamed-aside binary a previous Windows update left behind.
     #[cfg(windows)]
@@ -645,6 +739,39 @@ fn passive_check_inner() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_managed_install_path_detection() {
+        assert_eq!(
+            path_managed_install(Path::new("/Users/alice/.cargo/bin/ctx")),
+            Some(ManagedInstall::Cargo)
+        );
+        assert_eq!(
+            path_managed_install(Path::new("/opt/homebrew/Cellar/ctx/0.3.4/bin/ctx")),
+            Some(ManagedInstall::Homebrew)
+        );
+        assert_eq!(
+            path_managed_install(Path::new(r"C:\Users\Alice\scoop\apps\ctx\current\ctx.exe")),
+            Some(ManagedInstall::Scoop)
+        );
+        assert_eq!(path_managed_install(Path::new("/usr/local/bin/ctx")), None);
+    }
+
+    #[test]
+    fn test_managed_install_guidance_names_update_command() {
+        assert!(ManagedInstall::Cargo
+            .update_guidance()
+            .contains("cargo install agentis-ctx"));
+        assert!(ManagedInstall::Homebrew
+            .update_guidance()
+            .contains("brew upgrade ctx"));
+        assert!(ManagedInstall::Arch
+            .update_guidance()
+            .contains("yay -Syu ctx-bin"));
+        assert!(ManagedInstall::Scoop
+            .update_guidance()
+            .contains("scoop update ctx"));
+    }
 
     // ---- platform / artifact mapping -------------------------------------
 

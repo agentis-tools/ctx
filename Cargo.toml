@@ -108,6 +108,14 @@ zip = { version = "6", default-features = false, features = ["deflate"] }
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/ctx-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "ctx-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [features]
 default = ["duckdb"]
 duckdb = ["dep:duckdb"]

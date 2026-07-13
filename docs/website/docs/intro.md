@@ -36,8 +36,16 @@ Prefer to learn by topic? Jump to [Context Generation](context-generation.md),
 ## Install
 
 ```bash
-cargo install agentis-ctx   # installs the `ctx` binary
+cargo install agentis-ctx
+cargo binstall agentis-ctx
+brew install agentis-tools/tap/ctx
+yay -S ctx-bin
 ```
+
+Windows users can install from the
+[Scoop bucket](https://github.com/agentis-tools/scoop-bucket); Debian and RPM packages are attached
+to each [GitHub Release](https://github.com/agentis-tools/ctx/releases). See
+[Getting Started](getting-started.md) for all platforms and upgrade guidance.
 
 Supports Rust, TypeScript, JavaScript, JSX/TSX, Python, Go, Solidity, and YAML. Runs locally on
 macOS, Linux, and Windows — see [Getting Started](getting-started.md) for platform notes.

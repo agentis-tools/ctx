@@ -151,52 +151,21 @@ Add to `package.json`:
 
 ## PR Context Generation
 
-### Auto-generate PR Context
+This repository dogfoods ctx on every pull request. The reporter uses separate
+analysis and publishing workflows so fork pull requests can be analyzed
+without giving contributor-controlled code a write-capable token.
 
-```yaml
-name: PR Context
+The read-only workflow indexes the PR and stores a complete JSON bundle. A
+trusted `workflow_run` job then verifies that the analyzed commit is still the
+current PR head and updates one sticky bot comment. The report covers the PR
+quality delta, repository-wide audit and statistics, new near-duplicates,
+architecture rules, changed-code hotspots, and a token-budgeted architectural
+map. Long sections are capped for GitHub's comment limit, while the workflow
+artifact retains the full results for 14 days.
 
-on:
-  pull_request:
-    types: [opened, synchronize]
-
-jobs:
-  context:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Install ctx
-        run: cargo install agentis-ctx
-      
-      - name: Index codebase
-        run: ctx index
-      
-      - name: Generate change context
-        run: |
-          echo "## Changed Files Context" >> $GITHUB_STEP_SUMMARY
-          ctx diff ${{ github.event.pull_request.base.sha }} --summary >> $GITHUB_STEP_SUMMARY
-```
-
-### Comment on PRs
-
-```yaml
-- name: Comment context
-  uses: actions/github-script@v6
-  with:
-    script: |
-      const { execSync } = require('child_process');
-      const context = execSync('ctx diff origin/main --format markdown').toString();
-      
-      github.rest.issues.createComment({
-        issue_number: context.issue.number,
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        body: `## Code Context\n\n${context}`
-      });
-```
+Avoid `pull_request_target` workflows that check out the PR head: they can
+expose a write token to untrusted code. The publisher should download only the
+artifact from its exact triggering run and treat every field as untrusted.
 
 ## Quality Trends
 

@@ -1,0 +1,112 @@
+name: ctx PR analysis
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+# This workflow intentionally has no write permissions. It checks out and
+# analyzes untrusted pull-request code, then hands JSON to a separate
+# workflow_run workflow for publishing.
+permissions:
+  contents: read
+
+concurrency:
+  group: ctx-pr-analysis-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the pull-request head
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned, verified ctx release
+        env:
+          CTX_VERSION: 0.3.4
+        run: |
+          set -euo pipefail
+          artifact="ctx-v${CTX_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          archive_dir="${artifact%.tar.gz}"
+          release_url="https://github.com/agentis-tools/ctx/releases/download/v${CTX_VERSION}"
+
+          # Work outside the checkout and verify the release archive against
+          # the separately published aggregate checksum before executing it.
+          cd "${RUNNER_TEMP}"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "${artifact}" "${release_url}/${artifact}"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output SHA256SUMS "${release_url}/SHA256SUMS"
+          expected="$(awk -v artifact="${artifact}" '$2 == artifact { print $1 }' SHA256SUMS)"
+          test -n "${expected}"
+          echo "${expected}  ${artifact}" | sha256sum --check --strict -
+
+          mkdir -p "${RUNNER_TEMP}/ctx-bin"
+          tar -xzf "${artifact}" --strip-components=1 "${archive_dir}/ctx"
+          install -m 0755 ctx "${RUNNER_TEMP}/ctx-bin/ctx"
+          test "$("${RUNNER_TEMP}/ctx-bin/ctx" --version)" = "ctx ${CTX_VERSION}"
+          echo "${RUNNER_TEMP}/ctx-bin" >> "${GITHUB_PATH}"
+
+      - name: Build ctx analysis artifact
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p ctx-pr-analysis
+
+          # The base SHA is supplied by GitHub, not pull-request code. Fetching
+          # it explicitly makes --against work for both same-repo and fork PRs.
+          git fetch --no-tags origin "${BASE_SHA}"
+          ctx index
+
+          ctx audit --output json > ctx-pr-analysis/audit.json
+          ctx map --budget 12000 --format json > ctx-pr-analysis/map.json
+          ctx query stats --json > ctx-pr-analysis/stats.json
+          ctx score --against "${BASE_SHA}" --json > ctx-pr-analysis/score.json
+          ctx duplicates --against "${BASE_SHA}" --json > ctx-pr-analysis/duplicates.json
+          ctx hotspots --against "${BASE_SHA}" --limit 100 --json > ctx-pr-analysis/hotspots.json
+
+          if [[ -f .ctx/rules.toml ]]; then
+            # Findings use exit 1 and are still a successful analysis.
+            status=0
+            ctx check --against "${BASE_SHA}" --json > ctx-pr-analysis/check.json || status=$?
+            if [[ "${status}" -gt 1 ]]; then
+              exit "${status}"
+            fi
+          else
+            jq -n \
+              --arg version "$(ctx --version | awk '{print $2}')" \
+              --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg against "${BASE_SHA}" \
+              '{ctx_version:$version,command:"check",generated_at:$generated_at,data:{against:$against,configured:false,summary:{violations:0,rules_violated:0},violations:[],note:"No .ctx/rules.toml is configured."}}' \
+              > ctx-pr-analysis/check.json
+          fi
+
+          jq -n \
+            --argjson pr_number "${PR_NUMBER}" \
+            --arg head_sha "${HEAD_SHA}" \
+            --arg base_sha "${BASE_SHA}" \
+            --arg repository "${REPOSITORY}" \
+            --argjson run_id "${RUN_ID}" \
+            '{schema_version:1,pr_number:$pr_number,head_sha:$head_sha,base_sha:$base_sha,repository:$repository,run_id:$run_id}' \
+            > ctx-pr-analysis/metadata.json
+
+          jq -e . ctx-pr-analysis/*.json > /dev/null
+
+      - name: Upload full ctx results
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ctx-pr-analysis-${{ github.run_id }}
+          path: ctx-pr-analysis/*.json
+          if-no-files-found: error
+          retention-days: 14
