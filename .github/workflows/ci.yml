@@ -101,6 +101,7 @@ jobs:
         env:
           CODEX_HOME: ${{ runner.temp }}/codex-home
         run: |
+          mkdir -p "$CODEX_HOME"
           codex plugin marketplace add ./plugins/codex/ctx --json
           codex plugin add ctx@ctx-local --json
 
