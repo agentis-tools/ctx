@@ -647,6 +647,14 @@ mod tests {
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert!(value["description"].is_string());
         assert!(value["author"]["name"].is_string());
+        assert!(value["author"]["email"].is_string());
+        assert_eq!(value["license"], "MIT OR Apache-2.0");
+        assert!(value["homepage"].is_string());
+        assert!(value["repository"]
+            .as_str()
+            .unwrap()
+            .contains("/plugins/claude/ctx"));
+        assert!(value["keywords"].as_array().unwrap().len() >= 4);
 
         // Permission block matches the spec (allow ctx, deny self-update and
         // policy-file edits).

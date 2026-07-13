@@ -1,17 +1,16 @@
 {
   "name": "ctx",
-  "version": "{{CTX_VERSION}}",
+  "version": "0.3.4",
   "description": "Token-budgeted code intelligence, architecture checks, duplication detection, and deterministic quality gates for Codex",
   "author": {
-    "name": "{{AUTHOR_NAME}}",
+    "name": "Johan Öhman Saldes",
     "email": "johan@saldestechnology.com",
     "url": "https://github.com/agentis-tools"
   },
   "homepage": "https://docs.agentis.tools/docs/integrations/codex",
   "repository": "https://github.com/agentis-tools/ctx/tree/main/plugins/codex/ctx",
   "license": "MIT OR Apache-2.0",
-  "keywords": ["code-intelligence", "architecture", "quality-gates", "duplication", "developer-tools", "mcp"],
+  "keywords": ["code-intelligence", "architecture", "quality-gates", "duplication", "developer-tools"],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  "hooks": "./hooks/hooks.json"
 }

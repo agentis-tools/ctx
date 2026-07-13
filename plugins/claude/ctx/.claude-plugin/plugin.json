@@ -3,9 +3,9 @@
   "name": "ctx",
   "displayName": "ctx",
   "description": "Token-budgeted code intelligence, architecture rules, duplication detection, and deterministic quality gates for AI-assisted development",
-  "version": "{{CTX_VERSION}}",
+  "version": "0.3.4",
   "author": {
-    "name": "{{AUTHOR_NAME}}",
+    "name": "Johan Öhman Saldes",
     "email": "johan@saldestechnology.com",
     "url": "https://github.com/agentis-tools"
   },

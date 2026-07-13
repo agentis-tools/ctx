@@ -141,6 +141,17 @@ fn test_codex_plugin_init_json_output() {
         .path()
         .join(".agents/plugins/marketplace.json")
         .exists());
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(temp.path().join(".codex-plugin/plugin.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(manifest["license"], "MIT OR Apache-2.0");
+    assert!(manifest["repository"]
+        .as_str()
+        .unwrap()
+        .contains("/plugins/codex/ctx"));
+    assert!(manifest["keywords"].as_array().unwrap().len() >= 4);
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["data"]["target"], "codex");
 }
