@@ -63,6 +63,7 @@ const sidebars: SidebarsConfig = {
         'json-output',
         'reference/exit-codes',
         'sql-schema',
+        'privacy',
       ],
     },
     'architecture',

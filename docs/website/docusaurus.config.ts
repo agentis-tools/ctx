@@ -89,6 +89,7 @@ const config: Config = {
           title: 'More',
           items: [
             {label: 'GitHub', href: 'https://github.com/agentis-tools/ctx'},
+            {label: 'Privacy', to: '/docs/privacy'},
             {label: 'llms.txt', href: 'pathname:///llms.txt'},
           ],
         },

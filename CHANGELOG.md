@@ -7,17 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Internal
+## [0.3.5] - 2026-07-13
 
-- Add deterministic versioning, release governance, compatibility checks, supply-chain policy, and artifact provenance guardrails.
+### Added
+- Homebrew, Scoop, and AUR package definitions, plus Debian and RPM artifacts in the release workflow with native-package validation and upgrade guidance (#38)
+- Canonical Claude Code and Codex plugin trees that are regenerated and checked against the harness templates, then shipped as versioned release ZIPs (#40)
+- Pull-request analysis workflows that install a checksum-verified ctx binary, run repository checks in an unprivileged workflow, and publish a single updatable report comment from the trusted default branch (#39)
 
-### Security
-
-- Refresh compatible locked dependencies to remediate actionable RustSec advisories and document narrowly scoped, time-bounded transitive exceptions.
+### Changed
+- Standardized release archive construction, checksums, metadata generation, and package-manager-safe self-update behavior so package-owned installations defer upgrades to their package manager (#38)
+- Updated GitHub Actions JavaScript runtimes to Node 24 (#39)
 
 ### Fixed
+- Removed unusable `-f` aliases from `--file` filters that collided with the global `-f`/`--format` option and caused affected command help to abort (#41)
 
-- Remove unusable `-f` aliases from `--file` filters that collided with the global `-f`/`--format` option and caused affected command help to abort.
+### Security
+- Refreshed compatible locked dependencies to remediate actionable RustSec advisories and documented narrowly scoped, time-bounded transitive exceptions (#41)
+
+### Documentation
+- Expanded installation, package upgrade, project configuration, and canonical plugin setup guidance (#38, #40)
+
+### Internal
+- Added deterministic versioning, release governance, compatibility checks, supply-chain policy, and artifact provenance guardrails (#41)
 
 ## [0.3.4] - 2026-07-12
 
@@ -171,7 +182,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File size display option (`--show-sizes`)
 - Binary file detection and exclusion
 
-[Unreleased]: https://github.com/agentis-tools/ctx/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/agentis-tools/ctx/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/agentis-tools/ctx/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/agentis-tools/ctx/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/agentis-tools/ctx/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/agentis-tools/ctx/compare/v0.3.1...v0.3.2

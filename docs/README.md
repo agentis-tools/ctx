@@ -11,6 +11,7 @@ Welcome to the ctx documentation. **ctx** is a fast CLI tool that generates AI-r
 * [Language Support](language-support.md) - Supported languages and their features
 * [Architecture](architecture.md) - How ctx works under the hood
 * [Packaging and Distribution](packaging.md) - Release assets and package-manager maintenance
+* [Privacy Policy](privacy.md) - How ctx and its plugins handle information
 
 ## Why ctx?
 

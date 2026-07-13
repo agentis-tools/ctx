@@ -12,7 +12,7 @@ in Codex to review and trust the definitions.
 Use `ctx harness init --target codex --mode plugin` for a distributable plugin with
 hooks, the ctx skill, a local marketplace entry, and MCP wiring when available.
 
-Install the canonical v0.3.4 plugin from GitHub with:
+Install the canonical v0.3.5 plugin from GitHub with:
 
 ```bash
 codex plugin marketplace add agentis-tools/ctx --ref main --sparse plugins/codex/ctx

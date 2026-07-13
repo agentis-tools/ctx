@@ -30,9 +30,9 @@ After downloading a release's `SHA256SUMS`, run the repository generators with t
 version:
 
 ```bash
-./scripts/update-homebrew-formula.sh 0.3.4 SHA256SUMS
-./scripts/update-aur-package.sh 0.3.4 SHA256SUMS
-pwsh ./scripts/update-scoop-manifest.ps1 -Version 0.3.4 -Checksums SHA256SUMS
+./scripts/update-homebrew-formula.sh 0.3.5 SHA256SUMS
+./scripts/update-aur-package.sh 0.3.5 SHA256SUMS
+pwsh ./scripts/update-scoop-manifest.ps1 -Version 0.3.5 -Checksums SHA256SUMS
 ```
 
 The resulting files are ready to copy to the external package-index repositories:

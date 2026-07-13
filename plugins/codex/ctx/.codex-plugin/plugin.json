@@ -1,6 +1,6 @@
 {
   "name": "ctx",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Token-budgeted code intelligence, architecture checks, duplication detection, and deterministic quality gates for Codex",
   "author": {
     "name": "Johan Öhman Saldes",
