@@ -26,6 +26,20 @@ To package the same integration as a distributable Claude Code plugin (hooks + s
 ctx harness init --mode plugin
 ```
 
+To use the published v0.3.4 plugin directly, load its release ZIP for a
+session:
+
+```bash
+claude --plugin-url https://github.com/agentis-tools/ctx/releases/download/v0.3.4/ctx-claude-plugin-0.3.4.zip
+```
+
+For development, clone the repository and run
+`claude --plugin-dir ./plugins/claude/ctx`. The canonical plugin source is
+[`plugins/claude/ctx`](../../plugins/claude/ctx). It runs locally and invokes
+the `ctx` binary on `PATH`; the published default plugin does not configure
+MCP. Generate an MCP-enabled variant only with a ctx binary built using
+`--features mcp`.
+
 See [`ctx harness`](../commands/harness.md) for the full reference. If you prefer to wire the hooks by hand, the manual `settings.json` reference lives in the [Quality Gates guide](./quality-gates.md).
 
 ## Claude Desktop (MCP)

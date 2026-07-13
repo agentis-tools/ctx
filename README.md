@@ -139,6 +139,23 @@ ctx harness init --target claude          # local hooks in .claude/ (or --mode p
 ctx harness init --target codex           # local hooks in .codex/ (also supports --mode plugin)
 ```
 
+Released plugins are also available without generating them yourself:
+
+```bash
+# Claude Code: load the v0.3.4 release plugin for this session
+claude --plugin-url https://github.com/agentis-tools/ctx/releases/download/v0.3.4/ctx-claude-plugin-0.3.4.zip
+
+# Codex: add the canonical marketplace path and install ctx
+codex plugin marketplace add agentis-tools/ctx --ref main --sparse plugins/codex/ctx
+codex plugin add ctx@ctx-local
+```
+
+The canonical generated trees live at [`plugins/claude/ctx`](plugins/claude/ctx)
+and [`plugins/codex/ctx`](plugins/codex/ctx). Both run locally and require the
+`ctx` binary on `PATH`. MCP is optional and requires installing ctx with
+`cargo install agentis-ctx --features mcp`; the default v0.3.4 plugin ZIPs do
+not claim or configure MCP support.
+
 This scaffolds three hooks and a starter `.ctx/rules.toml`:
 
 - **SessionStart** → `ctx map` primes the agent with a codebase map before it does anything.

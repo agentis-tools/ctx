@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ctx *)"
+    ],
+    "deny": [
+      "Bash(ctx self-update*)",
+      "Edit(.ctx/rules.toml)",
+      "Edit(.claude/hooks/ctx/**)",
+      "Edit(.claude/settings.json)"
+    ]
+  }
+}

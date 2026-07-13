@@ -2,7 +2,7 @@
   "name": "ctx-local",
   "description": "Official ctx code-intelligence and quality-gate plugin",
   "owner": {
-    "name": "{{AUTHOR_NAME}}",
+    "name": "Johan Öhman Saldes",
     "email": "johan@saldestechnology.com"
   },
   "plugins": [
@@ -10,7 +10,7 @@
       "name": "ctx",
       "source": "./",
       "description": "Token-budgeted code intelligence and deterministic quality gates for Claude Code",
-      "version": "{{CTX_VERSION}}",
+      "version": "0.3.4",
       "homepage": "https://docs.agentis.tools/docs/integrations/claude",
       "repository": "https://github.com/agentis-tools/ctx/tree/main/plugins/claude/ctx",
       "license": "MIT OR Apache-2.0",
