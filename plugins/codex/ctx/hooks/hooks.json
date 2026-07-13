@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"\"${PLUGIN_ROOT}/hooks/session-start.sh\"","statusMessage":"Loading ctx codebase map"}]}],
+    "PostToolUse": [{"matcher":"Edit|Write","hooks":[{"type":"command","command":"\"${PLUGIN_ROOT}/hooks/post-tool-use.sh\"","statusMessage":"Checking architecture rules"}]}],
+    "Stop": [{"hooks":[{"type":"command","command":"\"${PLUGIN_ROOT}/hooks/stop.sh\"","timeout":120,"statusMessage":"Checking ctx quality gates"}]}]
+  }
+}

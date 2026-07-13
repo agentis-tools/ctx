@@ -87,6 +87,38 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: "1.91"
+
+      - name: Verify generated and committed plugins match
+        run: ./scripts/release-plugin-check.sh --check
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.207
+
+      - name: Validate Claude plugin
+        run: claude plugin validate ./plugins/claude/ctx --strict
+
+      - name: Install Codex
+        run: npm install -g @openai/codex@0.144.3
+
+      - name: Validate Codex marketplace and install
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codex-home
+        run: |
+          mkdir -p "$CODEX_HOME"
+          codex plugin marketplace add ./plugins/codex/ctx --json
+          codex plugin add ctx@ctx-local --json
+
   publish-dry-run:
     runs-on: ubuntu-latest
     steps:

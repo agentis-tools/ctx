@@ -127,6 +127,9 @@ jobs:
             ctx-*.zip*
           if-no-files-found: error
 
+  # Plugin/binary version lockstep: both release ZIPs are packaged from the
+  # committed canonical trees, after comparing them byte-for-byte with fresh
+  # `ctx harness init --mode plugin` output.
   plugin:
     needs: release-gates
     runs-on: ubuntu-latest
