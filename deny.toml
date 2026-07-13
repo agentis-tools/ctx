@@ -44,6 +44,9 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal path dependencies are tied to the checked-out source tree. Keep
+# registry wildcard versions denied without duplicating the ctx package version.
+allow-wildcard-paths = true
 highlight = "all"
 deny = []
 skip = []
