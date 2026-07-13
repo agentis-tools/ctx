@@ -1,0 +1,28 @@
+{
+    "version": "0.3.3",
+    "description": "Fast CLI tool that generates AI-ready context from your codebase",
+    "homepage": "https://docs.agentis.tools",
+    "license": "MIT OR Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/agentis-tools/ctx/releases/download/v0.3.3/ctx-v0.3.3-x86_64-pc-windows-msvc.zip",
+            "hash": "932a341acf9ae1fe0803cc806cd8e4334ebedea82dce45f875d4d0a0cc0aefae",
+            "extract_dir": "ctx-v0.3.3-x86_64-pc-windows-msvc",
+            "bin": "ctx.exe"
+        }
+    },
+    "checkver": {
+        "github": "https://github.com/agentis-tools/ctx"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/agentis-tools/ctx/releases/download/v$version/ctx-v$version-x86_64-pc-windows-msvc.zip",
+                "hash": {
+                    "url": "$url.sha256"
+                },
+                "extract_dir": "ctx-v$version-x86_64-pc-windows-msvc"
+            }
+        }
+    }
+}

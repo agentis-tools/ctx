@@ -44,7 +44,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pin the oldest available hosted Linux image to avoid unnecessarily
+          # raising the released binary's glibc floor on runner image updates.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             features: ""
           # macos-latest runners are arm64; use the Intel runner for x86_64
@@ -74,29 +76,85 @@ jobs:
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
-          NAME="ctx-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir "$NAME"
-          cp "target/${{ matrix.target }}/release/ctx" README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "$NAME/"
-          tar czf "$NAME.tar.gz" "$NAME"
-          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+          python3 scripts/package-release.py \
+            "${GITHUB_REF_NAME#v}" \
+            "${{ matrix.target }}" \
+            "target/${{ matrix.target }}/release/ctx" \
+            .
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $name = "ctx-$env:GITHUB_REF_NAME-${{ matrix.target }}"
-          New-Item -ItemType Directory -Path $name
-          Copy-Item target/${{ matrix.target }}/release/ctx.exe, README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE $name/
-          Compress-Archive -Path $name -DestinationPath "$name.zip"
-          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          python scripts/package-release.py `
+            "$($env:GITHUB_REF_NAME.TrimStart('v'))" `
+            "${{ matrix.target }}" `
+            "target/${{ matrix.target }}/release/ctx.exe" `
+            .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ctx-${{ matrix.target }}
           path: |
-            ctx-*.tar.gz*
-            ctx-*.zip*
+            ctx-v*.tar.gz
+            ctx-v*.zip
+
+  linux-packages:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux GNU release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ctx-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Install native package tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cpio rpm
+
+      - name: Build and validate Debian and RPM packages
+        run: |
+          ./scripts/package-linux.sh \
+            "${GITHUB_REF_NAME#v}" \
+            "dist/ctx-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" \
+            dist
+
+      - name: Optional package lint
+        run: |
+          if command -v lintian >/dev/null; then
+            lintian "dist/ctx_${GITHUB_REF_NAME#v}_amd64.deb"
+          else
+            echo "lintian is unavailable; dpkg-deb structural validation completed"
+          fi
+          if command -v rpmlint >/dev/null; then
+            rpmlint "dist/ctx-${GITHUB_REF_NAME#v}-1.x86_64.rpm"
+          else
+            echo "rpmlint is unavailable; rpm metadata/content validation completed"
+          fi
+
+      - name: Test packaged executables
+        run: |
+          sudo apt-get install --yes "./dist/ctx_${GITHUB_REF_NAME#v}_amd64.deb"
+          ctx --version
+          ctx --help >/dev/null
+          mkdir rpm-root
+          cd rpm-root
+          rpm2cpio "../dist/ctx-${GITHUB_REF_NAME#v}-1.x86_64.rpm" | cpio -idmu
+          ./usr/bin/ctx --version
+          ./usr/bin/ctx --help >/dev/null
+
+      - name: Upload native package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctx-linux-packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
 
   # Plugin/binary version lockstep: both release ZIPs are packaged from the
   # committed canonical trees, after comparing them byte-for-byte with fresh
@@ -122,9 +180,11 @@ jobs:
             ctx-codex-plugin-*.zip
 
   github-release:
-    needs: [build, plugin]
+    needs: [build, plugin, linux-packages]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -137,8 +197,33 @@ jobs:
       - name: Aggregate SHA256SUMS
         run: |
           cd dist
-          sha256sum ctx-*.tar.gz ctx-*.zip > SHA256SUMS
+          for artifact in ctx-v*.tar.gz ctx-v*.zip; do
+            sha256sum "$artifact" > "$artifact.sha256"
+          done
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+            | LC_ALL=C sort \
+            | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Validate release assets
+        run: python3 scripts/validate-release-assets.py "${GITHUB_REF_NAME#v}" dist --complete
+
+      - name: Generate and validate package-manager definitions
+        run: |
+          python3 scripts/update-package-metadata.py \
+            "${GITHUB_REF_NAME#v}" dist/SHA256SUMS
+          python3 scripts/update-package-metadata.py \
+            "${GITHUB_REF_NAME#v}" dist/SHA256SUMS --check
+
+      - name: Upload generated package-manager definitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctx-package-manager-definitions
+          path: |
+            packaging/homebrew/ctx.rb
+            packaging/aur/PKGBUILD
+            packaging/aur/.SRCINFO
+            packaging/scoop/ctx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

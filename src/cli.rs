@@ -815,7 +815,9 @@ SECURITY:
 
 NOTES:
     Set CTX_NO_UPDATE_CHECK=1 to silence the passive update notice.
-    If ctx was installed via cargo, prefer 'cargo install agentis-ctx'.
+    Self-update is for direct GitHub installs. Cargo, Homebrew, Arch,
+    Debian, RPM, and Scoop installations must use their package manager;
+    ctx refuses to overwrite package-owned executables.
     On Windows the previous binary is left beside the new one as
     'ctx.exe.old' (removed on the next self-update).
 

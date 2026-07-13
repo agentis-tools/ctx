@@ -119,6 +119,26 @@ jobs:
       - name: Dry-run publish (minimal)
         run: cargo publish --dry-run --no-default-features
 
+  packaging-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate generated package-manager files
+        run: |
+          python3 scripts/update-package-metadata.py \
+            0.3.3 packaging/SHA256SUMS.v0.3.3 --check
+          python3 -m py_compile \
+            scripts/package-release.py \
+            scripts/update-package-metadata.py \
+            scripts/validate-release-assets.py
+          bash -n \
+            scripts/package-linux.sh \
+            scripts/update-aur-package.sh \
+            scripts/update-homebrew-formula.sh
+          ruby -c packaging/homebrew/ctx.rb
+          python3 -m json.tool packaging/scoop/ctx.json >/dev/null
+
   perf:
     runs-on: ubuntu-latest
     steps:

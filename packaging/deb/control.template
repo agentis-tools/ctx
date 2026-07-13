@@ -1,0 +1,11 @@
+Package: ctx
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: @MAINTAINER@
+Homepage: https://github.com/agentis-tools/ctx
+Depends: @DEPENDS@
+Description: Fast CLI for generating AI-ready context from source code
+ ctx indexes, searches, and analyzes source trees for use by developers and
+ AI coding tools.

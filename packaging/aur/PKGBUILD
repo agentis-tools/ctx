@@ -1,0 +1,20 @@
+# Maintainer: agentis-tools contributors
+pkgname=ctx-bin
+pkgver=0.3.3
+pkgrel=1
+pkgdesc="Fast CLI tool that generates AI-ready context from your codebase"
+arch=('x86_64')
+url="https://github.com/agentis-tools/ctx"
+license=('MIT' 'Apache-2.0')
+provides=('ctx')
+conflicts=('ctx')
+options=('!strip')
+source_x86_64=("ctx-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz::https://github.com/agentis-tools/ctx/releases/download/v${pkgver}/ctx-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('21b9ce79def9fd07b123f30936fe65608679cce3532b6f789313b6bd815b6273')
+
+package() {
+  local srcdir="${srcdir}/ctx-v${pkgver}-x86_64-unknown-linux-gnu"
+  install -Dm755 "${srcdir}/ctx" "${pkgdir}/usr/bin/ctx"
+  install -Dm644 "${srcdir}/LICENSE-MIT" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
+  install -Dm644 "${srcdir}/LICENSE-APACHE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+}

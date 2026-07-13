@@ -28,14 +28,54 @@ leaves your machine.
 
 ## Install
 
+From crates.io:
+
 ```bash
-cargo install agentis-ctx        # crate is `agentis-ctx`; it installs the `ctx` binary
+cargo install agentis-ctx
+cargo binstall agentis-ctx
 ```
 
-Prebuilt binaries for Linux (x86_64), macOS (Intel + Apple Silicon), and Windows (x86_64) are
-attached to each [GitHub release](https://github.com/agentis-tools/ctx/releases). Once installed,
-`ctx self-update` upgrades in place (every download is checksum-verified against the release's
-`SHA256SUMS` before replacing the binary).
+Package managers:
+
+```bash
+brew install agentis-tools/tap/ctx   # macOS (Intel or Apple Silicon), Linux x86-64
+yay -S ctx-bin                       # Arch Linux x86-64
+```
+
+```powershell
+scoop bucket add agentis-tools https://github.com/agentis-tools/scoop-bucket
+scoop install ctx
+```
+
+Debian and RPM packages are attached to each
+[GitHub release](https://github.com/agentis-tools/ctx/releases) and can be installed directly:
+
+```bash
+sudo apt install ./ctx_VERSION_amd64.deb
+sudo dnf install ./ctx-VERSION-1.x86_64.rpm
+```
+
+The Homebrew tap, Scoop bucket, and AUR package are published from separate package-index
+repositories. Prebuilt release binaries support Linux GNU x86-64, macOS Intel and Apple Silicon,
+and Windows x86-64. Linux ARM64 and musl binaries are not currently published.
+
+### Upgrading
+
+Use the same package manager that installed `ctx`:
+
+| Installation | Upgrade command |
+|---|---|
+| Cargo | `cargo install agentis-ctx` |
+| Homebrew | `brew upgrade ctx` |
+| Arch/AUR | `yay -Syu ctx-bin` |
+| Scoop | `scoop update ctx` |
+| Debian | Install the newer `.deb` with `apt` |
+| RPM | Install the newer `.rpm` with `dnf` |
+| Direct GitHub download | `ctx self-update` |
+
+`ctx self-update` detects managed installations before accessing the network and refuses to
+overwrite package-owned files. Direct downloads are verified against the release's `SHA256SUMS`
+before the executable is replaced.
 
 ```bash
 # On Windows (MSVC), DuckDB analytics aren't available, so skip the default feature:
@@ -43,7 +83,9 @@ cargo install agentis-ctx --no-default-features
 ```
 
 See the [Getting Started guide](https://docs.agentis.tools/docs/getting-started) for the full
-platform matrix.
+platform matrix. Maintainers should use the [packaging and distribution runbook](docs/packaging.md)
+for release assets, metadata generation, native-package validation, and external repository
+publication.
 
 ## The loop: index → ground → govern
 
@@ -204,7 +246,7 @@ The full flag reference for every command lives at
 | **Integrate** | `harness` | Wire ctx into Claude Code (`init` / `doctor` / `compat`) |
 | | `serve --mcp` | MCP server (requires the `mcp` feature) |
 | | `shell` | Interactive REPL for exploring the codebase |
-| | `self-update` | Update to the latest release (checksum-verified) |
+| | `self-update` | Update a direct GitHub installation (checksum-verified) |
 
 ## Supported Languages
 
@@ -265,9 +307,33 @@ token counting, and output formatting.
 
 ```
 .ctx/
-├── codebase.sqlite    # symbols, edges, embeddings, compressed source (FTS5 + sqlite-vec)
-└── rules.toml         # your architecture rules (created by `ctx harness init`)
+├── config.toml        # committed project defaults (optional; edit this)
+├── rules.toml         # committed architecture policy (created by `ctx harness init`; edit this)
+├── harness.lock       # generated harness ownership metadata (do not edit)
+└── codebase.sqlite    # generated symbols, edges, embeddings, and compressed source
 ```
+
+`.ctx/config.toml` currently configures the embedding backend shared by a project:
+
+```toml
+[embedding]
+provider = "ollama"                 # local (default) | openai | ollama
+model = "qwen3-embedding:8b"        # provider-specific model
+# host = "http://localhost:11434"   # Ollama only
+```
+
+Settings resolve in this order: CLI flag, environment variable, `.ctx/config.toml`, built-in
+default. The file affects `ctx embed`, `semantic`, `smart`, and `similar`. Switching embedding
+providers or models requires `ctx embed --force` because their vectors are not interchangeable.
+
+`.ctx/rules.toml` defines the layers, forbidden dependencies, metric limits, and frozen paths used
+by `ctx check` and the `check_violations` metric in `ctx score`. Create a commented starter with
+`ctx harness init`, inspect it with `ctx check --list`, and run it with `ctx check`. See the
+[rules-file reference](https://docs.agentis.tools/docs/commands/check#rules-file) for the complete
+schema.
+
+Commit `config.toml` and `rules.toml` so the team and CI share the same defaults and policy. Ignore
+generated data such as `codebase.sqlite`; ctx can rebuild it with `ctx index`.
 
 - **Tree-sitter** parses every supported language into symbols and relationship edges.
 - **SQLite** (with FTS5 and `sqlite-vec`) is the persistent, single-file store.

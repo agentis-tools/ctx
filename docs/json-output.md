@@ -629,7 +629,11 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 }
 ```
 
-`outcome` is `updated` (the binary was replaced) or `up_to_date` (nothing to do). Failures (network error, checksum mismatch, install location not writable, unsupported platform) exit 2 without emitting an envelope. Note that `--json` also suppresses the passive update notice — in JSON mode nothing but the envelope is ever printed to stdout, and update notices only ever go to stderr.
+`outcome` is `updated` (the binary was replaced) or `up_to_date` (nothing to do). Failures
+(package-manager-owned installation, network error, checksum mismatch, install location not
+writable, or unsupported platform) exit 2 without emitting an envelope. Note that `--json` also
+suppresses the passive update notice — in JSON mode nothing but the envelope is ever printed to
+stdout, and update notices only ever go to stderr.
 
 ### `version.check`
 
