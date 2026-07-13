@@ -1,0 +1,99 @@
+name: ctx PR analysis
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+# This workflow intentionally has no write permissions. It checks out and
+# analyzes untrusted pull-request code, then hands JSON to a separate
+# workflow_run workflow for publishing.
+permissions:
+  contents: read
+
+concurrency:
+  group: ctx-pr-analysis-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned released ctx
+        env:
+          CTX_VERSION: 0.3.4
+        run: |
+          rustup toolchain install 1.91.0 --profile minimal
+          rustup default 1.91.0
+          # Run outside the checkout so PR-controlled .cargo/config.toml files
+          # cannot alter the registry, compiler, or install command.
+          cd "${RUNNER_TEMP}"
+          cargo install agentis-ctx --version "=${CTX_VERSION}" --locked --root "${RUNNER_TEMP}/ctx"
+          test "$("${RUNNER_TEMP}/ctx/bin/ctx" --version)" = "ctx ${CTX_VERSION}"
+          echo "${RUNNER_TEMP}/ctx/bin" >> "${GITHUB_PATH}"
+
+      - name: Build ctx analysis artifact
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p ctx-pr-analysis
+
+          # The base SHA is supplied by GitHub, not pull-request code. Fetching
+          # it explicitly makes --against work for both same-repo and fork PRs.
+          git fetch --no-tags origin "${BASE_SHA}"
+          ctx index
+
+          ctx audit --output json > ctx-pr-analysis/audit.json
+          ctx map --budget 12000 --format json > ctx-pr-analysis/map.json
+          ctx query stats --json > ctx-pr-analysis/stats.json
+          ctx score --against "${BASE_SHA}" --json > ctx-pr-analysis/score.json
+          ctx duplicates --against "${BASE_SHA}" --json > ctx-pr-analysis/duplicates.json
+          ctx hotspots --against "${BASE_SHA}" --limit 100 --json > ctx-pr-analysis/hotspots.json
+
+          if [[ -f .ctx/rules.toml ]]; then
+            # Findings use exit 1 and are still a successful analysis.
+            status=0
+            ctx check --against "${BASE_SHA}" --json > ctx-pr-analysis/check.json || status=$?
+            if [[ "${status}" -gt 1 ]]; then
+              exit "${status}"
+            fi
+          else
+            jq -n \
+              --arg version "$(ctx --version | awk '{print $2}')" \
+              --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg against "${BASE_SHA}" \
+              '{ctx_version:$version,command:"check",generated_at:$generated_at,data:{against:$against,configured:false,summary:{violations:0,rules_violated:0},violations:[],note:"No .ctx/rules.toml is configured."}}' \
+              > ctx-pr-analysis/check.json
+          fi
+
+          jq -n \
+            --argjson pr_number "${PR_NUMBER}" \
+            --arg head_sha "${HEAD_SHA}" \
+            --arg base_sha "${BASE_SHA}" \
+            --arg repository "${REPOSITORY}" \
+            --argjson run_id "${RUN_ID}" \
+            '{schema_version:1,pr_number:$pr_number,head_sha:$head_sha,base_sha:$base_sha,repository:$repository,run_id:$run_id}' \
+            > ctx-pr-analysis/metadata.json
+
+          jq -e . ctx-pr-analysis/*.json > /dev/null
+
+      - name: Upload full ctx results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ctx-pr-analysis-${{ github.run_id }}
+          path: ctx-pr-analysis/*.json
+          if-no-files-found: error
+          retention-days: 14
