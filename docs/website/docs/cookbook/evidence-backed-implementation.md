@@ -98,9 +98,11 @@ The analytics files remained validation-only. Evidence should remove files from 
 well as add them.
 
 :::caution A focused map can still be global
-`ctx map --focus query_impact` found no matching symbol in this experiment and returned a broadly
-ranked map. The dispatch logic was inline rather than named `query_impact`. Confirm that focused
-output contains the requested concept before using it as a working set.
+`ctx map --focus query_impact` found no matching symbol in this experiment. ctx 0.3.5 warned that
+the focus matched no indexed file or symbol and that it was proceeding without focus, then returned
+a broadly ranked map. The dispatch logic was inline rather than named `query_impact`. Treat that
+warning as a failed focus: choose an indexed path or symbol and rerun rather than using the global
+fallback as a focused working set.
 :::
 
 ## 3. Establish a narrow baseline
