@@ -82,6 +82,27 @@ ctx writes an atomic partition beneath `.ctx/snapshots/sha=<commit>/` containing
 Capturing the same commit again is a no-op unless you pass `--force`. A dirty-tree snapshot is
 labelled with `HEAD` but reflects working-tree content, so CI should capture from a clean checkout.
 
+### Bootstrap history, then verify coverage
+
+Backfill can seed an existing repository before default-branch CI takes over:
+
+```bash
+ctx snapshot backfill --since <ref> --json > backfill.json
+
+git rev-list --first-parent --reverse "<ref>^..HEAD"
+ctx sql --snapshots=.ctx/snapshots \
+  "SELECT commit_sha, committed_at
+   FROM snap.meta
+   ORDER BY committed_at;"
+```
+
+Compare the intended first-parent commits, adjusted for any `--every` sampling, with the rows in
+`snap.meta`. Do not treat a successful backfill exit or the length of `backfill.json` as proof of
+complete coverage. In ctx 0.3.5, a per-commit indexing or export failure is logged and skipped while
+the remaining walk continues; failed commits are omitted from the JSON report. Reports for existing
+partitions also contain zero row counts because ctx does not reopen those Parquet files. The
+persisted `snap.meta` table is the authority for which commits are actually queryable.
+
 ## 3. Append snapshots from default-branch CI
 
 Keep generated metric history out of the product branch. The following shape uses an orphan
@@ -215,6 +236,7 @@ Use several signals together:
 | Fan-out rises repeatedly around one symbol | Growing orchestration role or spreading coupling |
 | Violation count stays at zero | Confirm that active rules cover the architecture before celebrating |
 | One metric jumps at one commit and then stabilizes | Inspect that change before calling it a trend |
+| Expected commits are absent from `snap.meta` after backfill | Treat the history as incomplete and inspect the per-commit stderr diagnostics |
 
 Treat a trend as stronger evidence when it persists, appears in related metrics, and concentrates in
 code that changes frequently.
@@ -271,6 +293,12 @@ target, not an instruction to split the file blindly.
 The duplicate list also contained parallel enum `as_str` methods, analogous test helpers, and
 similar read-only database query methods. Some may be reusable; others are intentionally explicit.
 Each pair needs source and ownership context before action.
+
+A five-commit local backfill trial also demonstrated that coverage must be checked from persisted
+metadata. Four commits failed when the environment initially prevented temporary worktree creation,
+but the command still exited successfully and its JSON report mentioned only the already-existing
+partition. After worktree access was restored, the four missing partitions were captured and all
+five intended SHAs appeared in `snap.meta`.
 
 Finally, every snapshot reported zero architecture violations because the repository had no
 committed active architecture rules; the current local starter file is also empty. That is a

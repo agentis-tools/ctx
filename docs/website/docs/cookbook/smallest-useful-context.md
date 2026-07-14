@@ -134,6 +134,15 @@ rg -n "meta\.parquet|snap\.meta|snapshot_schema_version|capture_mode" \
 ctx's indexed search is symbol-oriented. Repository text search remains appropriate for prose,
 snapshots, string contracts, generated-contract inputs, and configuration keys.
 
+:::caution Code relevance is not repository completeness
+A second ctx 0.3.5 trial asked `smart` to “update cookbook governance without breaking generated
+plugin contracts.” It selected 12 code files totaling 45,730 content tokens, but no cookbook page,
+governance document, workflow YAML, or plugin skill source. That result was a useful code-symbol
+ranking, not a useful working set for the task. For documentation, CI, policy, packaging, or
+generated-contract work, inventory the relevant Markdown, YAML, configuration, and generator inputs
+with `rg`, `git diff`, and repository conventions before accepting any semantic bundle.
+:::
+
 ## 4. Verify relationships around the implementation
 
 Trace the distinctive writer symbol:
@@ -239,7 +248,7 @@ spending context on a global tree or unrelated ranked candidates.
 | Technique | Verified use | Limitation observed |
 |---|---|---|
 | `smart --dry-run --explain` | Reveals the ranked candidate set and selection reasons | Current dry-run ignores the token limit and is human-formatted |
-| Budgeted `smart` output | Quickly builds a useful whole-file implementation bundle | A smaller wrapper can displace a large core file; contracts may be omitted |
+| Budgeted `smart` output | Quickly builds a useful whole-file implementation bundle | A smaller wrapper can displace a large core file; prose, workflows, and contracts may be omitted |
 | Exact `ctx search` | Finds writer symbols and symbolized consumers from persisted terminology | Does not cover every prose or string-only reference |
 | Callers, dependencies, and impact | Verifies the execution path around a distinctive symbol | Static edges do not replace contract or text search |
 | `ctx source` | Creates very small, high-signal investigation context | A snippet omits neighboring conventions needed for editing |
@@ -255,10 +264,11 @@ Build the smallest useful context for this task. First define which writers, rea
 configuration, persisted schemas, public contracts, and documentation would make the context
 complete. Use ctx smart --dry-run --explain only for candidate discovery, then verify the actual
 budgeted output. Audit omissions with exact search, semantic search when configured, callers,
-dependencies, impact, source inspection, and repository text search. Use symbol snippets for the
-investigation, but include complete files needed for implementation. Count the final explicit file
-set before rendering it. Report why every included file belongs and which known surfaces remain
-outside the bundle.
+dependencies, impact, source inspection, git inventory, and repository text search. For docs,
+workflows, policy, packaging, or generated artifacts, explicitly inventory non-code sources and
+their generators. Use symbol snippets for the investigation, but include complete files needed for
+implementation. Count the final explicit file set before rendering it. Report why every included
+file belongs and which known surfaces remain outside the bundle.
 ```
 
 ## Next in Cookbook v2
