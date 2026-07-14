@@ -31,7 +31,7 @@ The `diff` command identifies changed files compared to a git reference and incl
 | `--depth <N>` | Depth for finding related symbols | 1 |
 | `--changes-only` | Only include changed files, not related context | false |
 | `--staged` | Compare staged changes instead of a revision | false |
-| `--summary` | Show only summary, not file contents | false |
+| `--summary` | Include a change summary on stderr | false |
 | `-f, --format <FORMAT>` | Output format (xml, markdown, md, plain, json) | xml |
 | `--show-sizes` | Show file sizes in the project tree | false |
 | `--no-tree` | Disable the project tree in output | false |
@@ -79,9 +79,14 @@ ctx diff --max-tokens 4000
 ### Summary Mode
 
 ```bash
-# Just see what changed without file contents
-ctx diff --summary
+# On Unix, discard streamed contents while retaining the stderr summary
+ctx diff --summary --changes-only --no-tree >/dev/null
 ```
+
+`--summary` adds the summary; it does not suppress context output. In ctx 0.3.5, the inherited
+`--count-only` option is accepted by `ctx diff` but is not applied, so use stdout redirection when
+you need only the diagnostic summary. The summary reports the selected token count and omissions;
+then choose a task-appropriate `--max-tokens` value for the content run.
 
 Output:
 ```

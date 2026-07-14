@@ -18,6 +18,27 @@ const sidebars: SidebarsConfig = {
     'code-intelligence',
     {
       type: 'category',
+      label: 'Cookbook',
+      items: [
+        'cookbook/cookbook',
+        'cookbook/continuous-health',
+        'cookbook/pr-governance',
+        'cookbook/architecture-drift',
+        'cookbook/chronic-hotspots',
+        'cookbook/intentional-complexity',
+        'cookbook/duplication-trajectories',
+        'cookbook/release-health-report',
+        'cookbook/unfamiliar-codebase',
+        'cookbook/smallest-useful-context',
+        'cookbook/find-existing-implementations',
+        'cookbook/blast-radius',
+        'cookbook/evidence-backed-implementation',
+        'cookbook/debug-failing-test',
+        'cookbook/review-large-branch',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Governance',
       items: [
         'integrations/quality-gates',

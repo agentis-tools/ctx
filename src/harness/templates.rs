@@ -26,6 +26,8 @@ pub const HOOKS_JSON: &str = include_str!("templates/hooks.json");
 pub const MCP_JSON: &str = include_str!("templates/mcp.json");
 pub const MARKETPLACE_JSON: &str = include_str!("templates/marketplace.json");
 pub const PLUGIN_SETTINGS_JSON: &str = include_str!("templates/plugin-settings.json");
+// Keep this canonical harness template in lockstep with the standalone
+// `skills/ctx/SKILL.md` distribution (enforced by release-plugin-check.sh).
 pub const SKILL_MD: &str = include_str!("templates/SKILL.md");
 pub const PLUGIN_README_MD: &str = include_str!("templates/plugin-README.md");
 pub const CODEX_SESSION_START_SH: &str = include_str!("templates/codex-session-start.sh");
