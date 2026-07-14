@@ -12,9 +12,12 @@ ctx uses tree-sitter for parsing, providing accurate symbol extraction across mu
 | JavaScript | `.js`, `.mjs`, `.cjs` | Full | Calls, Extends, Imports | Full |
 | JSX | `.jsx` | Full | Calls, Extends, Imports | Full |
 | Python | `.py`, `.pyi` | Full | Calls, Extends, Imports | Full |
+| Go | `.go` | Full | Calls, Imports | Full |
+| C | `.c`, `.h` when selected as C | Full | Calls, Includes | Full |
+| C++ | `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`, `.ipp`, `.tpp`, `.h` when selected as C++ | Full | Calls, Includes | Full |
+| Zig | `.zig` | Full | Calls, Imports | Full |
 | Solidity | `.sol` | Full | Calls | Full |
 | YAML | `.yaml`, `.yml` | File tracking only | N/A | Partial |
-| Go | `.go` | Planned | Planned | Not yet |
 
 ## Rust
 
@@ -292,6 +295,67 @@ Python docstrings (triple-quoted strings) are extracted:
 - First line -> `brief`
 - Full content -> `docstring`
 
+## C and C++
+
+C and C++ files are fully indexed. Ambiguous `.h` files are parsed with both
+grammars; the tree with fewer error and missing nodes is selected, with C
+winning ties. The selected `c` or `cpp` language is stored in the index and is
+also used for structural fingerprints.
+
+Definitions and prototypes, methods, constructors, destructors, operators,
+structs, classes, unions, enums, namespaces, typedefs, aliases, top-level
+variables/constants, and object- and function-like macros are searchable.
+C++ symbols receive `::`-qualified names and syntactic namespace/class parent
+links. C `static` declarations and declarations in anonymous C++ namespaces
+are private. C++ class/struct access defaults and access specifiers are
+honored; `protected` maps to private because ctx has no protected visibility.
+Contiguous `///`/`//!` comments and Doxygen blocks provide documentation.
+
+Direct, member, qualified, and constructor syntax produces call edges.
+Quoted includes retain the unquoted path and resolve from the importing
+directory, repository root, or a unique indexed suffix. Angle includes retain
+`<...>` and resolve only when the enclosed path exactly matches an indexed
+repository path. System, missing, ambiguous, computed, root-escaping, and
+build-path-dependent includes remain unresolved; `compile_commands.json`,
+type inference, overload resolution, template instantiation, and preprocessor
+expansion are outside static analysis.
+
+C/C++ functions participate in `ctx duplicates`; identifiers and literals are
+normalized and comments are removed.
+
+## Zig
+
+Zig `.zig` files are fully indexed. (`.zon` files remain ordinary context
+content and are not parsed as Zig source.)
+
+### Extracted Symbols
+
+| Kind | Example | Notes |
+|------|---------|-------|
+| Function | `fn run() void` | Named top-level functions |
+| Method | `fn start(self: *Server) void` | Functions in named containers |
+| Struct | `const Server = struct {}` | Named struct initializers |
+| Enum | `const Mode = enum { fast }` | Named enum initializers |
+| Type | `const Value = union(enum) { ... }` | Union, opaque, and error-set initializers |
+| Const / Variable | `const limit = 10`, `var count = 0` | Container-level declarations |
+| Named test | `test "parses input" {}` | Anonymous test blocks are skipped |
+
+`pub` declarations are public; other declarations are private. Contiguous
+`///` comments become the symbol's `docstring`, with the first line used as
+its `brief`. Container fields are not indexed as symbols.
+
+Identifier calls, field calls such as `server.start()`, and builtin calls such
+as `@panic()` produce call edges. Literal imports record their alias and
+specifier: `const util = @import("../util.zig")`. Imports ending in `.zig` are
+resolved relative to the importing file for architecture checks. Package
+imports such as `@import("std")`, missing files, dynamic imports, and paths
+escaping the index root remain unresolved.
+
+Zig functions participate in `ctx duplicates`; identifiers and literals are
+normalized and comments are removed like the other Tree-sitter languages.
+Static analysis does not perform type inference, computed-call resolution,
+comptime expansion, or Zig package-manager dependency resolution.
+
 ## Solidity
 
 ### Extracted Symbols
@@ -384,7 +448,7 @@ YAML files are tracked but not parsed for symbols (YAML doesn't have functions/c
 | `calls` | All | Function/method calls |
 | `extends` | TS, JS, Python | Class inheritance |
 | `implements` | TS, Rust | Interface/trait implementation |
-| `imports` | All (except Solidity) | Module imports |
+| `imports` | Rust, TS/JS, Python, Go, Zig, C/C++ | Module imports or includes |
 
 ## Limitations
 
@@ -506,7 +570,10 @@ match extension {
     "py" | "pyi" => Python,
     "sol" => Solidity,
     "yaml" | "yml" => Yaml,
-    "go" => Go,  // Planned
+    "go" => Go,
+    "c" | "h" => C, // `.h` is refined by parsing with C and C++
+    "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "ipp" | "tpp" => Cpp,
+    "zig" => Zig,
     _ => Unknown,
 }
 ```

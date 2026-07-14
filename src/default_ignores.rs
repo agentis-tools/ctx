@@ -44,6 +44,8 @@ pub const DEFAULT_IGNORES: &[&str] = &[
     "gradle/",
     ".m2/",
     ".cargo/",
+    ".zig-cache/",
+    "zig-out/",
     // Cache & temporary directories
     ".cache/",
     "cache/",

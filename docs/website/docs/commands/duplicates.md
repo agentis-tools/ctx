@@ -16,11 +16,11 @@ ctx duplicates [OPTIONS]
 
 ## Description
 
-The `duplicates` command compares MinHash fingerprints (built during `ctx index`) of every indexed function and method, and reports pairs whose normalized token shingles have a Jaccard similarity at or above the threshold.
+The `duplicates` command compares MinHash fingerprints (built during `ctx index`) of every indexed function and method, including C/C++ and Zig functions and methods, and reports pairs whose normalized token shingles have a Jaccard similarity at or above the threshold.
 
 Tokens are normalized before comparison - identifiers become `ID`, string and number literals become `LIT`, comments are dropped - so **renamed variables and changed literals still match**. Candidate pairs are found with LSH banding over 128-permutation MinHash signatures, then verified with the exact Jaccard similarity.
 
-All indexed languages participate, **including Solidity** (tokenized via the solang-parser lexer — identifiers → `ID`; string, hex, address, and number literals → `LIT`; keywords and punctuation verbatim — matching the normalization used for the tree-sitter languages).
+All indexed languages participate, **including C, C++, Zig, and Solidity** (Solidity is tokenized via the solang-parser lexer; the Tree-sitter languages normalize identifiers and literals and discard comments).
 
 > **Breaking change:** this replaces the old line-based detector. `--threshold` is a 0.0-1.0 Jaccard similarity over normalized 5-token shingles, **not** a percentage of matching lines; the old `--similarity <PERCENT>` / `--min-lines <N>` flags are gone. Existing indexes lack fingerprints: rebuild once with `ctx index --force` after upgrading.
 

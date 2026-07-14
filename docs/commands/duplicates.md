@@ -10,7 +10,7 @@ ctx duplicates [OPTIONS]
 
 ## Description
 
-The `duplicates` command compares MinHash fingerprints (built during `ctx index`) of every indexed function and method, and reports pairs whose normalized token shingles have a Jaccard similarity at or above the threshold.
+The `duplicates` command compares MinHash fingerprints (built during `ctx index`) of every indexed function and method, including C/C++ and Zig functions and methods, and reports pairs whose normalized token shingles have a Jaccard similarity at or above the threshold.
 
 Tokens are normalized before comparison - identifiers become `ID`, string and number literals become `LIT`, comments are dropped - so **renamed variables and changed literals still match**. Candidate pairs are found with LSH banding over 128-permutation MinHash signatures, then verified with the exact Jaccard similarity.
 
@@ -90,7 +90,7 @@ ctx duplicates --json
     "threshold": 0.85,
     "min_tokens": 50,
     "against": null,
-    "skipped_languages": ["solidity"],
+    "skipped_languages": [],
     "pairs": [
       {
         "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
@@ -106,7 +106,7 @@ ctx duplicates --json
 
 ## Caveats
 
-- **Solidity functions are skipped** - they are parsed with solang-parser (no tree-sitter grammar) and never fingerprinted.
+- **All fully indexed languages participate**, including C, C++, Zig, and Solidity.
 - **Idiomatic boilerplate** (builders, trait impls, small CRUD handlers) can legitimately look structurally similar; raise `--min-tokens` to filter short functions.
 - Nested functions share tokens with their enclosing function, so both can appear in results.
 - Fingerprints are built at index time: reindex before running this command after code changes.

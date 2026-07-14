@@ -523,7 +523,7 @@ impl Indexer {
         // Compute and store MinHash fingerprints for this file's
         // function/method symbols (incremental: only changed files reach
         // store_file, and delete_symbols_for_file cascaded old rows away).
-        let lang = crate::parser::Language::from_path(Path::new(rel_path));
+        let lang = crate::parser::Language::from_name(&parse_result.language);
         let fingerprints = crate::fingerprint::file_fingerprints(
             lang,
             content,
@@ -876,6 +876,235 @@ fn helper() -> i32 {
         let stats = indexer.database().get_stats().unwrap();
         assert_eq!(stats.files, 1);
         assert!(stats.symbols >= 2);
+    }
+
+    #[test]
+    fn test_index_zig_project_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(
+            src_dir.join("main.zig"),
+            r#"
+const util = @import("util.zig");
+
+/// Runs the application.
+pub fn run(value: usize) usize {
+    const first = util.double(value);
+    const second = util.double(first);
+    const third = util.double(second);
+    const fourth = util.double(third);
+    const fifth = util.double(fourth);
+    return fifth;
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            src_dir.join("util.zig"),
+            "pub fn double(value: usize) usize { return value * 2; }\n",
+        )
+        .unwrap();
+
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_indexed, 2);
+
+        let symbols = indexer.db.get_file_symbols("src/main.zig").unwrap();
+        let run = symbols.iter().find(|symbol| symbol.name == "run").unwrap();
+        assert_eq!(run.kind, crate::db::SymbolKind::Function);
+        assert_eq!(run.docstring.as_deref(), Some("Runs the application."));
+        assert!(indexer
+            .db
+            .get_source(&run.id)
+            .unwrap()
+            .unwrap()
+            .contains("pub fn run"));
+        let outgoing = indexer.db.get_outgoing_edges(&run.id).unwrap();
+        assert!(outgoing.iter().any(|edge| edge.target_name == "double"));
+
+        let imports = indexer.db.get_file_imports().unwrap();
+        assert!(imports.iter().any(|(file, values)| {
+            file == "src/main.zig"
+                && values.iter().any(|import| {
+                    import.from == "util.zig" && import.alias.as_deref() == Some("util")
+                })
+        }));
+        assert!(indexer
+            .db
+            .get_fingerprints(0)
+            .unwrap()
+            .iter()
+            .any(|fingerprint| fingerprint.symbol_id == run.id));
+
+        let connection = rusqlite::Connection::open(root.join(CTX_DIR).join(DB_FILE)).unwrap();
+        let language: String = connection
+            .query_row(
+                "SELECT language FROM files WHERE path = 'src/main.zig'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(language, "zig");
+    }
+
+    #[test]
+    fn test_index_c_cpp_project_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join("include")).unwrap();
+        fs::write(
+            root.join("include/api.h"),
+            "int add(int left, int right);\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.c"),
+            r#"#include "include/api.h"
+int add(int left, int right) { return left + right; }
+int run(void) { return add(20, 22); }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("widget.h"),
+            r#"template <typename T> class Widget {
+public:
+    T apply(T value) { return value; }
+};
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("widget.cpp"),
+            r#"#include "widget.h"
+int construct() { Widget<int> item; return item.apply(42); }
+"#,
+        )
+        .unwrap();
+
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_indexed, 4);
+        assert_eq!(
+            indexer
+                .db
+                .get_file_symbols("main.c")
+                .unwrap()
+                .iter()
+                .find(|symbol| symbol.name == "run")
+                .unwrap()
+                .kind,
+            crate::db::SymbolKind::Function
+        );
+        let header_symbols = indexer.db.get_file_symbols("widget.h").unwrap();
+        let apply = header_symbols
+            .iter()
+            .find(|symbol| symbol.name == "apply")
+            .unwrap();
+        assert_eq!(apply.kind, crate::db::SymbolKind::Method);
+        assert!(indexer
+            .db
+            .get_fingerprints(0)
+            .unwrap()
+            .iter()
+            .any(|fingerprint| fingerprint.symbol_id == apply.id));
+
+        let imports = indexer.db.get_file_imports().unwrap();
+        assert!(imports.iter().any(|(file, values)| {
+            file == "main.c" && values.iter().any(|import| import.from == "include/api.h")
+        }));
+
+        let connection = rusqlite::Connection::open(root.join(CTX_DIR).join(DB_FILE)).unwrap();
+        let mut statement = connection
+            .prepare("SELECT path, language FROM files")
+            .unwrap();
+        let languages: std::collections::HashMap<String, String> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(languages["include/api.h"], "c");
+        assert_eq!(languages["widget.h"], "cpp");
+        assert_eq!(languages["main.c"], "c");
+        assert_eq!(languages["widget.cpp"], "cpp");
+    }
+
+    #[test]
+    fn test_c_cpp_near_duplicates_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let c = r#"int process(int *items, int count) {
+    int total = 0;
+    for (int index = 0; index < count; index++) {
+        if (items[index] > 10) total += items[index] * 2;
+        else total += items[index] + 1;
+    }
+    return total;
+}
+"#;
+        let cpp = r#"int calculate(int *entries, int size) {
+    int result = 0;
+    for (int position = 0; position < size; position++) {
+        if (entries[position] > 99) result += entries[position] * 7;
+        else result += entries[position] + 3;
+    }
+    return result;
+}
+"#;
+        fs::write(root.join("a.c"), c).unwrap();
+        fs::write(root.join("b.cpp"), cpp).unwrap();
+        let mut indexer = Indexer::new_in_memory(root).unwrap();
+        indexer.index().unwrap();
+        let pairs =
+            crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 20, None).unwrap();
+        assert_eq!(pairs.len(), 1);
+    }
+
+    #[test]
+    fn test_zig_near_duplicates_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let source_a = r#"
+pub fn process(items: []const i64) i64 {
+    var total: i64 = 0;
+    for (items) |item| {
+        if (item > 10) {
+            total += item * 2;
+        } else {
+            total += item + 1;
+        }
+    }
+    std.debug.print("processed: {}", .{total});
+    return total;
+}
+"#;
+        let source_b = r#"
+pub fn calculate(entries: []const i64) i64 {
+    var result: i64 = 0;
+    for (entries) |entry| {
+        if (entry > 99) {
+            result += entry * 7;
+        } else {
+            result += entry + 3;
+        }
+    }
+    std.debug.print("calculated: {}", .{result});
+    return result;
+}
+"#;
+        fs::write(root.join("a.zig"), source_a).unwrap();
+        fs::write(root.join("b.zig"), source_b).unwrap();
+
+        let mut indexer = Indexer::new_in_memory(root).unwrap();
+        indexer.index().unwrap();
+        let pairs =
+            crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 20, None).unwrap();
+        assert_eq!(pairs.len(), 1);
+        let names = [pairs[0].a.name.as_str(), pairs[0].b.name.as_str()];
+        assert!(names.contains(&"process"));
+        assert!(names.contains(&"calculate"));
     }
 
     /// A function with > 50 normalized tokens.

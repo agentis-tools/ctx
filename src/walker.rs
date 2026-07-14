@@ -788,6 +788,16 @@ mod tests {
             Path::new("/project/target/debug/main"),
             &config
         ));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/.zig-cache/o/object.o"),
+            &config
+        ));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/zig-out/bin/app"),
+            &config
+        ));
 
         // Normal files should be included
         assert!(should_include_file(

@@ -194,6 +194,10 @@ fn resolve_import(indexed: &HashSet<String>, importing_file: &str, from: &str) -
             resolve_relative(indexed, importing_file, from, JS_SUFFIXES)
         }
         "sol" => resolve_relative(indexed, importing_file, from, SOL_SUFFIXES),
+        "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "ipp" | "tpp" => {
+            resolve_c_include(indexed, importing_file, from)
+        }
+        "zig" => resolve_zig(indexed, importing_file, from),
         "rs" => resolve_rust(indexed, importing_file, from),
         "py" => resolve_python(indexed, importing_file, from),
         "go" => resolve_go(indexed, from),
@@ -248,6 +252,51 @@ fn resolve_relative(
         }
     }
     None
+}
+
+/// Zig file imports are relative to the importing file. Package imports such
+/// as `std` have no `.zig` suffix and remain external.
+fn resolve_zig(indexed: &HashSet<String>, importing_file: &str, from: &str) -> Option<String> {
+    if !from.ends_with(".zig") {
+        return None;
+    }
+    let candidate = normalize(&format!("{}/{}", parent_dir(importing_file), from))?;
+    indexed.contains(&candidate).then_some(candidate)
+}
+
+/// Resolve C/C++ includes without build-system search paths. Quoted includes
+/// try the importing directory, repository root, then a unique indexed suffix.
+/// Angle includes resolve only as exact repository-relative paths.
+fn resolve_c_include(
+    indexed: &HashSet<String>,
+    importing_file: &str,
+    from: &str,
+) -> Option<String> {
+    if let Some(enclosed) = from
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+    {
+        return indexed.contains(enclosed).then(|| enclosed.to_string());
+    }
+    if from.starts_with('/') || from.contains('\\') {
+        return None;
+    }
+    if let Some(relative) = normalize(&format!("{}/{}", parent_dir(importing_file), from)) {
+        if indexed.contains(&relative) {
+            return Some(relative);
+        }
+    }
+    let root = normalize(from)?;
+    if indexed.contains(&root) {
+        return Some(root);
+    }
+    let suffix = format!("/{root}");
+    let mut matches = indexed
+        .iter()
+        .filter(|path| path.ends_with(&suffix))
+        .cloned();
+    let only = matches.next()?;
+    matches.next().is_none().then_some(only)
 }
 
 /// Rust `use` path resolution: `crate::` from `src/`, `self::`/`super::`
@@ -579,6 +628,69 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn test_resolve_import_zig() {
+        let idx = indexed(&[
+            "src/app/main.zig",
+            "src/app/util.zig",
+            "src/shared.zig",
+            "outside.zig",
+        ]);
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.zig", "util.zig").as_deref(),
+            Some("src/app/util.zig")
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.zig", "../shared.zig").as_deref(),
+            Some("src/shared.zig")
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.zig", "missing.zig"),
+            None
+        );
+        assert_eq!(resolve_import(&idx, "main.zig", "../outside.zig"), None);
+        assert_eq!(resolve_import(&idx, "src/app/main.zig", "std"), None);
+    }
+
+    #[test]
+    fn test_resolve_c_cpp_includes() {
+        let idx = indexed(&[
+            "src/app/main.cpp",
+            "src/app/local.h",
+            "include/project/api.hpp",
+            "vendor/exact.h",
+            "one/shared/ambiguous.h",
+            "two/shared/ambiguous.h",
+            "unique/deep/suffix.h",
+        ]);
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "local.h").as_deref(),
+            Some("src/app/local.h")
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "include/project/api.hpp").as_deref(),
+            Some("include/project/api.hpp")
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "deep/suffix.h").as_deref(),
+            Some("unique/deep/suffix.h")
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "<vendor/exact.h>").as_deref(),
+            Some("vendor/exact.h")
+        );
+        assert_eq!(resolve_import(&idx, "src/app/main.cpp", "<exact.h>"), None);
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "shared/ambiguous.h"),
+            None
+        );
+        assert_eq!(
+            resolve_import(&idx, "src/app/main.cpp", "../../../escape.h"),
+            None
+        );
+        assert_eq!(resolve_import(&idx, "src/app/main.cpp", "missing.h"), None);
     }
 
     #[test]

@@ -367,9 +367,10 @@ fn new_duplication(
     for path in changed {
         let mut keyed = KeyedShingles::new();
         if let Some(source) = gitutil::show_file_in(root, reference, path)? {
-            let lang = Language::from_path(Path::new(path));
-            let tokens = fingerprint::tokenize(lang, &source);
             let parse = parser.parse(Path::new(path), &source);
+            let tokens = parse.as_ref().and_then(|parsed| {
+                fingerprint::tokenize(Language::from_name(&parsed.language), &source)
+            });
             if let (Some(tokens), Some(parse)) = (tokens, parse) {
                 for symbol in &parse.symbols {
                     if !matches!(symbol.kind, SymbolKind::Function | SymbolKind::Method) {

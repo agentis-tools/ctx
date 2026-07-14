@@ -259,6 +259,9 @@ The full flag reference for every command lives at
 | JSX | `.jsx` | Functions, components | Calls, Extends, Imports |
 | Python | `.py`, `.pyi` | Functions, classes, methods, constants | Calls, Extends, Imports |
 | Go | `.go` | Functions, structs, interfaces, methods | Calls, Imports |
+| C | `.c`, `.h` when selected as C | Functions/prototypes, structs, unions, enums, typedefs, globals, macros | Calls, Includes |
+| C++ | `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`, `.ipp`, `.tpp`, `.h` when selected as C++ | Functions, classes, methods, namespaces, aliases, globals, macros | Calls, Includes |
+| Zig | `.zig` | Functions, container methods, structs, enums, types, constants, variables, named tests | Calls, Imports |
 | Solidity | `.sol` | Contracts, functions, events, structs | Calls |
 | YAML | `.yaml`, `.yml` | File tracking (no symbols) | N/A |
 

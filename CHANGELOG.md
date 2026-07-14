@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added full Zig `.zig` indexing across symbols, calls, literal imports, architecture checks,
+  watch mode, context selection, and normalized duplicate detection. `.zon` remains unparsed
+  context content.
+- Added full C and C++ indexing across conventional source/header extensions, dual-grammar
+  `.h` classification, symbols, calls, includes, architecture checks, watch mode, context
+  selection, source retrieval, and normalized duplicate detection.
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).

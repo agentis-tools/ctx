@@ -1,6 +1,6 @@
 //! Rust-specific code parsing using tree-sitter.
 
-use tree_sitter::{Node, Parser, Query, QueryCursor};
+use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::db::{Edge, EdgeKind, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
 use crate::parser::{
@@ -34,14 +34,14 @@ impl RustParser {
     /// Create a new Rust parser.
     pub fn new() -> Self {
         let mut parser = Parser::new();
-        let language = tree_sitter_rust::language();
+        let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
         parser
-            .set_language(language)
+            .set_language(&language)
             .expect("Failed to set Rust language");
 
         // Query for extracting trait implementations
         let impl_query = Query::new(
-            language,
+            &language,
             r#"
             ; Trait implementations: impl Trait for Type
             (impl_item
@@ -56,7 +56,7 @@ impl RustParser {
         // Note: We only match top-level functions (not inside impl blocks) and
         // methods inside impl blocks separately to avoid duplicate symbols.
         let symbols_query = Query::new(
-            language,
+            &language,
             r#"
             ; Top-level functions only (not inside impl blocks)
             ; Using a negated pattern to exclude functions in impl blocks
@@ -141,7 +141,7 @@ impl RustParser {
 
         // Query for extracting function calls
         let calls_query = Query::new(
-            language,
+            &language,
             r#"
             ; Function calls
             (call_expression
@@ -226,9 +226,9 @@ impl RustParser {
         exports: &mut Vec<String>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(&self.symbols_query, *root, source.as_bytes());
+        let mut matches = cursor.matches(&self.symbols_query, *root, source.as_bytes());
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut name: Option<&str> = None;
             let mut kind: Option<SymbolKind> = None;
             let mut def_node: Option<Node> = None;
@@ -236,8 +236,8 @@ impl RustParser {
             let mut parent_type: Option<&str> = None;
 
             for capture in m.captures {
-                let capture_name = &self.symbols_query.capture_names()[capture.index as usize];
-                let capture_str = capture_name.as_str();
+                let capture_name = self.symbols_query.capture_names()[capture.index as usize];
+                let capture_str = capture_name;
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
@@ -336,19 +336,19 @@ impl RustParser {
         edges: &mut Vec<Edge>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(&self.impl_query, *root, source.as_bytes());
+        let mut matches = cursor.matches(&self.impl_query, *root, source.as_bytes());
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut trait_name: Option<&str> = None;
             let mut type_name: Option<&str> = None;
             let mut def_node: Option<Node> = None;
 
             for capture in m.captures {
-                let capture_name = &self.impl_query.capture_names()[capture.index as usize];
+                let capture_name = self.impl_query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
-                match capture_name.as_str() {
+                match capture_name {
                     "trait.name" => {
                         trait_name = Some(text);
                     }

@@ -106,12 +106,15 @@ pub struct Tok {
 /// tokenized with the solang-parser lexer in [`tokenize`] instead.
 fn ts_language(lang: Language) -> Option<tree_sitter::Language> {
     match lang {
-        Language::Rust => Some(tree_sitter_rust::language()),
-        Language::TypeScript => Some(tree_sitter_typescript::language_typescript()),
-        Language::Tsx => Some(tree_sitter_typescript::language_tsx()),
-        Language::JavaScript | Language::Jsx => Some(tree_sitter_javascript::language()),
-        Language::Python => Some(tree_sitter_python::language()),
-        Language::Go => Some(tree_sitter_go::language()),
+        Language::C => Some(tree_sitter_c::LANGUAGE.into()),
+        Language::Cpp => Some(tree_sitter_cpp::LANGUAGE.into()),
+        Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
+        Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        Language::Tsx => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+        Language::JavaScript | Language::Jsx => Some(tree_sitter_javascript::LANGUAGE.into()),
+        Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
+        Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+        Language::Zig => Some(tree_sitter_zig::LANGUAGE.into()),
         Language::Solidity | Language::Yaml | Language::Unknown => None,
     }
 }
@@ -135,7 +138,7 @@ fn normalize_leaf(kind: &str, text: &str) -> String {
         return "LIT".to_string();
     }
     // Numeric literal node kinds across the supported grammars
-    // (rust, typescript/javascript, python, go).
+    // (rust, typescript/javascript, python, go, zig).
     if matches!(
         kind,
         "integer_literal"
@@ -145,7 +148,11 @@ fn normalize_leaf(kind: &str, text: &str) -> String {
             | "imaginary_literal"
             | "integer"
             | "float"
+            | "number_literal"
     ) {
+        return "LIT".to_string();
+    }
+    if matches!(kind, "true" | "false" | "null" | "nullptr") {
         return "LIT".to_string();
     }
     text.to_string()
@@ -168,7 +175,7 @@ pub fn tokenize(lang: Language, source: &str) -> Option<Vec<Tok>> {
         let mut parsers = cell.borrow_mut();
         let parser = parsers.entry(lang.as_str()).or_insert_with(|| {
             let mut p = Parser::new();
-            p.set_language(ts_lang)
+            p.set_language(&ts_lang)
                 .expect("grammar/version mismatch for fingerprint parser");
             p
         });
@@ -535,7 +542,7 @@ pub fn find_near_duplicates(
 /// unchanged files.
 pub fn symbol_shingles(symbol: &Symbol) -> Option<HashSet<u64>> {
     let source = symbol.source.as_ref()?;
-    let lang = Language::from_path(Path::new(&symbol.file_path));
+    let lang = Language::from_path_and_source(Path::new(&symbol.file_path), source);
     let tokens = tokenize(lang, source)?;
     Some(shingle_set(&tokens))
 }
@@ -606,6 +613,59 @@ mod tests {
         assert!(!toks.contains(&"a".to_string()));
         assert!(!toks.contains(&"42".to_string()));
         assert!(!toks.iter().any(|t| t.contains("short comment")));
+    }
+
+    #[test]
+    fn test_tokenize_zig_normalization() {
+        let src = "fn add(first: i32) i32 {\n    // a helpful remark\n    return first + 42;\n}\n";
+        let toks = texts(Language::Zig, src);
+        assert!(toks.contains(&"ID".to_string()));
+        assert!(toks.contains(&"LIT".to_string()));
+        assert!(toks.contains(&"fn".to_string()));
+        assert!(!toks.contains(&"first".to_string()));
+        assert!(!toks.contains(&"42".to_string()));
+        assert!(!toks.iter().any(|t| t.contains("remark")));
+
+        let renamed = "fn add(second: i32) i32 {\n    return second + 7;\n}\n";
+        assert_eq!(toks, texts(Language::Zig, renamed));
+    }
+
+    #[test]
+    fn test_tokenize_c_and_cpp_normalization() {
+        for (language, source, renamed) in [
+            (
+                Language::C,
+                "int add(int first) { /* note */ return first + 42; }\n",
+                "int add(int second) { return second + 7; }\n",
+            ),
+            (
+                Language::Cpp,
+                "int Widget::add(int first) { // note\n return first + 42; }\n",
+                "int Widget::add(int second) { return second + 7; }\n",
+            ),
+        ] {
+            let tokens = texts(language, source);
+            assert!(tokens.contains(&"ID".to_string()));
+            assert!(tokens.contains(&"LIT".to_string()));
+            assert!(!tokens.iter().any(|token| token.contains("note")));
+            assert_eq!(tokens, texts(language, renamed));
+        }
+    }
+
+    #[test]
+    fn test_ambiguous_header_fingerprint_uses_selected_grammar() {
+        let cpp = "template <typename T> T twice(T value) { return value + value; }\n";
+        assert_eq!(
+            Language::from_path_and_source(Path::new("template.h"), cpp),
+            Language::Cpp
+        );
+        assert!(tokenize(Language::Cpp, cpp).is_some());
+
+        let c = "int twice(int value) { return value + value; }\n";
+        assert_eq!(
+            Language::from_path_and_source(Path::new("plain.h"), c),
+            Language::C
+        );
     }
 
     #[test]
