@@ -90,7 +90,9 @@ async-trait = { version = "0.1", optional = true }
 rustyline = { version = "17", features = ["with-file-history"] }
 
 # Local embeddings (fastembed)
-fastembed = "5.4"
+# fastembed 5.17+ pulls an ort build that no longer ships Intel macOS binaries.
+# Keep the release matrix compatible with the documented x86_64 macOS target.
+fastembed = "=5.4.0"
 
 # Phase 2: DuckDB for analytical queries (optional, not available on Windows)
 duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
