@@ -282,11 +282,11 @@ impl Greeter {
         (temp_dir, server)
     }
 
-    /// Helper to extract text from Content
+    /// Helper to extract text from a content block.
     fn get_text_content(result: &CallToolResult) -> &str {
         let content = &result.content[0];
-        match &content.raw {
-            rmcp::model::RawContent::Text(text) => &text.text,
+        match content {
+            rmcp::model::ContentBlock::Text(text) => &text.text,
             _ => panic!("Expected text content"),
         }
     }

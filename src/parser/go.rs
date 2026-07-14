@@ -238,13 +238,13 @@ impl GoParser {
 
             // Import definitions produce import edges rather than symbols.
             if def_name.starts_with("import.") {
-                push_go_import_edges(&self.symbols_query, &m, source, file_path, edges);
+                push_go_import_edges(&self.symbols_query, m, source, file_path, edges);
                 continue;
             }
 
             // Everything else is a symbol definition.
             if let Some(symbol) =
-                build_go_symbol(&self.symbols_query, &m, def_node, source, file_path)
+                build_go_symbol(&self.symbols_query, m, def_node, source, file_path)
             {
                 symbols.push(symbol);
             }
