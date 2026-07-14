@@ -176,11 +176,26 @@ Exit codes: running without `--keyword` when no embeddings have been generated i
       "context": "index::open_database(&root)?"
     }
   ],
+  "unresolved_callers": [
+    {
+      "symbol": { "name": "retry_open", "qualified_name": null, "kind": "function", "file": "src/retry.rs", "line_start": 20, "line_end": 27 },
+      "line": 22,
+      "context": "open_database(path)?"
+    }
+  ],
   "ambiguous": []
 }
 ```
 
-Disambiguation: when several symbols match the name and no `--file` filter is given, `target` is `null`, `callers` is empty, and `ambiguous` lists the candidate SymbolRefs. When the symbol is not found at all, all three are empty/`null`.
+`callers` contains only resolved `calls` edges whose target ID is the selected symbol. It never
+contains an edge resolved to another same-named symbol. `unresolved_callers` preserves conservative
+name-based evidence separately: the source must use the target's language, and qualified symbols
+require matching qualified call context. Treat these entries as leads to verify in source, not as
+resolved relationships.
+
+Disambiguation: when several symbols match the name and no `--file` filter is given, `target` is
+`null`, `callers` and `unresolved_callers` are empty, and `ambiguous` lists the candidate
+SymbolRefs. When the symbol is not found at all, all three arrays are empty and `target` is `null`.
 
 ### `query.deps`
 

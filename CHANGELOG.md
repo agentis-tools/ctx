@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Caller lookup now reports only resolved `calls` edges to the selected symbol, while preserving
+  conservative same-language unresolved evidence in a separate section instead of mixing in
+  cross-language or same-name false positives (#61).
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
