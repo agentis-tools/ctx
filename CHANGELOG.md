@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
+  files by repository-relative path before greedy packing (#60).
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
