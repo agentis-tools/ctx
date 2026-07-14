@@ -14,10 +14,7 @@ use ctx::exit::Outcome;
 use ctx::index;
 use ctx::json::SymbolRef;
 use ctx::utils::{truncate_path, truncate_str};
-
-/// Over-fetch factor: results are requested with `limit * OVERFETCH` and then
-/// filtered down to callable kinds, so kind scoping needs no schema changes.
-const OVERFETCH: usize = 3;
+use ctx::walker::FilePatternFilter;
 
 /// One enriched similarity hit.
 struct Hit {
@@ -38,19 +35,25 @@ pub fn run_similar(
     keyword: bool,
     provider: Provider,
     json: bool,
+    patterns: &[String],
 ) -> Result<Outcome> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
+    let filter = FilePatternFilter::new(&root, patterns)
+        .map_err(|error| CtxError::Other(format!("Invalid file pattern: {error}")))?;
 
     let (hits, mode) = if keyword {
-        (keyword_hits(&db, query, limit)?, "keyword")
+        (keyword_hits(&db, query, limit, &filter)?, "keyword")
     } else {
         ensure_embeddings(&db)?;
         let provider =
             embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
         embeddings::warn_index_mismatch(&db, provider.as_ref());
         let query_embedding = provider.embed(query)?;
-        (semantic_hits(&db, &query_embedding, limit)?, "semantic")
+        (
+            semantic_hits(&db, &query_embedding, limit, &filter)?,
+            "semantic",
+        )
     };
 
     if json {
@@ -86,39 +89,80 @@ fn is_callable(kind: SymbolKind) -> bool {
 }
 
 /// Embedding-based hits, scoped to functions/methods.
-fn semantic_hits(db: &Database, query_embedding: &Embedding, limit: usize) -> Result<Vec<Hit>> {
-    let raw = embeddings::semantic_search(db, query_embedding, limit.saturating_mul(OVERFETCH))?;
-
-    let mut scored: Vec<(Symbol, f64)> = Vec::new();
-    for r in raw {
-        if scored.len() >= limit {
-            break;
-        }
-        if let Some(symbol) = db.get_symbol(&r.symbol_id)? {
-            if is_callable(symbol.kind) {
-                scored.push((symbol, f64::from(r.score)));
-            }
-        }
+fn semantic_hits(
+    db: &Database,
+    query_embedding: &Embedding,
+    limit: usize,
+    filter: &FilePatternFilter,
+) -> Result<Vec<Hit>> {
+    if limit == 0 {
+        return enrich(db, Vec::new());
     }
 
-    enrich(db, scored)
+    let mut fetch = limit.saturating_mul(3).max(limit);
+    loop {
+        let raw = embeddings::semantic_search(db, query_embedding, fetch)?;
+        let exhausted = raw.len() < fetch;
+        let mut scored: Vec<(Symbol, f64)> = Vec::new();
+        for result in raw {
+            if filter.matches(&result.file_path) {
+                if let Some(symbol) = db.get_symbol(&result.symbol_id)? {
+                    if is_callable(symbol.kind) {
+                        scored.push((symbol, f64::from(result.score)));
+                    }
+                }
+            }
+            if scored.len() >= limit {
+                break;
+            }
+        }
+
+        if scored.len() == limit || exhausted {
+            return enrich(db, scored);
+        }
+
+        let next = fetch.saturating_mul(2);
+        if next == fetch {
+            return enrich(db, scored);
+        }
+        fetch = next;
+    }
 }
 
 /// FTS5/keyword hits (no embeddings or API key needed), scoped to
 /// functions/methods. The score is the relevance value returned by
 /// `Database::hybrid_search` (see docs/json-output.md).
-fn keyword_hits(db: &Database, query: &str, limit: usize) -> Result<Vec<Hit>> {
-    let fetch = limit.saturating_mul(OVERFETCH).min(i32::MAX as usize) as i32;
-    let raw = db.hybrid_search(query, fetch)?;
+fn keyword_hits(
+    db: &Database,
+    query: &str,
+    limit: usize,
+    filter: &FilePatternFilter,
+) -> Result<Vec<Hit>> {
+    if limit == 0 {
+        return enrich(db, Vec::new());
+    }
 
-    let mut scored: Vec<(Symbol, f64)> = raw
-        .into_iter()
-        .filter(|(symbol, _, _)| is_callable(symbol.kind))
-        .map(|(symbol, score, _match_type)| (symbol, score))
-        .collect();
-    scored.truncate(limit);
+    let mut fetch = limit.saturating_mul(3).max(limit).min(i32::MAX as usize) as i32;
+    loop {
+        let raw = db.hybrid_search(query, fetch)?;
+        let exhausted = raw.len() < fetch as usize;
+        let scored: Vec<(Symbol, f64)> = raw
+            .into_iter()
+            .filter(|(symbol, _, _)| is_callable(symbol.kind) && filter.matches(&symbol.file_path))
+            .map(|(symbol, score, _match_type)| (symbol, score))
+            .take(limit)
+            .collect();
 
-    enrich(db, scored)
+        if scored.len() == limit || exhausted {
+            return enrich(db, scored);
+        }
+
+        let next = fetch.saturating_mul(2);
+        if next == fetch {
+            return enrich(db, scored);
+        }
+        fetch = next;
+    }
 }
 
 /// Attach fan-in counts (one batched query) and one-line docs to raw hits.
@@ -224,6 +268,10 @@ mod tests {
     use super::*;
     use ctx::db::{Edge, EdgeKind, FileRecord, Visibility};
 
+    fn all_files() -> FilePatternFilter {
+        FilePatternFilter::all(std::path::Path::new("."))
+    }
+
     fn make_symbol(
         name: &str,
         kind: SymbolKind,
@@ -324,7 +372,7 @@ mod tests {
         let db = fixture();
         let query = Embedding::new(vec![1.0, 0.0, 0.0]);
 
-        let hits = semantic_hits(&db, &query, 10).unwrap();
+        let hits = semantic_hits(&db, &query, 10, &all_files()).unwrap();
 
         // The struct is excluded even though its vector matches perfectly.
         assert!(hits.iter().all(|h| is_callable(h.symbol.kind)));
@@ -343,10 +391,47 @@ mod tests {
         let db = fixture();
         let query = Embedding::new(vec![1.0, 0.0, 0.0]);
 
-        let hits = semantic_hits(&db, &query, 2).unwrap();
+        let hits = semantic_hits(&db, &query, 2, &all_files()).unwrap();
         let names: Vec<&str> = hits.iter().map(|h| h.symbol.name.as_str()).collect();
         // The struct occupying an over-fetched slot must not push out beta.
         assert_eq!(names, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn test_semantic_hits_overfetches_again_after_path_filtering() {
+        let db = Database::open_in_memory().unwrap();
+        let entries = [
+            ("tests/one.rs", "one", [1.0, 0.0, 0.0]),
+            ("tests/two.rs", "two", [0.99, 0.1, 0.0]),
+            ("tests/three.rs", "three", [0.95, 0.2, 0.0]),
+            ("src/keep.rs", "keep", [0.8, 0.6, 0.0]),
+        ];
+        for (path, name, embedding) in entries {
+            db.upsert_file(
+                &FileRecord {
+                    path: path.to_string(),
+                    content_hash: name.to_string(),
+                    size_bytes: 1,
+                    language: Some("rust".to_string()),
+                    last_indexed: 0,
+                },
+                None,
+            )
+            .unwrap();
+            let mut symbol = make_symbol(name, SymbolKind::Function, None, None);
+            symbol.id = format!("{path}::{name}");
+            symbol.file_path = path.to_string();
+            db.insert_symbol(&symbol).unwrap();
+            db.store_embedding(&symbol.id, "test", "default", &embedding)
+                .unwrap();
+        }
+
+        let filter =
+            FilePatternFilter::new(std::path::Path::new("."), &["src/".to_string()]).unwrap();
+        let hits = semantic_hits(&db, &Embedding::new(vec![1.0, 0.0, 0.0]), 1, &filter).unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].symbol.file_path, "src/keep.rs");
     }
 
     #[test]
@@ -373,7 +458,7 @@ mod tests {
         assert!(deleted > 0);
         assert_eq!(db.count_embeddings().unwrap(), 0);
 
-        let hits = keyword_hits(&db, "alpha", 5).unwrap();
+        let hits = keyword_hits(&db, "alpha", 5, &all_files()).unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0].symbol.name, "alpha");
         assert!(hits.iter().all(|h| is_callable(h.symbol.kind)));
@@ -383,7 +468,7 @@ mod tests {
     fn test_keyword_hits_exclude_non_callable_kinds() {
         let db = fixture();
         // "shape" is a struct; an exact-name keyword query must not return it.
-        let hits = keyword_hits(&db, "shape", 5).unwrap();
+        let hits = keyword_hits(&db, "shape", 5, &all_files()).unwrap();
         assert!(!hits.iter().any(|h| h.symbol.name == "shape"));
     }
 
@@ -392,7 +477,7 @@ mod tests {
         let db = fixture();
         let query = Embedding::new(vec![1.0, 0.0, 0.0]);
 
-        let hits = semantic_hits(&db, &query, 10).unwrap();
+        let hits = semantic_hits(&db, &query, 10, &all_files()).unwrap();
         let get = |name: &str| hits.iter().find(|h| h.symbol.name == name).unwrap();
 
         assert_eq!(get("alpha").fan_in, 2);
@@ -433,7 +518,7 @@ mod tests {
     fn test_similar_data_payload_shape() {
         let db = fixture();
         let query = Embedding::new(vec![1.0, 0.0, 0.0]);
-        let hits = semantic_hits(&db, &query, 10).unwrap();
+        let hits = semantic_hits(&db, &query, 10, &all_files()).unwrap();
 
         let data = similar_data("parse input", "semantic", &hits);
         assert_eq!(data["query"], "parse input");

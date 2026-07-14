@@ -11,7 +11,7 @@ use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
 use ctx::output;
-use ctx::smart::{format_dry_run, format_explain, smart_context, SmartConfig};
+use ctx::smart::{format_dry_run, format_explain, smart_context_filtered, SmartConfig};
 use ctx::tokens;
 use ctx::walker;
 
@@ -28,9 +28,12 @@ pub fn run_smart(
     format: OutputFormat,
     show_sizes: bool,
     no_tree: bool,
+    patterns: &[String],
 ) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
+    let filter = walker::FilePatternFilter::new(&root, patterns)
+        .map_err(|error| ctx::error::CtxError::Other(format!("Invalid file pattern: {error}")))?;
 
     // Check if we have embeddings
     let embedding_count = db.count_embeddings()?;
@@ -63,7 +66,7 @@ pub fn run_smart(
 
     eprintln!("Analyzing task: \"{}\"...", task);
 
-    let result = smart_context(&db, &analytics, provider.as_ref(), task, config)?;
+    let result = smart_context_filtered(&db, &analytics, provider.as_ref(), task, config, &filter)?;
 
     if result.selected_files.is_empty() {
         eprintln!("No relevant files found for: \"{}\"", task);

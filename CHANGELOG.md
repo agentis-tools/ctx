@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Positional file, directory, and glob patterns now scope `ctx smart`, `ctx similar`, and `ctx diff`
+  as advertised, including semantic seeds, graph expansion, and renamed or deleted diff paths (#57).
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).

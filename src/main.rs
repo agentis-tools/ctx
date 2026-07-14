@@ -75,6 +75,7 @@ fn run_main() -> ExitCode {
 fn run(args: Args) -> Result<Outcome> {
     // Global machine-readable output flag (see docs/json-output.md)
     let json = args.json;
+    let patterns = args.patterns.clone();
 
     // Custom --version handling: clap's auto flag is disabled (it would
     // exit before `--check` could run). `ctx --version` prints the same
@@ -186,7 +187,7 @@ fn run(args: Args) -> Result<Outcome> {
             let provider = resolve_embed_provider(provider, openai);
             // `similar` participates in the Outcome convention directly:
             // Clean on success, Err (exit 2) when embeddings are missing.
-            return commands::run_similar(&query, limit, keyword, provider, json);
+            return commands::run_similar(&query, limit, keyword, provider, json, &patterns);
         }
         Some(Command::Complexity {
             threshold,
@@ -251,7 +252,7 @@ fn run(args: Args) -> Result<Outcome> {
             let provider = resolve_embed_provider(provider, openai);
             commands::run_smart(
                 &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
-                no_tree,
+                no_tree, &patterns,
             )
         }
         Some(Command::Diff {
@@ -274,6 +275,7 @@ fn run(args: Args) -> Result<Outcome> {
             format,
             show_sizes,
             no_tree,
+            &patterns,
         ),
         Some(Command::Review {
             pr,

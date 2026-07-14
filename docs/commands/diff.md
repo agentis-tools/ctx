@@ -5,7 +5,7 @@ Generate context for changed files with their related dependencies.
 ## Synopsis
 
 ```bash
-ctx diff [REF] [OPTIONS]
+ctx diff [REF] [PATTERNS]... [OPTIONS]
 ```
 
 ## Description
@@ -15,6 +15,11 @@ The `diff` command identifies changed files compared to a git reference and incl
 - **Code review** - Get context for reviewing a PR or commit
 - **Change impact** - Understand what's affected by your changes
 - **Pre-commit** - Verify changes before committing
+
+Optional positional patterns restrict both changed files and graph-expanded
+context. Literal files, directories, and globs are ORed together. Renames match
+when either the old or new path is in scope; deletions remain visible in the
+change summary. With no patterns, `.` includes all changed paths.
 
 ## Options
 
@@ -42,6 +47,9 @@ ctx diff main
 
 # Changes in feature branch
 ctx diff origin/main
+
+# Review only Rust sources and the public configuration contract
+ctx diff origin/main "src/**/*.rs" docs/configuration.md
 ```
 
 ### Review a Specific Commit

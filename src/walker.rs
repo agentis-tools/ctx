@@ -18,6 +18,92 @@ use ignore::WalkBuilder;
 
 use crate::default_ignores::DEFAULT_IGNORES;
 
+/// Reusable matcher for positional file and directory patterns.
+///
+/// Patterns are ORed together. Non-glob values match a literal file or every
+/// file below a literal directory, while glob values use the same
+/// separator-aware matching as [`discover_files`]. A missing pattern list or
+/// the conventional `.` pattern matches every repository-relative path.
+#[derive(Debug, Clone)]
+pub struct FilePatternFilter {
+    root: PathBuf,
+    globset: Option<GlobSet>,
+    literal_paths: Vec<PathBuf>,
+    match_all: bool,
+}
+
+impl FilePatternFilter {
+    /// Compile positional patterns relative to `root`.
+    pub fn new(root: &Path, patterns: &[String]) -> io::Result<Self> {
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let match_all = patterns.is_empty() || patterns.iter().any(|pattern| pattern == ".");
+        let globset = if match_all {
+            None
+        } else {
+            build_include_globset(&root, patterns)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
+        };
+        let literal_paths = if match_all {
+            Vec::new()
+        } else {
+            get_literal_paths(patterns)
+                .into_iter()
+                .map(|path| normalize_literal(&root, path))
+                .collect()
+        };
+
+        Ok(Self {
+            root,
+            globset,
+            literal_paths,
+            match_all,
+        })
+    }
+
+    /// Build a matcher that accepts every path.
+    pub fn all(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            globset: None,
+            literal_paths: Vec::new(),
+            match_all: true,
+        }
+    }
+
+    /// Return whether a repository-relative or absolute path is in scope.
+    pub fn matches(&self, path: impl AsRef<Path>) -> bool {
+        if self.match_all {
+            return true;
+        }
+
+        let path = path.as_ref();
+        let relative = if path.is_absolute() {
+            match path.strip_prefix(&self.root) {
+                Ok(relative) => relative,
+                Err(_) => return false,
+            }
+        } else {
+            path
+        };
+
+        self.literal_paths
+            .iter()
+            .any(|literal| relative == literal || relative.starts_with(literal))
+            || self
+                .globset
+                .as_ref()
+                .is_some_and(|globset| globset.is_match(relative))
+    }
+}
+
+fn normalize_literal(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path.strip_prefix(root).unwrap_or(&path).to_path_buf()
+    } else {
+        path
+    }
+}
+
 /// File filter that can check if individual files should be included.
 /// This is built once and reused for watch mode filtering.
 ///
@@ -765,6 +851,25 @@ mod tests {
 
         // Should NOT match files outside src/
         assert!(!globset.is_match(Path::new("tests/test.rs")));
+    }
+
+    #[test]
+    fn file_pattern_filter_supports_literals_globs_or_and_dot() {
+        let root = Path::new("/project");
+        let filter =
+            FilePatternFilter::new(root, &["src".to_string(), "tests/**/*.rs".to_string()])
+                .unwrap();
+
+        assert!(filter.matches("src/main.rs"));
+        assert!(filter.matches("tests/unit/parser.rs"));
+        assert!(!filter.matches("docs/guide.md"));
+
+        let file = FilePatternFilter::new(root, &["Cargo.toml".to_string()]).unwrap();
+        assert!(file.matches("Cargo.toml"));
+        assert!(!file.matches("Cargo.lock"));
+
+        let all = FilePatternFilter::new(root, &[".".to_string()]).unwrap();
+        assert!(all.matches("any/nested/path.rs"));
     }
 
     #[test]
