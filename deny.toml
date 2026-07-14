@@ -16,6 +16,10 @@ ignore = [
   # ctx enables rmcp's stdio transport only; the vulnerable Streamable HTTP
   # server transport is neither enabled nor exposed. Upgrade rmcp by 2026-09-30.
   "RUSTSEC-2026-0189",
+  # number_prefix is unmaintained but has no reported vulnerability; it is
+  # transitive through the Intel-compatible fastembed line. Remove when Intel
+  # macOS can move to a maintained ORT distribution, no later than 2026-09-30.
+  "RUSTSEC-2025-0119",
 ]
 
 [licenses]
