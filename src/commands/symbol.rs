@@ -137,7 +137,7 @@ pub fn run_explain(
     let sym = &symbols[0];
 
     if json {
-        let callers = db.get_incoming_edges(&sym.name)?;
+        let callers = resolved_callers(&db, sym)?;
         let deps = db.get_outgoing_edges(&sym.id)?;
         return ctx::json::emit("explain", explain_data(sym, callers.len(), deps.len()));
     }
@@ -159,7 +159,7 @@ pub fn run_explain(
     }
 
     // Show callers
-    let callers = db.get_incoming_edges(&sym.name)?;
+    let callers = resolved_callers(&db, sym)?;
     if !callers.is_empty() {
         println!("\nCalled by ({}):", callers.len());
         for edge in callers.iter().take(10) {
@@ -179,17 +179,44 @@ pub fn run_explain(
 
     // Show dependencies
     let deps = db.get_outgoing_edges(&sym.id)?;
-    if !deps.is_empty() {
-        println!("\nCalls ({}):", deps.len());
-        for edge in deps.iter().take(10) {
+    let (calls, relationships): (Vec<_>, Vec<_>) = deps
+        .iter()
+        .partition(|edge| edge.kind == ctx::db::EdgeKind::Calls);
+    if !calls.is_empty() {
+        println!("\nCalls ({}):", calls.len());
+        for edge in calls.iter().take(10) {
             println!("  {} [{}]", edge.target_name, edge.kind.as_str());
         }
-        if deps.len() > 10 {
-            println!("  ... and {} more", deps.len() - 10);
+        if calls.len() > 10 {
+            println!("  ... and {} more", calls.len() - 10);
+        }
+    }
+    if !relationships.is_empty() {
+        println!("\nRelationships ({}):", relationships.len());
+        for edge in relationships.iter().take(10) {
+            println!("  {} [{}]", edge.target_name, edge.kind.as_str());
+        }
+        if relationships.len() > 10 {
+            println!("  ... and {} more", relationships.len() - 10);
         }
     }
 
     Ok(())
+}
+
+/// Return only actual, resolved call edges to the selected symbol.
+///
+/// Other incoming relationships, including function-item `uses` references,
+/// are evidence but are not callers.
+fn resolved_callers(db: &ctx::db::Database, sym: &ctx::db::Symbol) -> Result<Vec<ctx::db::Edge>> {
+    Ok(db
+        .get_incoming_edges(&sym.id)?
+        .into_iter()
+        .filter(|edge| {
+            edge.kind == ctx::db::EdgeKind::Calls
+                && edge.target_id.as_deref() == Some(sym.id.as_str())
+        })
+        .collect())
 }
 
 /// Build the `explain` JSON payload for a resolved symbol.

@@ -45,7 +45,7 @@ the physical index. Query `v1.*` — not the underlying tables.
 | `target_id`   | VARCHAR | `id` of the target symbol; NULL when unresolved         |
 | `target_name` | VARCHAR | Name of the target; retained even when unresolved       |
 | `target_file` | VARCHAR | File of the target symbol; NULL when unresolved         |
-| `kind`        | VARCHAR | `calls`, `extends`, `implements`, or `imports`          |
+| `kind`        | VARCHAR | Relationship kind, including `calls`, `uses`, `extends`, `implements`, or `imports` |
 | `line`        | BIGINT  | Line of the reference in the source file                |
 
 ### `v1.files` — one row per indexed file
@@ -91,6 +91,16 @@ SELECT name, file
 FROM v1.symbols
 WHERE kind IN ('function', 'method') AND is_public AND fan_in = 0
 ORDER BY file, name;
+```
+
+Rust function items passed directly as callback values are exposed as `uses`
+edges. They are intentionally excluded from `fan_in`, `fan_out`, call graphs,
+and impact analysis:
+
+```sql
+SELECT source_name, target_name, target_file
+FROM v1.edges
+WHERE kind = 'uses';
 ```
 
 ## Snapshot tables (`snap.*`) — only with `--snapshots`

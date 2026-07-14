@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Rust indexing now records statically resolvable bare or module-qualified free functions passed as
+  callback values (such as `spawn(worker::run_main)` and `.map(transform)`) as `uses` relationships
+  without treating them as calls; rebuild existing indexes with `ctx index --force` to apply the
+  new parser semantics (#62).
+
 ### Fixed
 - `ctx query callers` and `ctx query deps` now honor `--depth` with cycle-safe breadth-first
   traversal, shortest-distance identity deduplication, explicit JSON distances, and distance-grouped
