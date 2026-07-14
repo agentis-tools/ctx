@@ -41,10 +41,13 @@ if [ -z "$maintainer" ]; then
   echo "ERROR: set DEB_MAINTAINER or configure a Cargo package author" >&2
   exit 1
 fi
-sed -e "s/@VERSION@/$version/g" \
-    -e "s|@MAINTAINER@|$maintainer|g" \
-    -e "s/@DEPENDS@//g" \
-    "$repo_root/packaging/deb/control.template" > "$work/debian/control"
+{
+  printf 'Source: ctx\n\n'
+  sed -e "s/@VERSION@/$version/g" \
+      -e "s|@MAINTAINER@|$maintainer|g" \
+      -e "s/@DEPENDS@//g" \
+      "$repo_root/packaging/deb/control.template"
+} > "$work/debian/control"
 depends="$(cd "$work" && dpkg-shlibdeps -O "$binary" | sed -n 's/^shlibs:Depends=//p')"
 if [ -z "$depends" ]; then
   echo "ERROR: dpkg-shlibdeps did not determine runtime dependencies" >&2

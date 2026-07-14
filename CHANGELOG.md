@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 - Made the local CI and canonical plugin lockstep checks honor Cargo's configured target directory while validating the standalone downloadable ctx skill against its harness template.
 - Constrained fastembed to the last ONNX Runtime dependency line that still publishes Intel macOS binaries.
+- Supplied the Debian source stanza required for release-package dependency discovery.
 
 ## [0.3.5] - 2026-07-13
 
