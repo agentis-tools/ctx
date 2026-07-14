@@ -14,6 +14,19 @@ This recipe was exercised against ctx's public `content_checksum` function using
 change to its hashing or checksum-line filtering behavior. That symbol has a small direct call graph
 but a much larger persisted and behavioral contract.
 
+## Quickest version
+
+```bash
+ctx index
+ctx query find <symbol> --json
+ctx query callers <symbol> --depth 1 --json
+ctx query deps <symbol> --depth 1 --json
+ctx source <symbol>
+```
+
+Then search the exact persisted or public name and write down tests, formats, configuration, and
+external consumers that cannot appear as call edges.
+
 ## State the proposed semantic change
 
 Do not ask only “what calls this function?” Record what might change:

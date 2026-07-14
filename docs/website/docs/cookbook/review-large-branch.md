@@ -16,6 +16,25 @@ governance and guardrails. It changed 29 files with 3,712 additions and 941 dele
 CI, release automation, Python enforcement, tests, lockfiles, and a generated CLI contract. Later
 follow-up fixes provide unusually strong evidence about which review questions mattered.
 
+:::note Worked-example provenance
+The historical example is pinned to ctx commit `7bb2167` and was exercised with ctx 0.3.5 on
+2026-07-14. Its file and line counts describe that commit, not the current repository.
+:::
+
+## Quickest version
+
+```bash
+BASE="$(git merge-base HEAD origin/main)"
+git diff --name-status "$BASE"..HEAD
+git diff --stat "$BASE"..HEAD
+ctx score --against "$BASE" --json
+ctx check --against "$BASE" --json
+```
+
+Partition the complete inventory by responsibility, then inspect behavioral, contract, security,
+generated, and test streams separately. Token-budgeted context routes attention; it does not define
+review coverage.
+
 ## Choose the comparison that represents the branch
 
 For a feature branch, compare with its merge base rather than an arbitrary local `main`:

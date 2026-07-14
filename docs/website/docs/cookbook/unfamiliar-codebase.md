@@ -13,6 +13,24 @@ closer inspection before a change.
 This recipe uses ctx in layers. Each layer answers a different question, and source code remains
 the final check when static relationships are ambiguous or incomplete.
 
+:::note Worked-example provenance
+The ctx-on-ctx measurements were captured from commit `0794eb1` with ctx 0.3.5 on 2026-07-14.
+They illustrate the workflow and will change as the repository and index evolve.
+:::
+
+## Quickest version
+
+```bash
+ctx index
+ctx query stats
+ctx map --budget 1200
+ctx query find <entry-point-name>
+ctx source <entry-point-name> --file <manifest-confirmed-file>
+```
+
+Confirm build metadata and trace one task-relevant path before editing. Rankings and graph edges are
+leads; source, manifests, tests, and compatibility documentation establish meaning.
+
 ## The orientation brief
 
 Before editing, aim to write down:

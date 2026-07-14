@@ -37,7 +37,8 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 
 ## Cookbook
 
-- [Cookbook](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/index.md): outcome-driven workflows, interpretation principles, and point-in-time versus longitudinal routing
+- [Cookbook](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/index.md): symptom-first routing into outcome-driven workflows, interpretation principles, and point-in-time versus longitudinal analysis
+- [Concepts shared by every recipe](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/concepts.md): canonical comparison-base selection, Report/Review/Block enforcement, exit codes, index coverage, and worked-example provenance
 - [Build a codebase health timeline in CI](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/continuous-health.md): capture default-branch snapshots, query normalized trends, investigate the responsible code, and see a real ctx-on-ctx case study
 - [Govern a pull request without inheriting old debt](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/pr-governance.md): compare against the merge base, separate evidence from blocking policy, investigate responsible code, and safely publish analysis for fork pull requests
 - [Detect architectural drift before it becomes a rewrite](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/architecture-drift.md): define reviewed boundaries, correlate coupling and violation trends, and distinguish code drift from policy-coverage changes
@@ -52,6 +53,8 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 - [Implement a feature with an evidence-backed working set](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/evidence-backed-implementation.md): baseline the owner boundary, test the compiled interface, refresh generated contracts and the index, audit context omissions, and interpret before-and-after metrics rather than treating them as verdicts
 - [Debug a failing test with a focused evidence loop](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/debug-failing-test.md): reproduce the exact symptom, trace test dependencies into the smallest production path, compare neighboring behavior, and prove one causal correction with widening tests
 - [Review a large branch without reading every file equally](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/review-large-branch.md): inventory every changed path, split the branch into review streams, route attention with scoped metrics, reject false graph expansion, and verify intent against enforcement and CI wiring
+- [Run ctx safely in CI on untrusted code](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/untrusted-ci.md): split read-only pull-request analysis from trusted publication, validate hostile artifacts, and reject stale results before writing
+- [Recover when a ctx gate blocks a legitimate change](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/gate-recovery.md): preserve evidence, distinguish findings from operational failure, verify source and policy, rebuild stale indexes, and correct the right layer without weakening the gate
 - [Downloadable ctx agent skill](https://raw.githubusercontent.com/agentis-tools/ctx/main/skills/ctx/SKILL.md): procedural routing and safeguards for agents using ctx to explore, govern, and analyze codebase health
 
 ## Governance

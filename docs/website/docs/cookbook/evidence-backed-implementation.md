@@ -16,6 +16,25 @@ set to documentation, the changelog, and a generated CLI contract. The experimen
 the point of the recipe and is not a claim about the released CLI; the verified edit-and-reindex
 loop is the reusable result.
 
+:::note Worked-example provenance
+The isolated implementation trial used ctx 0.3.5 on 2026-07-14. Its file counts and score deltas
+describe that controlled checkout, not a stable command fixture.
+:::
+
+## Quickest version
+
+```bash
+ctx index
+ctx smart "<task and acceptance behavior>" --explain --dry-run
+ctx score --against HEAD --json
+<run-the-narrow-acceptance-test>
+ctx index
+ctx score --against HEAD --json
+```
+
+Treat the initial context as a hypothesis. Let compiler errors, tests, contract generation, and the
+actual diff expand the working set before the final score is interpreted.
+
 ## Define behavior before files
 
 Write a small implementation brief:

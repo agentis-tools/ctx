@@ -12,6 +12,10 @@ security-sensitive conclusions against source. Do not edit generated harness
 hooks, Cargo lockfiles, plugin manifests, checksums, release notes, or CLI
 contract snapshots by hand when their generator exists.
 
+Cookbook additions and structural revisions must follow
+[`cookbook-authoring.md`](cookbook-authoring.md). Public recipes remain in `docs/`; the contributor
+contract and verification requirements remain in `governance/`.
+
 ## While changing contracts
 
 - Add a categorized Unreleased changelog entry for product behavior. Internal

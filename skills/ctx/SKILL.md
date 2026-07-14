@@ -31,6 +31,32 @@ ctx index --force    # full rebuild after schema changes or corruption
 | Where is current maintenance pressure? | `ctx hotspots` |
 | Is health changing across commits? | `ctx sql --snapshots=<dir>` |
 
+## Load the verified recipe for the problem
+
+The cookbook pages are executable workflows with observed limitations, not command advertisements.
+Open the matching page when the task needs more than the routing command:
+
+| Symptom | Recipe |
+|---|---|
+| Unfamiliar repository | [Orientation](https://docs.agentis.tools/docs/cookbook/unfamiliar-codebase) |
+| Context is too large or incomplete | [Smallest useful context](https://docs.agentis.tools/docs/cookbook/smallest-useful-context) |
+| Behavior may already exist | [Existing implementations](https://docs.agentis.tools/docs/cookbook/find-existing-implementations) |
+| A small edit may have hidden consumers | [Blast radius](https://docs.agentis.tools/docs/cookbook/blast-radius) |
+| Implementing with an uncertain working set | [Evidence-backed implementation](https://docs.agentis.tools/docs/cookbook/evidence-backed-implementation) |
+| Failing test in a large subsystem | [Focused debugging](https://docs.agentis.tools/docs/cookbook/debug-failing-test) |
+| Large branch review | [Risk-routed review](https://docs.agentis.tools/docs/cookbook/review-large-branch) |
+| PR gate inherits old debt | [PR governance](https://docs.agentis.tools/docs/cookbook/pr-governance) |
+| Gate blocks a legitimate change | [Gate recovery](https://docs.agentis.tools/docs/cookbook/gate-recovery) |
+| Fork PR needs a published report | [Untrusted CI](https://docs.agentis.tools/docs/cookbook/untrusted-ci) |
+| Boundaries are eroding | [Architecture drift](https://docs.agentis.tools/docs/cookbook/architecture-drift) |
+| The same code keeps changing | [Chronic hotspots](https://docs.agentis.tools/docs/cookbook/chronic-hotspots) |
+| High complexity may be intentional | [Intentional complexity](https://docs.agentis.tools/docs/cookbook/intentional-complexity) |
+| Duplication is growing | [Duplication trajectories](https://docs.agentis.tools/docs/cookbook/duplication-trajectories) |
+| Health direction or release decision | [Continuous health](https://docs.agentis.tools/docs/cookbook/continuous-health) and [release health](https://docs.agentis.tools/docs/cookbook/release-health-report) |
+
+Use each page's **Quickest version** only when its assumptions are already satisfied. Otherwise
+follow the full evidence loop and retain the page's “What worked, and what did not” limitations.
+
 ## Explore before editing
 
 ```bash
@@ -58,6 +84,8 @@ ctx duplicates --against main
 
 Use the repository's actual merge base instead of assuming `main` when it differs. Separate existing
 debt from findings introduced by the change. Do not edit `.ctx/rules.toml` to make a gate pass.
+If a gate is disputed, preserve its command, refs, JSON, stderr, and exit code; verify the finding
+against source and use the gate-recovery recipe instead of weakening policy.
 
 ## Analyze health over time
 

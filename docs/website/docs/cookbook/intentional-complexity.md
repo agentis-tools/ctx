@@ -14,6 +14,19 @@ This recipe determines what a high ctx score actually represents, tests whether 
 is coherent, and records the reasoning so the same code is not repeatedly “simplified” without
 context.
 
+## Quickest version
+
+```bash
+ctx index
+ctx query stats --json
+ctx source <high-scoring-symbol>
+ctx query callers <high-scoring-symbol> --depth 1
+ctx query deps <high-scoring-symbol> --depth 1
+```
+
+Separate fan-in from fan-out, read the responsibility in source, and check change pressure. Keep
+the complexity when proposed boundaries would only move coordination or duplicate invariants.
+
 ## Begin with the metric ctx actually computes
 
 ctx complexity is a graph heuristic:
@@ -167,7 +180,7 @@ When complexity is intentional, leave durable context close to the engineering d
 Avoid comments that merely repeat “this function is intentionally complex.” Explain why its parts
 belong together and what event would invalidate that reasoning.
 
-## What this found in ctx itself
+## What worked, and what did not in ctx itself
 
 The current highest ctx complexity score belongs to `Metrics::get` in `src/score.rs`: complexity
 226, fan-in 212, and fan-out 7. `ctx explain` shows that it is a public metric-name lookup spanning
@@ -203,9 +216,9 @@ dependency direction, and future change cost—not by score reduction alone.
 
 ## Next steps
 
-- Use the [chronic-hotspots recipe](chronic-hotspots.md) when high complexity also changes
+- Use the [chronic-hotspots recipe](chronic-hotspots) when high complexity also changes
   frequently.
-- Use [ctx explain and source](../code-intelligence.md#symbol-information) to verify the symbol's
+- Use [ctx explain and source](../code-intelligence#symbol-information) to verify the symbol's
   actual role.
 - Continue with the duplication-trajectory recipe to apply the same evidence-first reasoning to
   similar implementations.

@@ -21,6 +21,7 @@ const sidebars: SidebarsConfig = {
       label: 'Cookbook',
       items: [
         'cookbook/cookbook',
+        'cookbook/concepts',
         'cookbook/continuous-health',
         'cookbook/pr-governance',
         'cookbook/architecture-drift',
@@ -35,6 +36,8 @@ const sidebars: SidebarsConfig = {
         'cookbook/evidence-backed-implementation',
         'cookbook/debug-failing-test',
         'cookbook/review-large-branch',
+        'cookbook/untrusted-ci',
+        'cookbook/gate-recovery',
       ],
     },
     {

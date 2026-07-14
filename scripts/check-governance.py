@@ -18,6 +18,7 @@ REQUIRED = (
     "governance/releasing.md",
     "governance/guardrails.md",
     "governance/agent-workflow.md",
+    "governance/cookbook-authoring.md",
 )
 FORBIDDEN_DOCS = (
     "docs/versioning.md", "docs/releasing.md", "docs/guardrails.md",
@@ -28,6 +29,31 @@ AGENT_MARKER = "<!-- governance-instructions:v1 -->"
 
 class GovernanceError(RuntimeError):
     pass
+
+
+def cookbook_structure_errors(root: Path) -> list[str]:
+    cookbook = root / "docs/website/docs/cookbook"
+    errors: list[str] = []
+    exempt = {"index.md", "concepts.md"}
+    required_headings = (
+        "## Quickest version",
+        "## What worked, and what did not",
+        "## Give the workflow to an agent",
+    )
+    for recipe in sorted(cookbook.glob("*.md")):
+        text = recipe.read_text(encoding="utf-8")
+        if re.search(r"\]\((?!https?://)[^)]*\.md(?:#[^)]*)?\)", text):
+            errors.append(
+                f"{recipe.relative_to(root)} must use extensionless internal doc links"
+            )
+        if recipe.name in exempt:
+            continue
+        for heading in required_headings:
+            if heading not in text:
+                errors.append(
+                    f"{recipe.relative_to(root)} must include a '{heading}' section"
+                )
+    return errors
 
 
 def git(*args: str) -> str:
@@ -60,6 +86,7 @@ def structural_check() -> None:
         text = (ROOT / relative).read_text(encoding="utf-8")
         if "docs/" not in text and relative == "governance/guardrails.md":
             errors.append("guardrails.md must state the documentation boundary")
+    errors.extend(cookbook_structure_errors(ROOT))
     action_files = list((ROOT / ".github/workflows").glob("*.yml"))
     action_files += list((ROOT / ".github/workflows").glob("*.yaml"))
     action_files += list((ROOT / ".github/actions").glob("**/action.yml"))

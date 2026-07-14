@@ -13,6 +13,19 @@ moderately complex coordinator edited every week may impose a continuing cost.
 This recipe distinguishes a current hotspot from a chronic one, identifies the symbols responsible,
 and tests whether the pressure represents healthy feature growth or accidental responsibility.
 
+## Quickest version
+
+```bash
+ctx index
+ctx hotspots --since "90 days ago" --json
+ctx hotspots --since "1 year ago" --json
+ctx source <responsible-symbol>
+ctx query impact <responsible-symbol> --depth 1
+```
+
+Compare raw churn and complexity across meaningful windows. Use the score only to route
+investigation; confirm persistence and ownership before recommending decomposition.
+
 ## Understand the score before ranking work
 
 `ctx hotspots` computes:
@@ -172,7 +185,7 @@ ctx hotspots --against <base> --since "90 days ago"
 A successful refactor does not have to make every number fall. It should make the intended
 responsibility, dependency direction, or future change path clearer.
 
-## What this found in ctx itself
+## What worked, and what did not in ctx itself
 
 In the 90-day current view, `src/db/schema.rs` ranked first with 11 commits, complexity 2,084,
 fan-out 900, and a relative hotspot score of 0.60. Its leading symbols included
@@ -204,8 +217,8 @@ boundary.
 
 ## Next steps
 
-- Use the [architecture drift recipe](architecture-drift.md) when the hotspot crosses an intended
+- Use the [architecture drift recipe](architecture-drift) when the hotspot crosses an intended
   layer boundary.
-- Use [ctx hotspots](../commands/hotspots.md) for the complete scoring and option reference.
+- Use [ctx hotspots](../commands/hotspots) for the complete scoring and option reference.
 - Continue with the intentional-complexity recipe before deciding that a high-scoring function
   should be decomposed.

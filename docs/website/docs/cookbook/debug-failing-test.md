@@ -15,6 +15,20 @@ token-budget selection. The experiment changed an inclusive boundary into an exc
 existing test—not a test written to reveal the injected bug—caught it. The lab change was restored
 afterward; the purpose was to verify the diagnostic workflow, not to alter the product.
 
+## Quickest version
+
+```bash
+<run-the-exact-failing-test>
+ctx index
+ctx source <failing-test-symbol>
+ctx query deps <failing-test-symbol> --depth 1
+ctx source <smallest-production-symbol>
+<rerun-the-exact-test>
+```
+
+Change one causal boundary at a time, then widen validation from the exact test to its module,
+feature configurations, and the repository suite.
+
 ## Begin with the symptom, not a theory
 
 Run exactly the test and configuration that reported the problem:

@@ -15,6 +15,19 @@ This recipe was exercised against ctx itself using the hypothetical task **“ve
 files by comparing embedded checksums.”** The investigation found an existing complete workflow,
 not just a similarly named helper.
 
+## Quickest version
+
+```bash
+ctx index
+ctx similar "<behavior, inputs, and policy>"
+ctx similar "<repository vocabulary>" --keyword
+ctx source <candidate>
+ctx query callers <candidate> --depth 1
+```
+
+Read the candidate's tests and composed callers before choosing reuse. A retrieval match proves
+relevance, not compatible semantics or ownership.
+
 ## Describe behavior, not the implementation you expect
 
 Start with inputs, outcome, and important policy:

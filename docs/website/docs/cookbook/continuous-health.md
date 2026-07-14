@@ -13,6 +13,23 @@ architecture violations moving in a healthy direction across many changes?**
 This recipe captures one immutable metrics partition for every default-branch commit, keeps the
 history outside the product branch, and queries it with DuckDB through `ctx sql`.
 
+:::note Worked-example provenance
+The 98-partition case study describes ctx's snapshot branch as measured with ctx 0.3.5 on
+2026-07-14. It is an illustration, not a promised partition count or stable metric baseline.
+:::
+
+## Quickest version
+
+```bash
+ctx index
+ctx snapshot
+ctx sql --snapshots=.ctx/snapshots \
+  "SELECT commit_sha, committed_at FROM snap.meta ORDER BY committed_at;"
+```
+
+One partition proves capture works; it does not establish a trend. Preserve immutable partitions
+across default-branch commits, normalize totals, and investigate the code behind sustained movement.
+
 ## When to use this recipe
 
 Use it when you want to:
@@ -227,7 +244,7 @@ Classify the result before recommending work:
 Do not split a parser, state machine, transaction boundary, or orchestration function merely to
 lower a score. Do not abstract platform adapters or tests merely because their token shapes match.
 
-## What this found in ctx itself
+## What worked, and what did not in ctx itself
 
 ctx's `ctx-snapshots` branch contained 98 partitions when this recipe was written, spanning
 2025-11-25 through 2026-07-13 and writer versions 0.3.1 through 0.3.5.
@@ -279,5 +296,5 @@ questions to `ctx sql --snapshots` and investigate the responsible code before p
 - Add a scheduled job or release workflow that turns the series into a health report.
 - Introduce architecture rules gradually, then annotate when policy coverage changes.
 - Compare release-to-release trends rather than gating every absolute metric.
-- Follow up with [`ctx score`](../commands/score.md) for point-in-time change evaluation and
-  [`ctx snapshot`](../commands/snapshot.md) for the complete snapshot schema and backfill behavior.
+- Follow up with [`ctx score`](../commands/score) for point-in-time change evaluation and
+  [`ctx snapshot`](../commands/snapshot) for the complete snapshot schema and backfill behavior.

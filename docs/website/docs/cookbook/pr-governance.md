@@ -13,9 +13,28 @@ architecture.
 This recipe builds a delta-focused review with `ctx score --against`, then separates observations
 that deserve investigation from policies that are mature enough to block a merge.
 
+:::note Worked-example provenance
+The worked branch measurements were captured during the ctx cookbook work on 2026-07-14 with ctx
+0.3.5. They demonstrate interpretation; they are not expected output for a newer checkout.
+:::
+
+## Quickest version
+
+```bash
+git fetch origin main
+BASE="$(git merge-base HEAD origin/main)"
+ctx index
+ctx check --list
+ctx score --against "$BASE" --json
+```
+
+Investigate the files behind material deltas. Add `--fail-on` only for reviewed contracts, and
+handle exit `1` as findings and exit `2` as invalid analysis. See [shared cookbook concepts](concepts).
+
 ## The operating model
 
-Use three outcomes instead of treating every metric as pass or fail:
+Use the cookbook's canonical [Report/Review/Block model](concepts#interpret-gate-outcomes-consistently)
+instead of treating every metric as pass or fail:
 
 | Outcome | Meaning | Typical signals |
 |---|---|---|
@@ -206,7 +225,7 @@ ctx uses this design in its own
 and
 [`ctx-pr-comment.yml`](https://github.com/agentis-tools/ctx/blob/main/.github/workflows/ctx-pr-comment.yml).
 
-## What this recipe found in ctx itself
+## What worked, and what did not in ctx itself
 
 ctx's PR workflow is intentionally report-first. It captures the audit, map, index statistics,
 score, duplicates, hotspots, and architecture check as separate JSON documents. The privileged
@@ -231,8 +250,8 @@ not a clean result.
 
 ## Next steps
 
-- Use [ctx score](../commands/score.md) for metric definitions and gate expressions.
-- Use [ctx check](../commands/check.md) to introduce architecture contracts gradually.
-- Use [ctx duplicates](../commands/duplicates.md) to inspect similarity before deciding on reuse.
-- Follow the [continuous health recipe](continuous-health.md) to see whether accepted pull-request
+- Use [ctx score](../commands/score) for metric definitions and gate expressions.
+- Use [ctx check](../commands/check) to introduce architecture contracts gradually.
+- Use [ctx duplicates](../commands/duplicates) to inspect similarity before deciding on reuse.
+- Follow the [continuous health recipe](continuous-health) to see whether accepted pull-request
   deltas become a sustained repository trend.

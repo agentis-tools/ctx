@@ -14,6 +14,18 @@ long-term direction becomes expensive.
 This recipe combines current dependency evidence, explicit rules, pull-request scoping, and
 historical pressure signals. It does not assume that increasing coupling is automatically wrong.
 
+## Quickest version
+
+```bash
+ctx index
+ctx check --list
+BASE="$(git merge-base HEAD origin/main)"
+ctx check --against "$BASE"
+```
+
+Review each reported edge in source. Use snapshot history only after the point-in-time boundary is
+understood; a growing metric alone is not proof of drift.
+
 ## What counts as evidence of drift?
 
 Look for combinations rather than one high value:
@@ -108,12 +120,12 @@ This lets a legacy repository adopt boundaries without requiring one pull reques
 existing violation. Remember that touching a file can bring an existing relationship involving
 that file into scope. Review the reported edge before claiming the branch created it.
 
-Use [`no_new_dependents`](../commands/check.md) when the goal is directional: existing callers may
+Use [`no_new_dependents`](../commands/check) when the goal is directional: existing callers may
 remain temporarily, but migration work must not add another one.
 
 ## 4. Capture the long-term pressure
 
-Follow the [continuous health recipe](continuous-health.md) to retain one snapshot per
+Follow the [continuous health recipe](continuous-health) to retain one snapshot per
 default-branch commit. Then inspect symbols whose coupling remains high across multiple captures:
 
 ```bash
@@ -210,7 +222,7 @@ The response differs by category. Boundary erosion may require code movement; an
 may need documentation or an explicit exclusion; insufficient evidence should not trigger an
 automatic rewrite.
 
-## What this reveals in ctx itself
+## What worked, and what did not in ctx itself
 
 ctx's historical snapshots currently show zero architecture violations, but the repository has no
 committed active rules. That series therefore measures policy coverage as zero, not architectural
@@ -236,8 +248,8 @@ coupling metric alone.
 
 ## Next steps
 
-- Use the [pull-request governance recipe](pr-governance.md) to enforce reviewed contracts on new
+- Use the [pull-request governance recipe](pr-governance) to enforce reviewed contracts on new
   changes.
-- Use [ctx check](../commands/check.md) for the complete rule grammar and static-analysis caveats.
+- Use [ctx check](../commands/check) for the complete rule grammar and static-analysis caveats.
 - Investigate files that combine boundary pressure with churn using the forthcoming chronic
   hotspots recipe.

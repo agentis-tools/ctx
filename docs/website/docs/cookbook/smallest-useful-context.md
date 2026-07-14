@@ -14,6 +14,24 @@ This recipe uses `ctx smart` to discover candidates, then verifies the working s
 search, graph relationships, source inspection, and explicit token counting. It was exercised on
 the task **“add a new field to historical snapshot metadata”** in ctx itself.
 
+:::note Worked-example provenance
+The candidate counts and token estimates were measured against ctx 0.3.5 on 2026-07-14. They are
+illustrative and may change with repository content, embeddings, tokenizer, and ctx version.
+:::
+
+## Quickest version
+
+```bash
+ctx index
+ctx smart "<task, behavior, and contract>" --explain --dry-run
+ctx query callers <writer-or-public-symbol> --depth 1
+ctx query deps <writer-or-public-symbol> --depth 1
+ctx <verified-files...> --count-only
+```
+
+Use ranking to discover candidates, then explicitly add writers, readers, tests, schemas, and
+contracts. Count the verified set before packaging it; a token budget is not a completeness proof.
+
 ## Define useful before defining small
 
 Write a task-specific completeness test. For a persisted metadata field, useful context should

@@ -14,6 +14,18 @@ in sync?**
 This recipe separates current detection, branch review, and longitudinal analysis before deciding
 whether two implementations should share an abstraction.
 
+## Quickest version
+
+```bash
+ctx index
+ctx duplicates --json
+BASE="$(git merge-base HEAD origin/main)"
+ctx duplicates --against "$BASE" --json
+```
+
+Inspect the reported pair, ownership, tests, and change history. Similar structure is not proof of
+shared semantics, and a new pair should not block automatically without a reviewed exception path.
+
 ## Know what the detector sees
 
 ctx compares normalized five-token shingles:
@@ -185,7 +197,7 @@ ctx query impact <shared-symbol>
 
 Judge the result by reduced synchronization cost and a clearer contract, not only by the pair count.
 
-## What this found in ctx itself
+## What worked, and what did not in ctx itself
 
 Across the release snapshots, ctx's duplicate-pair count moved only from 137 at v0.3.1 to 139 in
 the latest recorded 0.3.5 state. Indexed symbols grew from 1,648 to 2,161, so duplicate pairs per
@@ -221,8 +233,8 @@ contract and reduces future synchronization cost.
 
 ## Next steps
 
-- Use the [pull-request governance recipe](pr-governance.md) to decide whether new similarity is a
+- Use the [pull-request governance recipe](pr-governance) to decide whether new similarity is a
   report, review, or blocking signal.
-- Use [ctx duplicates](../commands/duplicates.md) for threshold, token, and exit-code details.
+- Use [ctx duplicates](../commands/duplicates) for threshold, token, and exit-code details.
 - Feed normalized duplication evidence into the release-health report rather than reporting raw
   pair counts alone.

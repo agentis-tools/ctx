@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Documentation
+- Added symptom-first cookbook routing, per-recipe quick paths, canonical cross-cutting concepts,
+  pinned worked-example provenance, and an authoring contract that preserves verified limitations.
+- Added verified recipes for fork-safe ctx analysis and recovery from disputed findings,
+  operational gate failures, and stale indexes without weakening policy.
+- Expanded the downloadable ctx skill and `llms.txt` so agents can route directly from engineering
+  symptoms to the complete cookbook workflow.
 - Started Cookbook v2 with a source-verified unfamiliar-codebase orientation workflow that distinguishes ranked structural leads from real entry points and documents static-analysis uncertainty.
 - Added a verified smallest-useful-context recipe that tests smart selection at multiple budgets, audits omitted consumers and contracts, and separates compact symbol investigation from complete implementation context.
 - Added a reuse-discovery recipe that compares semantic, signature-like, and keyword retrieval, traces matching primitives into their composed workflow, and verifies ownership semantics from tests before recommending reuse.

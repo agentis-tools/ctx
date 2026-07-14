@@ -13,6 +13,23 @@ duplication, hotspots, and architecture policy into one unexplained “health sc
 This recipe turns snapshot history and focused investigations into a compact engineering decision
 artifact for maintainers, reviewers, and future agents.
 
+:::note Worked-example provenance
+The report compares immutable ctx tags v0.3.4 and v0.3.5 as measured on 2026-07-14. The values are
+an illustration; later releases and regenerated snapshot histories will differ.
+:::
+
+## Quickest version
+
+```bash
+git rev-parse <older-tag>^{} <newer-tag>^{}
+ctx sql --snapshots=<snapshot-dir> \
+  "SELECT commit_sha, committed_at FROM snap.meta ORDER BY committed_at;"
+ctx map --focus <materially-changed-path> --budget 2000
+```
+
+Compare immutable points with matching provenance, normalize repository-wide totals, and assign an
+owner only after inspecting the files and symbols behind each material signal.
+
 ## The report contract
 
 Every report should contain:
@@ -122,10 +139,10 @@ For each material delta, choose the next investigation:
 
 Use the other cookbook workflows for evidence:
 
-- [intentional complexity](intentional-complexity.md) for maximum-complexity outliers;
-- [chronic hotspots](chronic-hotspots.md) for churn combined with structural pressure;
-- [duplication trajectories](duplication-trajectories.md) for pair density and persistence;
-- [architecture drift](architecture-drift.md) for coupling and policy movement.
+- [intentional complexity](intentional-complexity) for maximum-complexity outliers;
+- [chronic hotspots](chronic-hotspots) for churn combined with structural pressure;
+- [duplication trajectories](duplication-trajectories) for pair density and persistence;
+- [architecture drift](architecture-drift) for coupling and policy movement.
 
 ## 4. Find the responsible files and symbols
 
@@ -243,7 +260,7 @@ duplication, and architecture findings.
 Do not make release publication depend on every rising metric. Block only explicit release policy,
 contract, or operational failures. Track other findings as review items with owners.
 
-## What the v0.3.4 → v0.3.5 ctx report says
+## What worked, and what did not in the v0.3.4 → v0.3.5 report
 
 The exact release snapshots produce:
 
@@ -285,8 +302,8 @@ report into one unexplained health score.
 
 ## Next steps
 
-- Keep the underlying [continuous snapshot history](continuous-health.md) current.
-- Use the [pull-request governance recipe](pr-governance.md) to address explicit contracts before
+- Keep the underlying [continuous snapshot history](continuous-health) current.
+- Use the [pull-request governance recipe](pr-governance) to address explicit contracts before
   release preparation.
 - Publish the Markdown summary with machine-readable artifacts so future reports and agents can
   reproduce the analysis.
