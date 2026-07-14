@@ -23,13 +23,19 @@ if [ "$#" -gt 1 ]; then
 fi
 
 expected="${1:-$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')}"
+target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r '.target_directory')"
+
+if ! diff -u src/harness/templates/SKILL.md skills/ctx/SKILL.md; then
+  echo "ERROR: standalone skills/ctx/SKILL.md has drifted from the harness template" >&2
+  exit 1
+fi
 
 echo "Building ctx plugin generator..."
 # Plugin templates do not depend on DuckDB; avoiding default features keeps
 # this packaging check fast and portable while preserving the default no-MCP
 # release plugin shape.
 cargo build --quiet --no-default-features
-ctx_bin="$repo_root/target/debug/ctx"
+ctx_bin="$target_dir/debug/ctx"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT

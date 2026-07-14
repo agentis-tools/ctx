@@ -81,6 +81,7 @@ const config: Config = {
           items: [
             {label: 'Why ctx?', to: '/docs/why-ctx'},
             {label: 'Getting Started', to: '/docs/getting-started'},
+            {label: 'Cookbook', to: '/docs/cookbook'},
             {label: 'Using ctx with agents', to: '/docs/guides/using-ctx-with-agents'},
             {label: 'Comparison', to: '/docs/comparison'},
           ],

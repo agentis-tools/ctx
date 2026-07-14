@@ -8,7 +8,10 @@
 > radius of an edit, plus quality/complexity/duplication gates for CI. Exposed over an MCP server.
 
 ctx works out of the box: `ctx index` builds the world model, then `smart`/`semantic`/`query` ground
-the agent and `query impact`/`audit` govern its changes. Install with `cargo install agentis-ctx`
+the agent and `query impact`/`check`/`score` govern its changes. `snapshot` plus read-only SQL adds a
+longitudinal view: whether complexity, coupling, duplication, hotspots, and architecture violations
+are improving or deteriorating across commits. Metrics are evidence to investigate, not automatic
+proof that code is wrong. Install with `cargo install agentis-ctx`
 (the binary is `ctx`). It is not a file-packer (repomix, gitingest) and not an IDE indexer (ctags,
 LSP) — it is a code world model, agent-first and local. Links below point to the markdown sources.
 
@@ -32,6 +35,25 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 - [Map the codebase](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/map.md): token-budgeted structural overview
 - [Find existing code](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/similar.md): pre-write reuse check
 
+## Cookbook
+
+- [Cookbook](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/index.md): outcome-driven workflows, interpretation principles, and point-in-time versus longitudinal routing
+- [Build a codebase health timeline in CI](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/continuous-health.md): capture default-branch snapshots, query normalized trends, investigate the responsible code, and see a real ctx-on-ctx case study
+- [Govern a pull request without inheriting old debt](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/pr-governance.md): compare against the merge base, separate evidence from blocking policy, investigate responsible code, and safely publish analysis for fork pull requests
+- [Detect architectural drift before it becomes a rewrite](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/architecture-drift.md): define reviewed boundaries, correlate coupling and violation trends, and distinguish code drift from policy-coverage changes
+- [Investigate chronic hotspots without chasing large files](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/chronic-hotspots.md): combine churn and complexity, confirm persistent pressure, inspect ownership, and avoid score-driven decomposition
+- [Review and document intentional complexity](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/intentional-complexity.md): distinguish popularity, orchestration, and exhaustive traversal from accidental responsibility before proposing decomposition
+- [Track duplication trajectories without forcing abstractions](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/duplication-trajectories.md): distinguish current and newly introduced pairs, normalize history by repository size, and inspect ownership before extracting reuse
+- [Produce a release health report that supports decisions](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/release-health-report.md): compare immutable releases with provenance, normalized metrics, investigated findings, policy coverage, uncertainty, and assigned actions
+- [Understand an unfamiliar codebase before editing it](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/unfamiliar-codebase.md): distinguish structural leads from real entry points, verify one execution path, and report static-analysis uncertainty before editing
+- [Build the smallest useful context for a task](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/smallest-useful-context.md): rank candidates, audit omitted contracts, use source snippets for investigation, and count the explicit implementation set before packaging it
+- [Find existing implementations before writing new code](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/find-existing-implementations.md): combine behavior-specific, keyword, and signature-like searches with caller and test inspection before choosing a reuse boundary
+- [Trace the blast radius before editing a symbol](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/blast-radius.md): bound graph expansion, reject name-resolution false positives from source, and include tests, persisted formats, generated artifacts, public APIs, and external uncertainty
+- [Implement a feature with an evidence-backed working set](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/evidence-backed-implementation.md): baseline the owner boundary, test the compiled interface, refresh generated contracts and the index, audit context omissions, and interpret before-and-after metrics rather than treating them as verdicts
+- [Debug a failing test with a focused evidence loop](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/debug-failing-test.md): reproduce the exact symptom, trace test dependencies into the smallest production path, compare neighboring behavior, and prove one causal correction with widening tests
+- [Review a large branch without reading every file equally](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/cookbook/review-large-branch.md): inventory every changed path, split the branch into review streams, route attention with scoped metrics, reject false graph expansion, and verify intent against enforcement and CI wiring
+- [Downloadable ctx agent skill](https://raw.githubusercontent.com/agentis-tools/ctx/main/skills/ctx/SKILL.md): procedural routing and safeguards for agents using ctx to explore, govern, and analyze codebase health
+
 ## Governance
 
 - [Quality gates overview](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/integrations/quality-gates.md): the suite, exit-code contract, CI + agent usage
@@ -40,6 +62,7 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 - [Hotspots](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/hotspots.md): churn × complexity ranking
 - [Duplicates](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/duplicates.md): MinHash near-duplicate detection
 - [SQL gates (ctx sql)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/sql.md): raw read-only SQL over the v1 schema, with `--fail-on-rows` for repo-committed gates
+- [Historical snapshots](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/snapshot.md): per-commit Parquet metrics, backfills, data-branch CI, and trend queries
 
 ## Reference
 

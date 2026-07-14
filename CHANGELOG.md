@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Started Cookbook v2 with a source-verified unfamiliar-codebase orientation workflow that distinguishes ranked structural leads from real entry points and documents static-analysis uncertainty.
+- Added a verified smallest-useful-context recipe that tests smart selection at multiple budgets, audits omitted consumers and contracts, and separates compact symbol investigation from complete implementation context.
+- Added a reuse-discovery recipe that compares semantic, signature-like, and keyword retrieval, traces matching primitives into their composed workflow, and verifies ownership semantics from tests before recommending reuse.
+- Added a blast-radius recipe that bounds graph traversal, verifies transitive relationships from source, supplements incomplete edges with exact contract search, and turns persisted, generated, public, and behavioral impact into a validation plan.
+- Added an evidence-backed implementation recipe that baselines the owning boundary, tests the compiled interface, refreshes contracts and code intelligence after editing, audits context omissions, and interprets structural deltas before completion.
+- Added a focused failing-test debugging recipe that reproduces the symptom, traces test dependencies into production code, compares neighboring behavior, and proves one causal correction with widening validation.
+- Added a large-branch review recipe that inventories the complete change, separates review streams, routes attention with scoped metrics, rejects false graph expansion, and verifies policy intent against enforcement and CI wiring.
+- Added an outcome-driven cookbook with a real ctx-on-ctx case study for capturing codebase-health snapshots in CI, normalizing longitudinal metrics, and investigating trends without treating high complexity or duplication as automatic defects.
+- Added a delta-focused pull-request governance recipe that separates informational metrics, human-review signals, explicit blocking policy, and safe analysis of fork contributions.
+- Added an architectural-drift recipe that combines reviewed dependency rules, pull-request scoping, longitudinal coupling signals, and policy-history interpretation.
+- Added a chronic-hotspots recipe that combines current churn-complexity rankings, normalized historical evidence, change history, and ownership-focused investigation.
+- Added an intentional-complexity recipe that separates fan-in from fan-out, tests responsibility coherence, and records why complex shared primitives, parsers, and dispatchers may remain intact.
+- Added a duplication-trajectory recipe that distinguishes current, changed-file, and newly introduced pairs while normalizing history and requiring ownership analysis before reuse.
+- Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
+
+### Internal
+- Made the local CI and canonical plugin lockstep checks honor Cargo's configured target directory while validating the standalone downloadable ctx skill against its harness template.
+
 ## [0.3.5] - 2026-07-13
 
 ### Added

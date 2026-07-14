@@ -28,6 +28,7 @@ ctx serve --mcp                                     # expose the whole model to 
 - **[Why ctx?](why-ctx.md)** — the problem it solves and how grounding and governing work.
 - **[Get started](getting-started.md)** — install and build your first world model in minutes.
 - **[Using ctx with agents](guides/using-ctx-with-agents.md)** — the recommended agent loop and MCP setup.
+- **[Cookbook](cookbook/index.md)** — outcome-driven workflows for everyday agent-assisted engineering, change governance, and continuous codebase health.
 - **[Comparison](comparison.md)** — how ctx differs from file-packers and IDE indexers.
 
 Prefer to learn by topic? Jump to [Context Generation](context-generation.md),
