@@ -50,7 +50,9 @@ struct Scenario {
     server_version: Option<String>,
     /// Respond to `initialize`, then exit immediately (simulated crash).
     exit_after_initialize: bool,
-    /// Read requests but never answer anything (simulated hang).
+    /// Complete the `initialize` handshake, then read but never answer any
+    /// further message (simulated hang; exercises the client's
+    /// consecutive-timeout failure logic).
     never_respond: bool,
     /// Append one line per received message (`method<TAB>uri`) to this file.
     hits_file: Option<PathBuf>,
@@ -99,7 +101,10 @@ pub fn run_stdio_mock(scenario_path: &Path) {
 
         record_hit(&scenario, &method, &message);
 
-        if scenario.never_respond {
+        // Simulated hang: the handshake succeeds so the server looks healthy,
+        // then every later request times out (the process exits when the
+        // client kills it / closes stdin).
+        if scenario.never_respond && method != "initialize" {
             continue;
         }
 

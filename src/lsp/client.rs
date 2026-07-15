@@ -49,10 +49,15 @@ pub struct LspClient {
     child: Child,
     stderr_lines: Arc<Mutex<VecDeque<String>>>,
     request_timeout: Duration,
+    /// Whether `timeout_ms` was configured explicitly. An explicit timeout is
+    /// honored as-is (no warmup extension), so tests and impatient users get
+    /// deterministic deadlines.
+    explicit_timeout: bool,
     /// `Some(reason)` once the server has been declared unusable.
     failed: Option<String>,
     consecutive_timeouts: u32,
-    /// The first request after `initialize` gets a longer warmup deadline.
+    /// The first request after `initialize` gets a longer warmup deadline
+    /// (unless the timeout was configured explicitly).
     warmup_pending: bool,
     shut_down: bool,
     /// Server-reported name from `initialize` (if any).
@@ -112,6 +117,7 @@ impl LspClient {
                 .timeout_ms
                 .map(Duration::from_millis)
                 .unwrap_or(DEFAULT_REQUEST_TIMEOUT),
+            explicit_timeout: config.timeout_ms.is_some(),
             failed: None,
             consecutive_timeouts: 0,
             warmup_pending: true,
@@ -230,7 +236,7 @@ impl LspClient {
             return Err(reason.clone());
         }
 
-        let timeout = if self.warmup_pending {
+        let timeout = if self.warmup_pending && !self.explicit_timeout {
             self.request_timeout.max(WARMUP_TIMEOUT)
         } else {
             self.request_timeout

@@ -59,6 +59,13 @@ fn rewrite_id(
 /// Default directory name for storing the database.
 pub const CTX_DIR: &str = ".ctx";
 
+/// Prefix marking a file record stored from a *degraded* extraction (LSP
+/// server unusable and no tree-sitter fallback, i.e. an empty symbol set that
+/// does not reflect the file's content). Because the stored hash never equals
+/// a real content hash, `needs_update` re-extracts the file on the next run —
+/// once the server is healthy again the real symbols replace the empty record.
+const LSP_DEGRADED_HASH_PREFIX: &str = "lsp-degraded:";
+
 /// Default database filename.
 pub const DB_FILE: &str = "codebase.sqlite";
 
@@ -165,34 +172,48 @@ impl Indexer {
     /// fallback: builtin languages re-parse with tree-sitter, dynamic
     /// languages store a file record with zero symbols (so incremental
     /// skipping and deletion cleanup keep working). Never fails the run.
+    ///
+    /// The `bool` is the *degraded* flag: `true` only for the empty-result
+    /// path (server unusable AND no tree-sitter fallback). Callers must then
+    /// store the file with [`degraded_hash`] so the next run retries instead
+    /// of skipping the empty record forever. A healthy server's answer (even
+    /// zero symbols, e.g. a `null` documentSymbol for an empty file) and a
+    /// tree-sitter fallback parse are durable results and are not poisoned.
     fn lsp_extract_or_fallback(
         &mut self,
         language: &str,
         rel_path: &str,
         abs_path: &Path,
         content: &str,
-    ) -> ParseResult {
+    ) -> (ParseResult, bool) {
         if let Some(mgr) = self.lsp.as_mut() {
             if let Some(result) = mgr.extract(language, rel_path, content) {
-                return result;
+                return (result, false);
             }
         }
 
         // Server missing/crashed (the manager already warned once per
-        // language): builtin grammars still produce full symbols.
+        // language): builtin grammars still produce full symbols, which is
+        // an acceptable durable result — no retry needed.
         if CodeParser::is_supported_static(abs_path) {
             if let Some(result) = self.parser.parse(abs_path, content) {
-                return result;
+                return (result, false);
             }
         }
 
-        ParseResult {
-            file_path: rel_path.to_string(),
-            language: language.to_string(),
-            symbols: Vec::new(),
-            edges: Vec::new(),
-            module: None,
-        }
+        // Degraded: no server and no fallback. The empty record keeps
+        // incremental bookkeeping and deletion cleanup working, but must be
+        // stored with a poisoned hash so a later healthy run re-extracts.
+        (
+            ParseResult {
+                file_path: rel_path.to_string(),
+                language: language.to_string(),
+                symbols: Vec::new(),
+                edges: Vec::new(),
+                module: None,
+            },
+            true,
+        )
     }
 
     /// Stage B: resolve leftover cross-file references for the given files
@@ -288,7 +309,7 @@ impl Indexer {
             }
 
             // Parse the file (tree-sitter or LSP, per backend)
-            let parse_result = match &backend {
+            let (parse_result, degraded) = match &backend {
                 FileBackend::Lsp(language) => {
                     let language = language.clone();
                     self.lsp_extract_or_fallback(
@@ -299,7 +320,7 @@ impl Indexer {
                     )
                 }
                 _ => match self.parser.parse(&entry.absolute_path, &content) {
-                    Some(r) => r,
+                    Some(r) => (r, false),
                     None => {
                         if self.verbose {
                             eprintln!("Warning: failed to parse {}", rel_path);
@@ -310,8 +331,16 @@ impl Indexer {
                 },
             };
 
+            // A degraded (empty) extraction is stored with a poisoned hash so
+            // the next run retries it once the server is healthy again.
+            let store_hash = if degraded {
+                degraded_hash(&hash)
+            } else {
+                hash.clone()
+            };
+
             // Store in database
-            if let Err(e) = self.store_file(&rel_path, &content, &hash, &parse_result) {
+            if let Err(e) = self.store_file(&rel_path, &content, &store_hash, &parse_result) {
                 if self.verbose {
                     eprintln!("Warning: failed to store {}: {}", rel_path, e);
                 }
@@ -533,13 +562,21 @@ impl Indexer {
                     if verbose {
                         eprintln!("Indexing (lsp:{}): {}", language, rel_path);
                     }
-                    let parse_result = self.lsp_extract_or_fallback(
+                    let (parse_result, degraded) = self.lsp_extract_or_fallback(
                         &language,
                         &rel_path,
                         &entry.absolute_path,
                         &content,
                     );
-                    if let Err(e) = self.store_file(&rel_path, &content, &hash, &parse_result) {
+                    // Poisoned hash for degraded (empty) extractions: the
+                    // next run retries instead of skipping forever.
+                    let store_hash = if degraded {
+                        degraded_hash(&hash)
+                    } else {
+                        hash.clone()
+                    };
+                    if let Err(e) = self.store_file(&rel_path, &content, &store_hash, &parse_result)
+                    {
                         if self.verbose {
                             eprintln!("Warning: failed to store {}: {}", rel_path, e);
                         }
@@ -628,19 +665,28 @@ impl Indexer {
         }
 
         // Parse (tree-sitter or LSP, per backend)
-        let parse_result = match &backend {
+        let (parse_result, degraded) = match &backend {
             FileBackend::Lsp(language) => {
                 let language = language.clone();
                 self.lsp_extract_or_fallback(&language, &rel_path, &abs_path, &content)
             }
-            _ => self
-                .parser
-                .parse(&abs_path, &content)
-                .ok_or_else(|| io::Error::other("Parse failed"))?,
+            _ => (
+                self.parser
+                    .parse(&abs_path, &content)
+                    .ok_or_else(|| io::Error::other("Parse failed"))?,
+                false,
+            ),
+        };
+
+        // Poisoned hash for degraded (empty) extractions: retried next run.
+        let store_hash = if degraded {
+            degraded_hash(&hash)
+        } else {
+            hash.clone()
         };
 
         // Store
-        self.store_file(&rel_path, &content, &hash, &parse_result)?;
+        self.store_file(&rel_path, &content, &store_hash, &parse_result)?;
 
         // The graph changed: invalidate the cached PageRank scores
         // (`ctx map` recomputes them lazily).
@@ -824,6 +870,13 @@ impl Indexer {
     pub fn database(&self) -> &Database {
         &self.db
     }
+}
+
+/// Hash stored for a degraded (empty, server-unavailable) extraction: keeps
+/// the real content hash for debuggability but never compares equal to one,
+/// so `needs_update` always retries the file on the next run.
+fn degraded_hash(hash: &str) -> String {
+    format!("{LSP_DEGRADED_HASH_PREFIX}{hash}")
 }
 
 /// Compute SHA256 hash of content.

@@ -158,6 +158,15 @@ pub(crate) fn validate(
             continue;
         }
 
+        // Validation floor: a zero timeout would make every request fail
+        // instantly; treat it as "not set" (the built-in default applies).
+        if cfg.timeout_ms == Some(0) {
+            eprintln!(
+                "Warning: [lsp.{language}] timeout_ms = 0 is invalid; using the default timeout"
+            );
+            cfg.timeout_ms = None;
+        }
+
         // Normalize extensions: lowercase, no leading dot, no empties.
         cfg.extensions = cfg
             .extensions
@@ -300,6 +309,33 @@ command = "kls"
         );
         let (servers, _) = validate(&lsp);
         assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn zero_timeout_is_floored_to_default() {
+        let lsp = parse(
+            r#"
+[lsp.python]
+command = "pyls"
+timeout_ms = 0
+"#,
+        );
+        let (servers, _) = validate(&lsp);
+        assert_eq!(
+            servers["python"].timeout_ms, None,
+            "0 falls back to default"
+        );
+
+        // Non-zero values pass through.
+        let lsp = parse(
+            r#"
+[lsp.python]
+command = "pyls"
+timeout_ms = 200
+"#,
+        );
+        let (servers, _) = validate(&lsp);
+        assert_eq!(servers["python"].timeout_ms, Some(200));
     }
 
     #[test]

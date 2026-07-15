@@ -392,6 +392,290 @@ fn incremental_reindex_spawns_no_server() {
         .contains("textDocument/documentSymbol"));
 }
 
+/// A dynamic-language file indexed while its server is unusable must be
+/// retried on the next run (the empty record is stored with a poisoned hash),
+/// not skipped forever because the content hash still matches.
+#[test]
+fn degraded_dynamic_file_reindexes_once_server_recovers() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let scratch = scenario_dir();
+    let scenario_path = scratch.path().join("scenario.json");
+
+    write(root, "src/main.kt", KOTLIN_SOURCE);
+
+    // Run 1: the configured server binary does not exist -> the kotlin file
+    // is stored with zero symbols (no tree-sitter grammar to fall back to).
+    write(
+        root,
+        ".ctx/config.toml",
+        r#"
+[lsp.kotlin]
+command = "definitely-not-on-path-xyz"
+extensions = ["kt"]
+backend = "lsp"
+"#,
+    );
+    let out = ctx(root, &["index"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    {
+        let db = ctx::index::open_database(root).unwrap();
+        assert!(
+            db.find_symbols("greet", 10).unwrap().is_empty(),
+            "run 1 has no server and no fallback: zero symbols expected"
+        );
+        // The file record itself exists (incremental bookkeeping + deletion
+        // cleanup), with a poisoned hash so the next run retries it.
+        let hash = db.get_file_hash("src/main.kt").unwrap().unwrap();
+        assert!(
+            hash.starts_with("lsp-degraded:"),
+            "degraded record must carry a poisoned hash, got {hash}"
+        );
+    }
+
+    // Run 2: the server is healthy again (mock with real symbols). The file
+    // content is unchanged — before the fix this run skipped the file forever.
+    fs::write(
+        &scenario_path,
+        serde_json::json!({
+            "server_name": "ctx-mock-kotlin",
+            "document_symbols": { "src/main.kt": kotlin_document_symbols() },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    write_mock_lsp_config(
+        root,
+        "kotlin",
+        "lsp",
+        "extensions = [\"kt\"]",
+        &scenario_path,
+    );
+    let out = ctx(root, &["index"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Indexed 1 files"),
+        "the degraded file must be re-indexed: {stderr}"
+    );
+
+    // The retry produced real symbols and a healthy status sidecar.
+    let db = ctx::index::open_database(root).unwrap();
+    let symbols = db.find_symbols("greet", 10).unwrap();
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.file_path == "src/main.kt" && s.name == "greet"),
+        "symbols: {symbols:?}"
+    );
+    let hash = db.get_file_hash("src/main.kt").unwrap().unwrap();
+    assert!(
+        !hash.starts_with("lsp-degraded:"),
+        "healthy extraction must store the real hash, got {hash}"
+    );
+    let status = fs::read_to_string(root.join(".ctx/lsp_status.json")).unwrap();
+    let status: serde_json::Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(status["servers"][0]["state"], "healthy");
+}
+
+/// Stage B must ask `textDocument/definition` at the callee identifier, not
+/// at the start of the call expression (the receiver for method calls), and
+/// must only write targets whose symbol name matches the edge's callee name.
+#[test]
+fn stage_b_definition_targets_callee_identifier() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let scratch = scenario_dir();
+    let scenario_path = scratch.path().join("scenario.json");
+
+    // `obj.helper()`: tree-sitter records the call edge at the start of the
+    // whole call expression — column 11, the receiver `obj`. The callee
+    // identifier `helper` starts at column 15. `helper` is defined in two
+    // files so the SQL passes leave the edge unresolved for Stage B.
+    write(root, "app.py", "def main():\n    return obj.helper()\n");
+    write(root, "util.py", "def helper():\n    return 1\n");
+    write(root, "other.py", "def helper():\n    return 2\n");
+
+    // Position-sensitive mock: the receiver position resolves to the WRONG
+    // symbol (`main` in app.py), the callee-identifier position to the right
+    // one. Only the column adjustment reaches the second mapping.
+    fs::write(
+        &scenario_path,
+        serde_json::json!({
+            "definitions": {
+                "app.py:1:11": { "path": "app.py", "line": 0 },
+                "app.py:1:15": { "path": "util.py", "line": 0, "character": 4 },
+            },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    write_mock_lsp_config(root, "python", "hybrid", "", &scenario_path);
+
+    let out = ctx(root, &["index"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let db = ctx::index::open_database(root).unwrap();
+    let call_edge = db
+        .get_incoming_edges("helper")
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == ctx::db::EdgeKind::Calls)
+        .expect("expected a calls edge for helper");
+    let target_id = call_edge
+        .target_id
+        .as_deref()
+        .expect("the method call must be resolved via the callee identifier");
+    assert!(
+        target_id.starts_with("util.py::helper"),
+        "expected util.py's helper (right names match), got {target_id}"
+    );
+}
+
+/// When the server's definition answer names a different symbol than the
+/// edge's callee, Stage B must leave the edge unresolved instead of writing
+/// a wrong target (which would never be corrected).
+#[test]
+fn stage_b_rejects_definition_with_mismatched_name() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let scratch = scenario_dir();
+    let scenario_path = scratch.path().join("scenario.json");
+
+    write(root, "app.py", "def main():\n    return obj.helper()\n");
+    write(root, "util.py", "def helper():\n    return 1\n");
+    write(root, "other.py", "def helper():\n    return 2\n");
+
+    // Every definition request in app.py resolves to app.py line 0 — the
+    // symbol `main`, whose name does not match the callee `helper`.
+    fs::write(
+        &scenario_path,
+        serde_json::json!({
+            "definitions": {
+                "app.py": { "path": "app.py", "line": 0 },
+            },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    write_mock_lsp_config(root, "python", "hybrid", "", &scenario_path);
+
+    let out = ctx(root, &["index"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let db = ctx::index::open_database(root).unwrap();
+    let call_edge = db
+        .get_incoming_edges("helper")
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == ctx::db::EdgeKind::Calls)
+        .expect("expected a calls edge for helper");
+    assert_eq!(
+        call_edge.target_id, None,
+        "a name-mismatched definition target must be rejected, got {:?}",
+        call_edge.target_id
+    );
+}
+
+/// A server that answers `initialize` and then hangs must be declared failed
+/// after three consecutive request timeouts, fall back to tree-sitter, and
+/// never break the run.
+#[test]
+fn unresponsive_server_fails_after_three_timeouts_and_falls_back() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let scratch = scenario_dir();
+    let scenario_path = scratch.path().join("scenario.json");
+    let hits_path = scratch.path().join("hits.log");
+
+    // Three files -> three documentSymbol timeouts -> three strikes.
+    write(root, "a.py", "def alpha_fn():\n    return 1\n");
+    write(root, "b.py", "def beta_fn():\n    return 2\n");
+    write(root, "c.py", "def gamma_fn():\n    return 3\n");
+
+    fs::write(
+        &scenario_path,
+        serde_json::json!({
+            "never_respond": true,
+            "hits_file": hits_path,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    // Explicit timeout_ms keeps the test fast (no 60s warmup extension).
+    let config = format!(
+        r#"
+[lsp.python]
+command = '{command}'
+backend = "lsp"
+timeout_ms = 200
+env = {{ CTX_INTERNAL_MOCK_LSP = '{scenario}' }}
+"#,
+        command = env!("CARGO_BIN_EXE_ctx"),
+        scenario = scenario_path.display(),
+    );
+    write(root, ".ctx/config.toml", &config);
+
+    let out = ctx(root, &["index"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "LSP failures never break indexing; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("consecutive request timeouts"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("falling back"), "stderr: {stderr}");
+
+    // The handshake did happen (the hang is post-initialize).
+    let hits = fs::read_to_string(&hits_path).unwrap_or_default();
+    assert!(hits.contains("initialize"), "hits: {hits}");
+
+    // Tree-sitter fallback still extracted the symbols.
+    let db = ctx::index::open_database(root).unwrap();
+    for name in ["alpha_fn", "beta_fn", "gamma_fn"] {
+        assert!(
+            !db.find_symbols(name, 10).unwrap().is_empty(),
+            "tree-sitter fallback must provide {name}"
+        );
+    }
+
+    // Status sidecar records the failure.
+    let status = fs::read_to_string(root.join(".ctx/lsp_status.json")).unwrap();
+    let status: serde_json::Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(status["servers"][0]["state"], "failed");
+    assert!(
+        status["servers"][0]["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("consecutive request timeouts"),
+        "status: {status}"
+    );
+}
+
 /// Optional smoke test against a real language server. Run explicitly with
 /// `cargo test --test lsp_cli -- --ignored` on a machine with
 /// `pyright-langserver` installed; skips silently when the binary is absent.
