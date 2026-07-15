@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Pluggable LSP extraction backend: any stdio language server can be registered
+  declaratively under `[lsp.<language>]` in `.ctx/config.toml`, with per-language
+  backend selection (`tree-sitter` (default) / `lsp` / `hybrid`), lazy server
+  startup, cross-file reference resolution via `textDocument/definition`, a
+  `.ctx/lsp_status.json` run sidecar, and graceful fallback to tree-sitter —
+  server failures never fail an indexing run.
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
