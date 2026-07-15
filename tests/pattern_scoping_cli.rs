@@ -165,11 +165,17 @@ fn diff_scope_matching_no_changes_warns_and_succeeds() {
     assert_success(&ctx(&repo.root, &["index"]));
 
     // Scope that matches changed files: succeeds and reports them.
-    let hit = ctx(&repo.root, &["diff", "HEAD^", "--summary", "--no-tree", "src/"]);
+    let hit = ctx(
+        &repo.root,
+        &["diff", "HEAD^", "--summary", "--no-tree", "src/"],
+    );
     assert_success(&hit);
 
     // Scope that matches nothing: exit 0, warns, and reports no changed file.
-    let miss = ctx(&repo.root, &["diff", "HEAD^", "--summary", "--no-tree", "docs/"]);
+    let miss = ctx(
+        &repo.root,
+        &["diff", "HEAD^", "--summary", "--no-tree", "docs/"],
+    );
     assert_eq!(
         miss.status.code(),
         Some(0),

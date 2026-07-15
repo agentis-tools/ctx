@@ -101,13 +101,6 @@ pub fn run_diff(
             eprintln!("No changes found.");
             std::process::exit(2);
         }
-        // An empty scope is a legitimate answer, not an operational failure:
-        // the revision has changes, the caller just asked about paths none of
-        // them touch. Warn, because it usually means a mistyped pattern.
-        Err(CtxError::NoChangesInScope) => {
-            eprintln!("Warning: no changed files match the requested scope.");
-            std::process::exit(0);
-        }
         Err(CtxError::NotGitRepo) => {
             eprintln!("Error: Not a git repository.");
             std::process::exit(1);
@@ -118,6 +111,14 @@ pub fn run_diff(
         }
         Err(e) => return Err(e),
     };
+
+    // The revision had changes -- `get_changed_files` rejects one that did not --
+    // so an empty list here means the patterns excluded every one of them. That
+    // answers the narrower question rather than failing it, but warn, because in
+    // practice it usually means a mistyped pattern.
+    if result.changed_files.is_empty() {
+        eprintln!("Warning: no changed files match the requested scope.");
+    }
 
     // Show summary if requested
     if summary {

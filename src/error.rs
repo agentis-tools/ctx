@@ -76,13 +76,6 @@ pub enum CtxError {
     #[error("No changes found")]
     NoChanges,
 
-    /// The revision has changes, but none match the requested path scope.
-    ///
-    /// Distinct from [`CtxError::NoChanges`]: an empty scope is a legitimate
-    /// answer to a narrower question, not a failure to answer it.
-    #[error("No changes found in scope")]
-    NoChangesInScope,
-
     // ========== Business Logic Errors ==========
     /// No relevant files found for smart context.
     #[error("No relevant files found")]

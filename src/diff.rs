@@ -275,6 +275,12 @@ pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile
 /// mirroring how users reason about path-limited git diffs. Deleted paths are
 /// retained in the changed-file summary even though they cannot be emitted as
 /// context content.
+///
+/// Returns an empty list when the revision has changes that the scope excludes;
+/// that is a legitimate answer to a narrower question, not a failure. A revision
+/// with no changes at all still fails with [`CtxError::NoChanges`], because
+/// `get_changed_files` rejects it before the scope is applied -- so an empty
+/// list here always means the patterns excluded everything.
 pub fn get_changed_files_filtered(
     revision: &str,
     staged: bool,
@@ -288,9 +294,6 @@ pub fn get_changed_files_filtered(
                 .as_deref()
                 .is_some_and(|path| filter.matches(path))
     });
-    if files.is_empty() {
-        return Err(CtxError::NoChangesInScope);
-    }
     Ok(files)
 }
 
