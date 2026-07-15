@@ -355,6 +355,16 @@ impl Database {
             .optional()
     }
 
+    /// Get the parser language recorded for an indexed file.
+    pub fn get_file_language(&self, path: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row("SELECT language FROM files WHERE path = ?", [path], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map(|language| language.flatten())
+    }
+
     /// Check if a file needs reindexing based on hash.
     pub fn needs_update(&self, path: &str, new_hash: &str) -> Result<bool> {
         match self.get_file_hash(path)? {

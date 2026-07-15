@@ -331,6 +331,12 @@ Functions that call 'authenticate':
     > if (!authenticate(req.token)) return 401
 ```
 
+Resolved callers are identity-based: ctx includes only `calls` edges resolved to the selected
+symbol ID. Potentially useful same-language name matches that could not be resolved are shown under
+`Unresolved same-language call evidence` (and as `unresolved_callers` in JSON). Verify that evidence
+against source; cross-language matches, qualified calls without matching qualified context, and
+edges resolved to another same-named symbol are excluded.
+
 ### Dependencies (What Does This Call?)
 
 See what a function depends on:
