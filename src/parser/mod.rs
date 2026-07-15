@@ -18,10 +18,13 @@ use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 use crate::db::{Edge, EdgeKind, ParseResult, Symbol, SymbolKind};
 
 /// Supported programming languages.
+///
+/// Marked `#[non_exhaustive]`: new languages are appended here over time, so
+/// downstream matches need a wildcard arm. Existing variants keep their
+/// declaration order to hold their discriminants stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Language {
-    C,
-    Cpp,
     Rust,
     TypeScript,
     Tsx,
@@ -29,10 +32,12 @@ pub enum Language {
     Jsx,
     Python,
     Go,
-    Zig,
     Solidity,
     Yaml,
     Unknown,
+    C,
+    Cpp,
+    Zig,
 }
 
 impl Language {

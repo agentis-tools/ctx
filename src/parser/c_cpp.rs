@@ -61,10 +61,9 @@ impl CCppParser {
         let (tree, language) = if is_header {
             let c_tree = self.c.parse(source, None)?;
             let cpp_tree = self.cpp.parse(source, None)?;
-            if syntax_error_count(c_tree.root_node()) <= syntax_error_count(cpp_tree.root_node()) {
-                (c_tree, Language::C)
-            } else {
-                (cpp_tree, Language::Cpp)
+            match classify_header_trees(&c_tree, &cpp_tree) {
+                Language::Cpp => (cpp_tree, Language::Cpp),
+                _ => (c_tree, Language::C),
             }
         } else if requested == Language::Cpp {
             (self.cpp.parse(source, None)?, Language::Cpp)
@@ -86,14 +85,75 @@ pub(super) fn classify_header(source: &str) -> Language {
     cpp.set_language(&cpp_language)
         .expect("Failed to set C++ language");
     match (c.parse(source, None), cpp.parse(source, None)) {
-        (Some(c_tree), Some(cpp_tree))
-            if syntax_error_count(c_tree.root_node())
-                > syntax_error_count(cpp_tree.root_node()) =>
-        {
-            Language::Cpp
-        }
+        (Some(c_tree), Some(cpp_tree)) => classify_header_trees(&c_tree, &cpp_tree),
         _ => Language::C,
     }
+}
+
+/// Node kinds that only the C++ grammar produces. The C grammar reinterprets
+/// most of these constructs without reporting an error -- `namespace ns { .. }`
+/// parses as a K&R function definition and `public:` as a labeled statement --
+/// so relative error counts cannot distinguish the dialects on their own.
+const CPP_MARKER_KINDS: &[&str] = &[
+    "namespace_definition",
+    "namespace_alias_definition",
+    "class_specifier",
+    "base_class_clause",
+    "access_specifier",
+    "template_declaration",
+    "template_instantiation",
+    "qualified_identifier",
+    "reference_declarator",
+    "destructor_name",
+    "operator_name",
+    "operator_cast",
+    "using_declaration",
+    "alias_declaration",
+    "friend_declaration",
+    "field_initializer_list",
+    "lambda_expression",
+    "new_expression",
+    "delete_expression",
+    "try_statement",
+    "throw_statement",
+    "static_assert_declaration",
+    "structured_binding_declarator",
+    "optional_parameter_declaration",
+    "explicit_function_specifier",
+    "concept_definition",
+    "requires_clause",
+];
+
+/// Decide whether an ambiguous `.h` holds C or C++.
+///
+/// Positive C++ evidence wins outright. Only when the C++ tree carries no such
+/// marker do relative error counts break the tie, which keeps dialect-neutral
+/// headers on C while still catching C++-only syntax (default arguments, for
+/// example) that the C grammar genuinely rejects.
+fn classify_header_trees(c_tree: &Tree, cpp_tree: &Tree) -> Language {
+    if has_cpp_marker(cpp_tree.root_node()) {
+        return Language::Cpp;
+    }
+    if syntax_error_count(c_tree.root_node()) <= syntax_error_count(cpp_tree.root_node()) {
+        Language::C
+    } else {
+        Language::Cpp
+    }
+}
+
+fn has_cpp_marker(root: Node<'_>) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if CPP_MARKER_KINDS.contains(&node.kind()) {
+            return true;
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index) {
+                stack.push(child);
+            }
+        }
+    }
+    false
 }
 
 fn syntax_error_count(root: Node<'_>) -> usize {
@@ -889,6 +949,81 @@ mod tests {
             "c"
         );
         assert_eq!(parser.parse("widget.h", "template <typename T> class Widget { public: virtual ~Widget() = default; };\n", Language::C).unwrap().language, "cpp");
+    }
+
+    /// The C grammar parses these without error, so the dialects tie on error
+    /// count and only positive C++ markers separate them.
+    #[test]
+    fn header_selection_detects_cpp_that_the_c_grammar_accepts() {
+        let mut parser = CCppParser::new();
+        for (case, source) in [
+            (
+                "namespace and class",
+                "namespace ns {\nclass Widget {\npublic:\n  void go();\n};\n}\n",
+            ),
+            ("bare namespace", "namespace ns {\nint value;\n}\n"),
+            ("bare class", "class Widget {\npublic:\n  void go();\n};\n"),
+            (
+                "qualified identifier",
+                "void ns::Widget::go() {}\n",
+            ),
+            (
+                "using declaration",
+                "using ns::Widget;\n",
+            ),
+        ] {
+            assert_eq!(
+                parser
+                    .parse("widget.h", source, Language::C)
+                    .unwrap()
+                    .language,
+                "cpp",
+                "{case} should classify as C++"
+            );
+        }
+    }
+
+    /// Dialect-neutral headers must stay on C rather than drift to C++.
+    #[test]
+    fn header_selection_keeps_plain_c_on_c() {
+        let mut parser = CCppParser::new();
+        for (case, source) in [
+            ("declaration", "int add(int a, int b);\n"),
+            ("struct typedef", "typedef struct Point { int x; } Point;\n"),
+            (
+                "static function",
+                "static int hidden(int value) { return value + 1; }\n",
+            ),
+            ("enum", "enum Mode { FAST };\n"),
+            ("include guard", "#ifndef H\n#define H\nint value;\n#endif\n"),
+        ] {
+            assert_eq!(
+                parser
+                    .parse("plain.h", source, Language::C)
+                    .unwrap()
+                    .language,
+                "c",
+                "{case} should classify as C"
+            );
+        }
+    }
+
+    #[test]
+    fn header_symbols_carry_cpp_structure_regardless_of_extension() {
+        let mut parser = CCppParser::new();
+        let source = "namespace ns {\nclass Widget {\npublic:\n  void go();\n};\n}\n";
+        let from_h = parser.parse("widget.h", source, Language::C).unwrap();
+        let from_hpp = parser.parse("widget.hpp", source, Language::Cpp).unwrap();
+        let qualified = |result: &ParseResult| {
+            let mut names: Vec<_> = result
+                .symbols
+                .iter()
+                .map(|symbol| symbol.qualified_name.clone())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(qualified(&from_h), qualified(&from_hpp));
     }
 
     #[test]
