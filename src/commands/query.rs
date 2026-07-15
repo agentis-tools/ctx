@@ -641,7 +641,7 @@ fn print_disambiguation(symbols: &[db::Symbol], name: &str, filters: &str, examp
     eprintln!("\nExample: {}", example);
 }
 
-/// Build a SymbolRef-shaped value from a call-graph/impact node.
+/// Build a SymbolRef-shaped value from a call-graph node.
 ///
 /// Graph traversal results don't carry line information, so `line_start` and
 /// `line_end` are 0.
@@ -672,14 +672,25 @@ fn graph_data(root: &str, depth: i32, nodes: &[analytics::CallGraphNode]) -> ser
 }
 
 /// Build the `query.impact` JSON payload.
-fn impact_data(target: &str, depth: i32, impacts: &[analytics::ImpactNode]) -> serde_json::Value {
+fn impact_data(
+    target: &str,
+    depth: i32,
+    impacts: &[analytics::LocatedImpactNode],
+) -> serde_json::Value {
     serde_json::json!({
         "target": target,
         "depth": depth,
         "impacted": impacts
             .iter()
             .map(|n| serde_json::json!({
-                "symbol": node_symbol(&n.name, &n.file_path, &n.kind),
+                "symbol": {
+                    "name": n.name,
+                    "qualified_name": n.qualified_name,
+                    "kind": n.kind,
+                    "file": n.file_path,
+                    "line_start": n.line_start,
+                    "line_end": n.line_end,
+                },
                 "distance": n.distance,
             }))
             .collect::<Vec<_>>(),
@@ -809,7 +820,7 @@ pub fn run_query(query: QueryCommand, json: bool) -> Result<()> {
             // Use DuckDB analytics for recursive impact analysis
             let analytics = analytics::Analytics::open(&root)?;
 
-            let impacts = analytics.impact_analysis(&symbol, depth)?;
+            let impacts = analytics.impact_analysis_located(&symbol, depth)?;
 
             if json {
                 return ctx::json::emit("query.impact", impact_data(&symbol, depth, &impacts));
@@ -1483,16 +1494,26 @@ mod tests {
         assert_eq!(data["nodes"][0]["symbol"]["name"], "helper");
         assert_eq!(data["nodes"][0]["depth"], 1);
 
-        let impacts = vec![analytics::ImpactNode {
+        let impacts = vec![analytics::LocatedImpactNode {
+            symbol_id: "src/x.rs::caller@17".to_string(),
             name: "caller".to_string(),
+            qualified_name: Some("Worker::caller".to_string()),
             file_path: "src/x.rs".to_string(),
             kind: "function".to_string(),
+            line_start: 17,
+            line_end: 29,
             distance: 2,
         }];
         let data = impact_data("main", 5, &impacts);
         assert_eq!(data["target"], "main");
         assert_eq!(data["total"], 1);
         assert_eq!(data["impacted"][0]["symbol"]["name"], "caller");
+        assert_eq!(
+            data["impacted"][0]["symbol"]["qualified_name"],
+            "Worker::caller"
+        );
+        assert_eq!(data["impacted"][0]["symbol"]["line_start"], 17);
+        assert_eq!(data["impacted"][0]["symbol"]["line_end"], 29);
         assert_eq!(data["impacted"][0]["distance"], 2);
     }
 

@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relationships only. The documented default of 3 now takes effect: existing invocations that pass
   no flags return transitive results grouped under new `Distance N:` headings, where they
   previously returned direct relationships. Pass `--depth 1` to retain the old output.
+- BREAKING: `ctx query impact --json` now reports indexed qualified names and source line ranges
+  while keeping same-named symbols distinct by identity (#63). `line_start` and `line_end` were
+  previously always `0` and `qualified_name` always `null`; both now carry real indexed values.
+  Consumers that treated `0` as "no location" must read the value rather than the sentinel.
 
 ### Documentation
 - Documented the pluggable LSP support: a `ctx lsp` command reference
