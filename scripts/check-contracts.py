@@ -215,21 +215,19 @@ def pr_policy(base_ref: str, labels: set[str]) -> None:
             "compatibility-sensitive changes require maintainer label contract-review: "
             + details
         )
-    if removed:
-        if "breaking-change" not in labels:
-            raise ContractError(
-                "removed CLI contracts require maintainer label breaking-change: "
-                + ", ".join(removed)
-            )
+    if removed and "breaking-change" not in labels:
+        raise ContractError(
+            "removed CLI contracts require maintainer label breaking-change: "
+            + ", ".join(removed)
+        )
+    # An acknowledged break must read as one in the changelog. The matching
+    # version increase is enforced when the release is cut (version.py), not
+    # here: breaks land under Unreleased and the release PR carries the bump.
+    if "breaking-change" in labels:
         old, new = version_from_ref(base_ref), current_version()
-        compatible_bump = new[0] > old[0] if old[0] > 0 else (new[0] > old[0] or new[1] > old[1])
-        if not compatible_bump:
-            raise ContractError(
-                f"breaking CLI change requires a major bump (or pre-1.0 minor bump): {old} -> {new}"
-            )
         if "BREAKING:" not in breaking_notes_section(old, new):
             raise ContractError(
-                "breaking change needs a prominent BREAKING: entry in Unreleased "
+                "breaking-change requires a prominent BREAKING: entry in Unreleased "
                 "or the release-preparation version section"
             )
     print("OK: compatibility-sensitive changes have the required review acknowledgement")

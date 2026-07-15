@@ -361,6 +361,25 @@ def finalize_changelog(text: str, old: str, new: str, date: str, allow_empty: bo
     return text.replace(old_unreleased, new_links, 1)
 
 
+def require_breaking_bump(text: str, old: SemVer, new: SemVer) -> None:
+    """Refuse to release accumulated breaks under an insufficient bump.
+
+    PR review records a break with the `breaking-change` label and a BREAKING:
+    entry under Unreleased; the version increase those breaks require is owed
+    at release time, which is here. Pre-1.0 the vehicle is 0.MINOR.0, so a
+    minor bump suffices; from 1.0 a break needs a major.
+    """
+    if "BREAKING:" not in changelog_section(text, "Unreleased"):
+        return
+    sufficient = new.major > old.major if old.major > 0 else new.minor > old.minor
+    if not sufficient:
+        level = "major" if old.major > 0 else "minor"
+        raise PolicyError(
+            f"Unreleased contains a BREAKING: entry; {old} -> {new} is not a "
+            f"{level} bump. Breaking changes require a {level} increase."
+        )
+
+
 def ensure_clean(allow_dirty: bool) -> None:
     result = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=normal"],
@@ -398,6 +417,7 @@ def set_version(args: argparse.Namespace) -> int:
     changed: list[Path] = []
     manifest_text = MANIFEST.read_text(encoding="utf-8")
     changelog_text = CHANGELOG.read_text(encoding="utf-8")
+    require_breaking_bump(changelog_text, old, new)
     updates: dict[Path, str] = {
         MANIFEST: replace_manifest_version(manifest_text, str(old), str(new)),
         CHANGELOG: finalize_changelog(
