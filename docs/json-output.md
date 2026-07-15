@@ -164,7 +164,7 @@ Exit codes: running without `--keyword` when no embeddings have been generated i
 
 ### `query.callers`
 
-`ctx query callers <FUNCTION> [--file F] --json`
+`ctx query callers <FUNCTION> [--depth N] [--file F] --json`
 
 ```json
 {
@@ -173,25 +173,29 @@ Exit codes: running without `--keyword` when no embeddings have been generated i
     {
       "symbol": { "name": "run_search", "qualified_name": null, "kind": "function", "file": "src/commands/search.rs", "line_start": 14, "line_end": 41 },
       "line": 16,
-      "context": "index::open_database(&root)?"
+      "context": "index::open_database(&root)?",
+      "distance": 1
     }
   ],
   "unresolved_callers": [
     {
       "symbol": { "name": "retry_open", "qualified_name": null, "kind": "function", "file": "src/retry.rs", "line_start": 20, "line_end": 27 },
       "line": 22,
-      "context": "open_database(path)?"
+      "context": "open_database(path)?",
+      "distance": 1
     }
   ],
   "ambiguous": []
 }
 ```
 
-`callers` contains only resolved `calls` edges whose target ID is the selected symbol. It never
-contains an edge resolved to another same-named symbol. `unresolved_callers` preserves conservative
-name-based evidence separately: the source must use the target's language, and qualified symbols
-require matching qualified call context. Treat these entries as leads to verify in source, not as
-resolved relationships.
+`callers` traverses only resolved `calls` edges whose target ID matches the symbol at the preceding
+distance. Results are deduplicated by symbol ID at their shortest distance, exclude the root, and
+are ordered by distance, file, line, name, and ID. The `--file` filter disambiguates only the root;
+it does not hide callers in other files. `unresolved_callers` preserves conservative name-based
+evidence from the root at distance 1 only: the source must use the target's language, and qualified
+symbols require matching qualified call context. Unresolved evidence is never recursively
+traversed. Treat these entries as leads to verify in source, not as resolved relationships.
 
 Disambiguation: when several symbols match the name and no `--file` filter is given, `target` is
 `null`, `callers` and `unresolved_callers` are empty, and `ambiguous` lists the candidate
@@ -199,7 +203,7 @@ SymbolRefs. When the symbol is not found at all, all three arrays are empty and 
 
 ### `query.deps`
 
-`ctx query deps <SYMBOL> [--file F] [--kind K] --json`
+`ctx query deps <SYMBOL> [--depth N] [--file F] [--kind K] --json`
 
 ```json
 {
@@ -209,14 +213,19 @@ SymbolRefs. When the symbol is not found at all, all three arrays are empty and 
       "kind": "calls",
       "target_name": "open_database",
       "line": 16,
-      "resolved": { "name": "open_database", "qualified_name": null, "kind": "function", "file": "src/index/mod.rs", "line_start": 637, "line_end": 652 }
+      "resolved": { "name": "open_database", "qualified_name": null, "kind": "function", "file": "src/index/mod.rs", "line_start": 637, "line_end": 652 },
+      "distance": 1
     }
   ],
   "ambiguous": []
 }
 ```
 
-`resolved` is `null` for unresolved (e.g. external) references. Ambiguity is reported like `query.callers`.
+Resolved targets are traversed breadth-first through every outgoing relationship kind. Results are
+deduplicated by symbol ID at their shortest distance, exclude the root, and retain the relationship
+kind that reached each target. `resolved` is `null` for unresolved (for example, external)
+references; those entries remain visible leaves and are never traversed. The `--file` and `--kind`
+filters disambiguate only the root. Ambiguity is reported like `query.callers`.
 
 ### `query.graph`
 

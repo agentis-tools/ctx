@@ -323,6 +323,8 @@ Output:
 ```
 Functions that call 'authenticate':
 ------------------------------------------------------------
+
+Distance 1:
   handleLogin (src/auth/login.ts:45)
     > authenticate(username, password)
   validateSession (src/auth/session.ts:23)
@@ -332,10 +334,13 @@ Functions that call 'authenticate':
 ```
 
 Resolved callers are identity-based: ctx includes only `calls` edges resolved to the selected
-symbol ID. Potentially useful same-language name matches that could not be resolved are shown under
-`Unresolved same-language call evidence` (and as `unresolved_callers` in JSON). Verify that evidence
+symbol ID, then follows resolved callers breadth-first up to `--depth`. Cycles and diamonds are
+deduplicated by symbol ID at the shortest distance, and the root is excluded. `--file` selects only
+the root; callers in other files remain eligible. Potentially useful same-language name matches
+that could not be resolved are shown under `Unresolved same-language call evidence` (and as
+`unresolved_callers` in JSON) at distance 1 only and are never traversed. Verify that evidence
 against source; cross-language matches, qualified calls without matching qualified context, and
-edges resolved to another same-named symbol are excluded.
+edges resolved to another same-named symbol are excluded. JSON entries include numeric `distance`.
 
 ### Dependencies (What Does This Call?)
 
@@ -350,11 +355,19 @@ Output:
 ```
 Dependencies of 'handleRequest':
 ------------------------------------------------------------
+
+Distance 1:
   calls validateInput (line 12)
   calls processData (line 18)
   calls sendResponse (line 25)
   imports Logger (line 3)
 ```
+
+Dependency traversal follows resolved targets breadth-first across all outgoing relationship kinds
+up to `--depth`. Direct edge kinds are preserved, unresolved references remain visible leaves, and
+resolved symbols are deduplicated at their shortest distance with the root excluded. `--file` and
+`--kind` select only the root. Human output groups results by distance; JSON entries include numeric
+`distance`.
 
 ### Call Graph
 

@@ -115,10 +115,14 @@ unrelated functions. Use deep impact as a list of hypotheses, not a transitive p
 a branch when its source does not contain the preceding call.
 :::
 
-In ctx 0.3.5, the `--depth` option accepted by `query callers` and `query deps` is not applied; both
-commands return direct relationships. Use `query impact` or `query graph` for recursive traversal,
-with the source-verification rule above. Current impact and graph JSON also report zero source-line
-positions for traversed nodes, so use the returned file and name to retrieve source.
+The ctx 0.3.5 limitation where `query callers` and `query deps` ignored `--depth` has been resolved.
+Both commands now traverse resolved symbol IDs breadth-first, report shortest numeric distances,
+and stop safely at cycles; unresolved relationships remain non-recursive evidence leaves. Root
+filters such as `--file` disambiguate the starting symbol only, so transitive results can cross file
+boundaries. Continue verifying every reported step against source: resolution precision, rather
+than traversal depth, remains the limiting factor. `query impact` and `query graph` remain useful
+alternative projections; their JSON reports zero source-line positions for traversed nodes, so use
+the returned file and name to retrieve source.
 
 ## 4. Search exact references and persisted names
 

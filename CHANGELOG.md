@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in meaning: entries that previously appeared through bare name matching now surface under
   `unresolved_callers` or not at all, so consumers reading `callers` see fewer, higher-confidence
   entries than before.
+- BREAKING: `ctx query callers` and `ctx query deps` now honor `--depth` with cycle-safe
+  breadth-first traversal, shortest-distance identity deduplication, explicit JSON distances, and
+  distance-grouped human output while keeping unresolved relationships as non-recursive evidence
+  leaves (#58). `--depth` was previously parsed and discarded, so both commands returned direct
+  relationships only. The documented default of 3 now takes effect: existing invocations that pass
+  no flags return transitive results grouped under new `Distance N:` headings, where they
+  previously returned direct relationships. Pass `--depth 1` to retain the old output.
 
 ### Documentation
 - Documented the pluggable LSP support: a `ctx lsp` command reference
