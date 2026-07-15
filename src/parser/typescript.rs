@@ -1,6 +1,6 @@
 //! TypeScript/JavaScript/JSX/TSX code parsing using tree-sitter.
 
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::db::{
     Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
@@ -55,23 +55,23 @@ pub struct TypeScriptParser {
 impl TypeScriptParser {
     /// Create a new TypeScript/JavaScript parser.
     pub fn new() -> Self {
-        let js_language = tree_sitter_javascript::language();
-        let ts_language = tree_sitter_typescript::language_typescript();
-        let tsx_language = tree_sitter_typescript::language_tsx();
+        let js_language: Language = tree_sitter_javascript::LANGUAGE.into();
+        let ts_language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        let tsx_language: Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
         let mut js_parser = Parser::new();
         js_parser
-            .set_language(js_language)
+            .set_language(&js_language)
             .expect("Failed to set JavaScript language");
 
         let mut ts_parser = Parser::new();
         ts_parser
-            .set_language(ts_language)
+            .set_language(&ts_language)
             .expect("Failed to set TypeScript language");
 
         let mut tsx_parser = Parser::new();
         tsx_parser
-            .set_language(tsx_language)
+            .set_language(&tsx_language)
             .expect("Failed to set TSX language");
 
         Self {
@@ -85,17 +85,17 @@ impl TypeScriptParser {
     }
 
     /// Get the appropriate parser and language for a variant.
-    fn get_parser_and_language(&mut self, variant: JsVariant) -> (&mut Parser, Language) {
+    fn get_parser_and_language(&mut self, variant: JsVariant) -> (&mut Parser, &Language) {
         match variant {
-            JsVariant::JavaScript | JsVariant::Jsx => (&mut self.js_parser, self.js_language),
-            JsVariant::TypeScript => (&mut self.ts_parser, self.ts_language),
-            JsVariant::Tsx => (&mut self.tsx_parser, self.tsx_language),
+            JsVariant::JavaScript | JsVariant::Jsx => (&mut self.js_parser, &self.js_language),
+            JsVariant::TypeScript => (&mut self.ts_parser, &self.ts_language),
+            JsVariant::Tsx => (&mut self.tsx_parser, &self.tsx_language),
         }
     }
 
     /// Create the symbols query for a given language.
     /// Note: Uses different queries for JS vs TS since they have different node types.
-    fn create_symbols_query(language: Language, is_typescript: bool) -> Query {
+    fn create_symbols_query(language: &Language, is_typescript: bool) -> Query {
         if is_typescript {
             // TypeScript/TSX query - includes interfaces, type aliases, enums
             Query::new(
@@ -191,7 +191,7 @@ impl TypeScriptParser {
     }
 
     /// Create the calls query for a given language.
-    fn create_calls_query(language: Language) -> Query {
+    fn create_calls_query(language: &Language) -> Query {
         Query::new(
             language,
             r#"
@@ -217,7 +217,7 @@ impl TypeScriptParser {
     }
 
     /// Create the inheritance query for a given language.
-    fn create_inheritance_query(language: Language, is_typescript: bool) -> Query {
+    fn create_inheritance_query(language: &Language, is_typescript: bool) -> Query {
         if is_typescript {
             Query::new(
                 language,
@@ -341,11 +341,11 @@ impl TypeScriptParser {
         exports: &mut Vec<String>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(query, *root, source.as_bytes());
+        let mut matches = cursor.matches(query, *root, source.as_bytes());
 
         let mut current_class: Option<String> = None;
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut name: Option<&str> = None;
             let mut kind: Option<SymbolKind> = None;
             let mut def_node: Option<Node> = None;
@@ -353,8 +353,8 @@ impl TypeScriptParser {
             let mut import_source: Option<&str> = None;
 
             for capture in m.captures {
-                let capture_name = &query.capture_names()[capture.index as usize];
-                let capture_str = capture_name.as_str();
+                let capture_name = query.capture_names()[capture.index as usize];
+                let capture_str = capture_name;
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
@@ -423,9 +423,9 @@ impl TypeScriptParser {
         edges: &mut Vec<Edge>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(query, *root, source.as_bytes());
+        let mut matches = cursor.matches(query, *root, source.as_bytes());
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut class_name: Option<&str> = None;
             let mut interface_name: Option<&str> = None;
             let mut extends_names: Vec<&str> = Vec::new();
@@ -434,11 +434,11 @@ impl TypeScriptParser {
             let mut def_node: Option<Node> = None;
 
             for capture in m.captures {
-                let capture_name = &query.capture_names()[capture.index as usize];
+                let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
-                match capture_name.as_str() {
+                match capture_name {
                     "class.name" => {
                         class_name = Some(text);
                     }

@@ -525,6 +525,105 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 
 `severity` is `error`, `warning`, or `info`; `hint` is omitted when there is none. `code` is a stable machine-readable identifier: `binary_version`, `harness_not_initialized`, `templates_stale`, `index_missing`, `index_schema`, `index_stale`, `rules_missing`, `rules_invalid`, `hooks_missing`, `hooks_modified`, `settings_not_wired`, `mcp_unavailable`, `mcp_not_wired`. Checks are independent (a missing index and an invalid rules file are both reported in one run). `healthy` is `true` when no check is an error or a warning; exit codes: 0 = healthy, 1 = problems, 2 = operational error.
 
+### `lsp.add`
+
+`ctx lsp add <LANGUAGE> [--server <NAME>] --yes --json`
+
+JSON mode never prompts, so `--yes` is required (exit 2 otherwise).
+
+```json
+{
+  "language": "python",
+  "server": "pyright",
+  "command": "pyright-langserver",
+  "args": ["--stdio"],
+  "backend": "hybrid",
+  "source": "registry",
+  "registry_url": "https://raw.githubusercontent.com/agentis-tools/ctx-lsp-registry/v1/registry/python.toml",
+  "install_hint": "npm install -g pyright",
+  "homepage": "https://github.com/microsoft/pyright",
+  "binary_found": true,
+  "status": "added"
+}
+```
+
+`install_hint` and `homepage` are `null` when the registry entry does not provide them. `binary_found` reports whether the server command already resolves to an executable (a `false` is accompanied by a stderr install warning). When the entry is already configured and matches the registry, `data` is just `{"language", "server", "status": "already_configured"}`.
+
+### `lsp.list`
+
+`ctx lsp list [--available] --json`
+
+```json
+{
+  "available": false,
+  "servers": [
+    {
+      "language": "python",
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "backend": "hybrid",
+      "source": "registry",
+      "source_server": "pyright"
+    }
+  ]
+}
+```
+
+`source` is `"registry"` for entries installed by `ctx lsp add`, `"manual"` otherwise. With `--available` the payload is instead `{"available": true, "registry": "<base url>", "languages": [{"language", "recommended", "servers", "configured"}]}` — one row per registry language, with `configured` marking languages already present in `.ctx/config.toml`.
+
+### `lsp.update`
+
+`ctx lsp update [LANGUAGE] --yes --json`
+
+```json
+{
+  "registry": "https://raw.githubusercontent.com/agentis-tools/ctx-lsp-registry/v1",
+  "languages": [
+    { "language": "go", "server": "gopls", "status": "up_to_date" },
+    {
+      "language": "python",
+      "server": "pyright",
+      "status": "updated",
+      "changes": {
+        "args": { "from": "[\"--stdio\", \"--verbose\"]", "to": "[\"--stdio\"]" }
+      }
+    }
+  ]
+}
+```
+
+`changes` is present only for `"status": "updated"`, keyed by config key with display-string `from`/`to` values. When nothing in the config is registry-managed the payload is `{"languages": []}`.
+
+### `lsp.doctor`
+
+`ctx lsp doctor --json`
+
+```json
+{
+  "healthy": true,
+  "summary": { "pass": 1, "warn": 0, "fail": 0 },
+  "servers": [
+    {
+      "language": "python",
+      "command": "pyright-langserver",
+      "backend": "hybrid",
+      "binary_found": true,
+      "binary_path": "/usr/local/bin/pyright-langserver",
+      "root_markers_found": ["pyproject.toml"],
+      "handshake_ok": true,
+      "server_name": "pyright",
+      "server_version": "1.1.400",
+      "negotiated_capabilities": ["documentSymbolProvider", "definitionProvider"],
+      "missing_capabilities": [],
+      "stderr": [],
+      "status": "pass"
+    }
+  ]
+}
+```
+
+`status` per server is `fail` (binary missing or handshake failed), `warn` (requested capabilities not advertised), or `pass`. `binary_path`, `server_name`, `server_version`, and `error` are omitted when unknown. `healthy` is `true` when no server fails; exit codes: 0 = no failures (warnings allowed), 1 = at least one failure, 2 = operational error.
+
 ### `self_update`
 
 `ctx self-update [--version X.Y.Z] --json`

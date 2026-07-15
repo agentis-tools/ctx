@@ -30,6 +30,7 @@
         "harness",
         "hotspots",
         "index",
+        "lsp",
         "map",
         "query",
         "review",
@@ -343,6 +344,105 @@
         "--stats": "--stats Print stats (file count, total size, time taken)",
         "--verbose": "-v, --verbose Show verbose output",
         "--watch": "-w, --watch Watch for changes and reindex automatically"
+      },
+      "subcommands": []
+    },
+    "ctx lsp": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": [
+        "add",
+        "doctor",
+        "list",
+        "update"
+      ]
+    },
+    "ctx lsp add": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--server": "--server <NAME> Pick a specific server instead of the registry's recommended one",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--yes": "-y, --yes Skip the confirmation prompt (required in non-interactive use)"
+      },
+      "subcommands": []
+    },
+    "ctx lsp doctor": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": []
+    },
+    "ctx lsp list": {
+      "options": {
+        "--available": "--available List available registry entries instead of configured ones",
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": []
+    },
+    "ctx lsp update": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--yes": "-y, --yes Apply changes without prompting"
       },
       "subcommands": []
     },

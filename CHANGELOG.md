@@ -8,20 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ctx lsp` command group for community-registry LSP management: `ctx lsp add
+  <language>` installs a curated `[lsp.<language>]` entry into
+  `.ctx/config.toml` after confirmation (`--yes`/`-y` for non-interactive use,
+  `--server <NAME>` to override the recommended server), `ctx lsp list`
+  shows configured servers (`--available` lists the registry), `ctx lsp
+  update` refreshes entries carrying `source = "registry"` provenance with a
+  per-key diff while preserving user-added keys (`timeout_ms`, `env`, ...),
+  and `ctx lsp doctor` health-checks every configured server (PATH lookup,
+  initialize handshake, capability diff; a malformed config file or invalid
+  `[lsp.*]` blocks are reported as failures; exit 1 on failures). All four
+  support the global `--json` flag.
+- Pluggable LSP extraction backend: any stdio language server can be registered
+  declaratively under `[lsp.<language>]` in `.ctx/config.toml`, with per-language
+  backend selection (`tree-sitter` (default) / `lsp` / `hybrid`), lazy server
+  startup, cross-file reference resolution via `textDocument/definition`, a
+  `.ctx/lsp_status.json` run sidecar, and graceful fallback to tree-sitter —
+  server failures never fail an indexing run.
 - Rust indexing now records statically resolvable bare or module-qualified free functions passed as
   callback values (such as `spawn(worker::run_main)` and `.map(transform)`) as `uses` relationships
-  without treating them as calls; rebuild existing indexes with `ctx index --force` to apply the
-  new parser semantics (#62).
+  without treating them as calls (#62).
 
 ### Fixed
-- `ctx query callers` and `ctx query deps` now honor `--depth` with cycle-safe breadth-first
-  traversal, shortest-distance identity deduplication, explicit JSON distances, and distance-grouped
-  human output while keeping unresolved relationships as non-recursive evidence leaves (#58).
-- Caller lookup now reports only resolved `calls` edges to the selected symbol, while preserving
-  conservative same-language unresolved evidence in a separate section instead of mixing in
-  cross-language or same-name false positives (#61).
+- Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
+  files by repository-relative path before greedy packing (#60).
+- BREAKING: Caller lookup now reports only resolved `calls` edges to the selected symbol, while
+  preserving conservative same-language unresolved evidence in a separate section instead of mixing
+  in cross-language or same-name false positives (#61). The documented `callers` JSON array narrows
+  in meaning: entries that previously appeared through bare name matching now surface under
+  `unresolved_callers` or not at all, so consumers reading `callers` see fewer, higher-confidence
+  entries than before.
+- BREAKING: `ctx query callers` and `ctx query deps` now honor `--depth` with cycle-safe
+  breadth-first traversal, shortest-distance identity deduplication, explicit JSON distances, and
+  distance-grouped human output while keeping unresolved relationships as non-recursive evidence
+  leaves (#58). `--depth` was previously parsed and discarded, so both commands returned direct
+  relationships only. The documented default of 3 now takes effect: existing invocations that pass
+  no flags return transitive results grouped under new `Distance N:` headings, where they
+  previously returned direct relationships. Pass `--depth 1` to retain the old output.
 
 ### Documentation
+- Documented the pluggable LSP support: a `ctx lsp` command reference
+  (`docs/commands/lsp.md`), an "Add a Language via LSP" guide covering manual
+  `[lsp.<language>]` authoring, backend modes, fallback behavior, and
+  troubleshooting (`docs/lsp-languages.md`), the full `[lsp.<language>]` key
+  reference in `docs/configuration.md`, and the LSP path in
+  `docs/language-support.md` — all mirrored to the documentation site.
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
 - Added symptom-first cookbook routing, per-recipe quick paths, canonical cross-cutting concepts,
@@ -46,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Added an internal LSP registry client (`lsp_registry`) and a format-preserving
+  `.ctx/config.toml` writer (`config_edit`) as groundwork for the future `ctx lsp`
+  commands. Internal only: no CLI surface, config contract, or documented behavior
+  changes yet.
 - Made the local CI and canonical plugin lockstep checks honor Cargo's configured target directory while validating the standalone downloadable ctx skill against its harness template.
 - Constrained fastembed to the last ONNX Runtime dependency line that still publishes Intel macOS binaries.
 - Supplied the Debian source stanza required for release-package dependency discovery.

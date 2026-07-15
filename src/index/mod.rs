@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 use crate::db::{Database, FileRecord, ParseResult};
+use crate::lsp::{FileBackend, LspManager};
 use crate::parser::CodeParser;
 use crate::walker::{discover_files, WalkerConfig};
 
@@ -58,6 +59,13 @@ fn rewrite_id(
 /// Default directory name for storing the database.
 pub const CTX_DIR: &str = ".ctx";
 
+/// Prefix marking a file record stored from a *degraded* extraction (LSP
+/// server unusable and no tree-sitter fallback, i.e. an empty symbol set that
+/// does not reflect the file's content). Because the stored hash never equals
+/// a real content hash, `needs_update` re-extracts the file on the next run —
+/// once the server is healthy again the real symbols replace the empty record.
+const LSP_DEGRADED_HASH_PREFIX: &str = "lsp-degraded:";
+
 /// Default database filename.
 pub const DB_FILE: &str = "codebase.sqlite";
 
@@ -90,6 +98,10 @@ pub struct Indexer {
     verbose: bool,
     /// Walker configuration for file discovery.
     walker_config: WalkerConfig,
+    /// LSP extraction backend; `None` unless `.ctx/config.toml` registers at
+    /// least one `[lsp.*]` server. Lives on the indexer so servers stay warm
+    /// across watch-mode events.
+    lsp: Option<LspManager>,
 }
 
 impl Indexer {
@@ -111,12 +123,17 @@ impl Indexer {
         let db_path = ctx_dir.join(DB_FILE);
         let db = Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))?;
 
+        // Optional LSP extraction backend (inert without [lsp.*] config).
+        let config = crate::lsp::LspConfig::load(&root);
+        let lsp = LspManager::from_config(&root, &config, verbose);
+
         Ok(Self {
             db,
             parser: CodeParser::new(),
             root,
             verbose,
             walker_config,
+            lsp,
         })
     }
 
@@ -132,7 +149,100 @@ impl Indexer {
             root,
             verbose: false,
             walker_config: WalkerConfig::default(),
+            lsp: None,
         })
+    }
+
+    /// Decide how a file should be extracted: via the LSP manager when one is
+    /// configured, otherwise via the builtin tree-sitter language table.
+    pub fn backend_for(&self, path: &Path) -> FileBackend {
+        match &self.lsp {
+            Some(mgr) => mgr.backend_for(path),
+            None => {
+                if CodeParser::is_supported_static(path) {
+                    FileBackend::TreeSitter
+                } else {
+                    FileBackend::Unsupported
+                }
+            }
+        }
+    }
+
+    /// Stage A extraction for a file with an `lsp` backend, with graceful
+    /// fallback: builtin languages re-parse with tree-sitter, dynamic
+    /// languages store a file record with zero symbols (so incremental
+    /// skipping and deletion cleanup keep working). Never fails the run.
+    ///
+    /// The `bool` is the *degraded* flag: `true` only for the empty-result
+    /// path (server unusable AND no tree-sitter fallback). Callers must then
+    /// store the file with [`degraded_hash`] so the next run retries instead
+    /// of skipping the empty record forever. A healthy server's answer (even
+    /// zero symbols, e.g. a `null` documentSymbol for an empty file) and a
+    /// tree-sitter fallback parse are durable results and are not poisoned.
+    fn lsp_extract_or_fallback(
+        &mut self,
+        language: &str,
+        rel_path: &str,
+        abs_path: &Path,
+        content: &str,
+    ) -> (ParseResult, bool) {
+        if let Some(mgr) = self.lsp.as_mut() {
+            if let Some(result) = mgr.extract(language, rel_path, content) {
+                return (result, false);
+            }
+        }
+
+        // Server missing/crashed (the manager already warned once per
+        // language): builtin grammars still produce full symbols, which is
+        // an acceptable durable result — no retry needed.
+        if CodeParser::is_supported_static(abs_path) {
+            if let Some(result) = self.parser.parse(abs_path, content) {
+                return (result, false);
+            }
+        }
+
+        // Degraded: no server and no fallback. The empty record keeps
+        // incremental bookkeeping and deletion cleanup working, but must be
+        // stored with a poisoned hash so a later healthy run re-extracts.
+        (
+            ParseResult {
+                file_path: rel_path.to_string(),
+                language: language.to_string(),
+                symbols: Vec::new(),
+                edges: Vec::new(),
+                module: None,
+            },
+            true,
+        )
+    }
+
+    /// Stage B: resolve leftover cross-file references for the given files
+    /// via the language server, then refresh the LSP status sidecar.
+    /// Best-effort — never affects the exit code.
+    fn run_lsp_stage_b(&mut self, changed_files: &std::collections::HashSet<String>) {
+        let verbose = self.verbose;
+        if let Some(mgr) = self.lsp.as_mut() {
+            if !changed_files.is_empty() {
+                let resolved = crate::lsp::resolve::resolve_edges_with_lsp(
+                    &self.db,
+                    mgr,
+                    changed_files,
+                    verbose,
+                );
+                if verbose && resolved > 0 {
+                    eprintln!("Resolved {} edge targets via LSP", resolved);
+                }
+            }
+            mgr.write_status();
+        }
+    }
+
+    /// Shut down all LSP servers at the end of a full indexing run. Watch
+    /// mode never calls this so servers stay warm across events.
+    fn shutdown_lsp(&mut self) {
+        if let Some(mgr) = self.lsp.as_mut() {
+            mgr.shutdown_all();
+        }
     }
 
     /// Index the codebase.
@@ -153,12 +263,16 @@ impl Indexer {
 
         // Track files we've seen for cleanup
         let mut seen_files: Vec<String> = Vec::new();
+        // Files indexed this run with an lsp/hybrid backend (Stage B input).
+        let mut stage_b_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for entry in &entries {
             let rel_path = entry.relative_path.to_string_lossy().replace('\\', "/");
 
-            // Only process supported languages
-            if !self.parser.is_supported(&entry.relative_path) {
+            // Only process supported files (builtin grammars plus any
+            // language claimed by an [lsp.*] config block)
+            let backend = self.backend_for(&entry.relative_path);
+            if backend == FileBackend::Unsupported {
                 result.files_skipped += 1;
                 continue;
             }
@@ -194,20 +308,39 @@ impl Indexer {
                 eprintln!("Indexing: {}", rel_path);
             }
 
-            // Parse the file
-            let parse_result = match self.parser.parse(&entry.absolute_path, &content) {
-                Some(r) => r,
-                None => {
-                    if self.verbose {
-                        eprintln!("Warning: failed to parse {}", rel_path);
-                    }
-                    result.files_failed += 1;
-                    continue;
+            // Parse the file (tree-sitter or LSP, per backend)
+            let (parse_result, degraded) = match &backend {
+                FileBackend::Lsp(language) => {
+                    let language = language.clone();
+                    self.lsp_extract_or_fallback(
+                        &language,
+                        &rel_path,
+                        &entry.absolute_path,
+                        &content,
+                    )
                 }
+                _ => match self.parser.parse(&entry.absolute_path, &content) {
+                    Some(r) => (r, false),
+                    None => {
+                        if self.verbose {
+                            eprintln!("Warning: failed to parse {}", rel_path);
+                        }
+                        result.files_failed += 1;
+                        continue;
+                    }
+                },
+            };
+
+            // A degraded (empty) extraction is stored with a poisoned hash so
+            // the next run retries it once the server is healthy again.
+            let store_hash = if degraded {
+                degraded_hash(&hash)
+            } else {
+                hash.clone()
             };
 
             // Store in database
-            if let Err(e) = self.store_file(&rel_path, &content, &hash, &parse_result) {
+            if let Err(e) = self.store_file(&rel_path, &content, &store_hash, &parse_result) {
                 if self.verbose {
                     eprintln!("Warning: failed to store {}: {}", rel_path, e);
                 }
@@ -215,6 +348,9 @@ impl Indexer {
                 continue;
             }
 
+            if matches!(backend, FileBackend::Lsp(_) | FileBackend::Hybrid(_)) {
+                stage_b_files.insert(rel_path.clone());
+            }
             seen_files.push(rel_path);
             result.files_indexed += 1;
             result.symbols_extracted += parse_result.symbols.len();
@@ -241,6 +377,11 @@ impl Indexer {
                 }
             }
         }
+
+        // Stage B: LSP-assisted resolution for what the SQL passes left
+        // unresolved, then shut the servers down for this run.
+        self.run_lsp_stage_b(&stage_b_files);
+        self.shutdown_lsp();
 
         // The graph changed: invalidate the cached PageRank scores
         // (`ctx map` recomputes them lazily).
@@ -277,8 +418,10 @@ impl Indexer {
             .filter_map(|entry| {
                 let rel_path = entry.relative_path.to_string_lossy().replace('\\', "/");
 
-                // Only process supported languages
-                if !CodeParser::is_supported_static(&entry.relative_path) {
+                // Only process supported files (builtin grammars plus any
+                // language claimed by an [lsp.*] config block)
+                let backend = self.backend_for(&entry.relative_path);
+                if backend == FileBackend::Unsupported {
                     files_skipped.fetch_add(1, Ordering::Relaxed);
                     return None;
                 }
@@ -296,7 +439,7 @@ impl Indexer {
 
                 // Check if file needs updating
                 match self.db.needs_update(&rel_path, &hash) {
-                    Ok(true) => Some((entry.clone(), rel_path, content, hash)),
+                    Ok(true) => Some((entry.clone(), rel_path, content, hash, backend)),
                     Ok(false) => {
                         files_skipped.fetch_add(1, Ordering::Relaxed);
                         None
@@ -311,10 +454,26 @@ impl Indexer {
 
         let verbose = self.verbose;
 
+        // Files indexed this run with an lsp/hybrid backend (Stage B input).
+        let stage_b_files: std::collections::HashSet<String> = files_to_index
+            .iter()
+            .filter(|(_, _, _, _, backend)| {
+                matches!(backend, FileBackend::Lsp(_) | FileBackend::Hybrid(_))
+            })
+            .map(|(_, rel_path, _, _, _)| rel_path.clone())
+            .collect();
+
+        // Partition: `lsp`-backend files are extracted serially (Stage A)
+        // after the rayon parse phase; everything else (tree-sitter and
+        // hybrid) goes through the unchanged parallel parse path.
+        let (lsp_files, ts_files): (Vec<_>, Vec<_>) = files_to_index
+            .into_iter()
+            .partition(|(_, _, _, _, backend)| matches!(backend, FileBackend::Lsp(_)));
+
         // Parallel parse phase: parse all files that need updating
-        let parsed_files: Vec<ParsedFile> = files_to_index
+        let parsed_files: Vec<ParsedFile> = ts_files
             .par_iter()
-            .filter_map(|(entry, rel_path, content, hash)| {
+            .filter_map(|(entry, rel_path, content, hash, _)| {
                 // Create thread-local parser
                 let mut parser = CodeParser::new();
 
@@ -348,12 +507,14 @@ impl Indexer {
             elapsed_ms: 0,
         };
 
-        // Track files we've seen for cleanup (both indexed and skipped)
+        // Track files we've seen for cleanup (both indexed and skipped);
+        // includes LSP-claimed dynamic languages so their deletions are
+        // cleaned up like any other file.
         let seen_files: Vec<String> = entries
             .iter()
             .filter_map(|e| {
                 let rel = e.relative_path.to_string_lossy().replace('\\', "/");
-                if CodeParser::is_supported_static(&e.relative_path) {
+                if self.backend_for(&e.relative_path) != FileBackend::Unsupported {
                     Some(rel)
                 } else {
                     None
@@ -382,6 +543,53 @@ impl Indexer {
             result.edges_extracted += parsed.parse_result.edges.len();
         }
 
+        // Stage A: serial LSP extraction, grouped per language so each
+        // server handles its files consecutively while warm.
+        if !lsp_files.is_empty() {
+            let mut by_language: std::collections::BTreeMap<String, Vec<_>> =
+                std::collections::BTreeMap::new();
+            for (entry, rel_path, content, hash, backend) in lsp_files {
+                if let FileBackend::Lsp(language) = backend {
+                    by_language
+                        .entry(language)
+                        .or_default()
+                        .push((entry, rel_path, content, hash));
+                }
+            }
+
+            for (language, files) in by_language {
+                for (entry, rel_path, content, hash) in files {
+                    if verbose {
+                        eprintln!("Indexing (lsp:{}): {}", language, rel_path);
+                    }
+                    let (parse_result, degraded) = self.lsp_extract_or_fallback(
+                        &language,
+                        &rel_path,
+                        &entry.absolute_path,
+                        &content,
+                    );
+                    // Poisoned hash for degraded (empty) extractions: the
+                    // next run retries instead of skipping forever.
+                    let store_hash = if degraded {
+                        degraded_hash(&hash)
+                    } else {
+                        hash.clone()
+                    };
+                    if let Err(e) = self.store_file(&rel_path, &content, &store_hash, &parse_result)
+                    {
+                        if self.verbose {
+                            eprintln!("Warning: failed to store {}: {}", rel_path, e);
+                        }
+                        result.files_failed += 1;
+                        continue;
+                    }
+                    result.files_indexed += 1;
+                    result.symbols_extracted += parse_result.symbols.len();
+                    result.edges_extracted += parse_result.edges.len();
+                }
+            }
+        }
+
         // Clean up deleted files
         if let Err(e) = self.cleanup_deleted_files(&seen_files) {
             if self.verbose {
@@ -402,6 +610,11 @@ impl Indexer {
                 }
             }
         }
+
+        // Stage B: LSP-assisted resolution for what the SQL passes left
+        // unresolved, then shut the servers down for this run.
+        self.run_lsp_stage_b(&stage_b_files);
+        self.shutdown_lsp();
 
         // The graph changed: invalidate the cached PageRank scores
         // (`ctx map` recomputes them lazily).
@@ -431,8 +644,9 @@ impl Indexer {
             .to_string_lossy()
             .replace('\\', "/");
 
-        // Check if supported
-        if !self.parser.is_supported(path) {
+        // Check if supported (builtin grammars plus LSP-claimed extensions)
+        let backend = self.backend_for(&abs_path);
+        if backend == FileBackend::Unsupported {
             return Ok(false);
         }
 
@@ -450,18 +664,46 @@ impl Indexer {
             return Ok(false);
         }
 
-        // Parse
-        let parse_result = self
-            .parser
-            .parse(&abs_path, &content)
-            .ok_or_else(|| io::Error::other("Parse failed"))?;
+        // Parse (tree-sitter or LSP, per backend)
+        let (parse_result, degraded) = match &backend {
+            FileBackend::Lsp(language) => {
+                let language = language.clone();
+                self.lsp_extract_or_fallback(&language, &rel_path, &abs_path, &content)
+            }
+            _ => (
+                self.parser
+                    .parse(&abs_path, &content)
+                    .ok_or_else(|| io::Error::other("Parse failed"))?,
+                false,
+            ),
+        };
+
+        // Poisoned hash for degraded (empty) extractions: retried next run.
+        let store_hash = if degraded {
+            degraded_hash(&hash)
+        } else {
+            hash.clone()
+        };
 
         // Store
-        self.store_file(&rel_path, &content, &hash, &parse_result)?;
+        self.store_file(&rel_path, &content, &store_hash, &parse_result)?;
 
         // The graph changed: invalidate the cached PageRank scores
         // (`ctx map` recomputes them lazily).
         self.db.clear_symbol_rank().map_err(db_error)?;
+
+        // Stage B for this file (lsp/hybrid backends): run the cheap SQL
+        // resolution first so the language server only sees the leftovers.
+        // Servers stay warm on the indexer for subsequent watch events.
+        if matches!(backend, FileBackend::Lsp(_) | FileBackend::Hybrid(_)) {
+            if let Err(e) = self.db.resolve_edge_targets() {
+                if self.verbose {
+                    eprintln!("Warning: edge resolution failed: {}", e);
+                }
+            }
+            let changed: std::collections::HashSet<String> = std::iter::once(rel_path).collect();
+            self.run_lsp_stage_b(&changed);
+        }
 
         Ok(true)
     }
@@ -630,12 +872,19 @@ impl Indexer {
     }
 }
 
+/// Hash stored for a degraded (empty, server-unavailable) extraction: keeps
+/// the real content hash for debuggability but never compares equal to one,
+/// so `needs_update` always retries the file on the next run.
+fn degraded_hash(hash: &str) -> String {
+    format!("{LSP_DEGRADED_HASH_PREFIX}{hash}")
+}
+
 /// Compute SHA256 hash of content.
 fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    result.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Compress source code using gzip.
@@ -672,7 +921,6 @@ pub mod watch {
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 
     use super::Indexer;
-    use crate::parser::Language;
     use crate::walker::{FileFilter, WalkerConfig};
 
     /// Start watching the codebase for changes and reindex automatically.
@@ -730,9 +978,10 @@ pub mod watch {
                                 continue;
                             }
 
-                            // Check if it's a supported source file
-                            let lang = Language::from_path(path);
-                            if lang == Language::Unknown {
+                            // Check if it's a supported source file (LSP-aware:
+                            // dynamic languages registered in [lsp.*] must
+                            // reindex too, not just builtin grammars)
+                            if indexer.backend_for(path) == crate::lsp::FileBackend::Unsupported {
                                 continue;
                             }
 

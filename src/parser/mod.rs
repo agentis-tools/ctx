@@ -11,7 +11,7 @@ mod typescript;
 
 use std::path::Path;
 
-use tree_sitter::{Node, Query, QueryCursor};
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use crate::db::{Edge, EdgeKind, ParseResult, Symbol, SymbolKind};
 
@@ -302,20 +302,20 @@ pub fn extract_call_edges(
         .collect();
 
     let mut cursor = QueryCursor::new();
-    let matches = cursor.matches(query, *root, source.as_bytes());
+    let mut matches = cursor.matches(query, *root, source.as_bytes());
 
-    for m in matches {
+    while let Some(m) = matches.next() {
         let mut call_name: Option<&str> = None;
         let mut call_node: Option<Node> = None;
 
         for capture in m.captures {
-            let capture_name = &query.capture_names()[capture.index as usize];
+            let capture_name = query.capture_names()[capture.index as usize];
             let node = capture.node;
             let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
-            if patterns.name_patterns.contains(&capture_name.as_str()) {
+            if patterns.name_patterns.contains(&capture_name) {
                 call_name = Some(text);
-            } else if patterns.expr_patterns.contains(&capture_name.as_str()) {
+            } else if patterns.expr_patterns.contains(&capture_name) {
                 call_node = Some(node);
             }
         }

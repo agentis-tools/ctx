@@ -1,6 +1,6 @@
 //! File-related MCP tools.
 
-use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 use std::fs;
 
@@ -68,7 +68,7 @@ pub async fn get_file(
     // Format output with file path header
     let output = format!("// File: {}\n\n{}", params.path, content);
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 /// Execute the get_file_tree tool.
@@ -108,7 +108,7 @@ pub async fn get_file_tree(
         discover_files(&start_path, &config).map_err(|e| internal_error(e.to_string()))?;
 
     if entries.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(
             "No files found matching the criteria",
         )]));
     }
@@ -155,7 +155,7 @@ pub async fn get_file_tree(
         output.push_str(&format!("  {}\n", file_name));
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Search-related MCP tools.
 
-use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
 use super::{parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams};
@@ -62,7 +62,7 @@ pub async fn search_symbols(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No symbols found matching '{}'",
             params.query
         ))]));
@@ -91,7 +91,7 @@ pub async fn search_symbols(
         output.push('\n');
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 /// Execute the get_definition tool.
@@ -114,7 +114,7 @@ pub async fn get_definition(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Symbol '{}' not found",
             params.symbol
         ))]));
@@ -139,7 +139,7 @@ pub async fn get_definition(
         if symbols.len() > 10 {
             output.push_str(&format!("... and {} more\n", symbols.len() - 10));
         }
-        return Ok(CallToolResult::success(vec![Content::text(output)]));
+        return Ok(CallToolResult::success(vec![ContentBlock::text(output)]));
     }
 
     // Get the source for the first matching symbol
@@ -163,9 +163,9 @@ pub async fn get_definition(
             }
             output.push('\n');
             output.push_str(&src);
-            Ok(CallToolResult::success(vec![Content::text(output)]))
+            Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
         }
-        None => Ok(CallToolResult::success(vec![Content::text(format!(
+        None => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Source code not available for '{}'",
             sym.name
         ))])),
@@ -185,7 +185,7 @@ pub async fn find_references(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Symbol '{}' not found",
             params.symbol
         ))]));
@@ -199,7 +199,7 @@ pub async fn find_references(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No references found for '{}'",
             sym.name
         ))]));
@@ -222,7 +222,7 @@ pub async fn find_references(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 #[cfg(test)]
@@ -282,11 +282,11 @@ impl Greeter {
         (temp_dir, server)
     }
 
-    /// Helper to extract text from Content
+    /// Helper to extract text from a content block.
     fn get_text_content(result: &CallToolResult) -> &str {
         let content = &result.content[0];
-        match &content.raw {
-            rmcp::model::RawContent::Text(text) => &text.text,
+        match content {
+            rmcp::model::ContentBlock::Text(text) => &text.text,
             _ => panic!("Expected text content"),
         }
     }

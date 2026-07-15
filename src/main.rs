@@ -27,6 +27,15 @@ fn resolve_embed_provider(
 /// Exit codes: 0 = clean, 1 = findings, 2 = operational error,
 /// 3 = version requirement not met (`ctx harness compat` only).
 fn main() -> ExitCode {
+    // Hidden test mode: when CTX_INTERNAL_MOCK_LSP points at a scenario file,
+    // the binary acts as a scripted mock language server over stdio (used by
+    // the LSP backend integration tests). Checked before clap parsing so no
+    // CLI surface is involved.
+    if let Some(path) = std::env::var_os("CTX_INTERNAL_MOCK_LSP") {
+        ctx::lsp::mock::run_stdio_mock(std::path::Path::new(&path));
+        return ExitCode::SUCCESS;
+    }
+
     // The OS-provided main thread stack is too small on some platforms (notably
     // Windows, which defaults to ~1 MiB) for this program's parsing/graph-walking
     // call depth; run on a thread with a larger, explicit stack instead.
@@ -337,6 +346,11 @@ fn run(args: Args) -> Result<Outcome> {
             // Harness command: returns its own Outcome (doctor exits 1 on
             // problems; compat exits 3 on version mismatch).
             return commands::run_harness(cmd, json);
+        }
+        Some(Command::Lsp { cmd }) => {
+            // LSP registry command: returns its own Outcome (doctor exits 1
+            // when a configured server fails its health probe).
+            return commands::run_lsp(cmd, json);
         }
         Some(Command::SelfUpdate { version }) => {
             // Update command: returns its own Outcome (Clean when updated or

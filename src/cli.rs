@@ -794,6 +794,32 @@ EXAMPLES:
         cmd: HarnessCommand,
     },
 
+    /// Manage LSP-backed language support (community registry)
+    ///
+    /// `add` installs a curated `[lsp.<language>]` block from the community
+    /// LSP registry into `.ctx/config.toml`, `list` shows configured (or
+    /// available) servers, `update` refreshes registry-sourced entries, and
+    /// `doctor` health-checks every configured server.
+    #[command(after_help = r#"EXIT CODES:
+    0    success (including "already configured" and "up to date")
+    1    doctor found problems (missing binary, failed handshake)
+    2    operational error (network failure, unknown language, refusal,
+         stdin is not a TTY and --yes was not given)
+
+EXAMPLES:
+    ctx lsp add python                  # install the recommended python server
+    ctx lsp add python --server pylsp   # pick a specific server
+    ctx lsp add python --yes            # skip the confirmation prompt
+    ctx lsp list                        # show configured servers
+    ctx lsp list --available            # show what the registry offers
+    ctx lsp update --yes                # refresh registry-sourced entries
+    ctx lsp doctor                      # health-check configured servers
+"#)]
+    Lsp {
+        #[command(subcommand)]
+        cmd: LspCommand,
+    },
+
     /// Update ctx to the latest GitHub release (or a pinned version)
     ///
     /// Downloads the release artifact for this platform, verifies its
@@ -946,6 +972,58 @@ pub enum HarnessCommand {
     ///
     /// Exit codes: 0 = healthy (info-level notes only), 1 = problems found
     /// (errors or warnings), 2 = operational error.
+    Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LspCommand {
+    /// Add a language server from the community registry to .ctx/config.toml
+    ///
+    /// Shows the curated server (command, install hint, homepage) and asks
+    /// for confirmation before writing anything. Entries written by this
+    /// command carry `source = "registry"` provenance so `ctx lsp update`
+    /// can refresh them later; hand-written entries are never touched.
+    Add {
+        /// Language to add (e.g. "python")
+        language: String,
+
+        /// Pick a specific server instead of the registry's recommended one
+        #[arg(long, value_name = "NAME")]
+        server: Option<String>,
+
+        /// Skip the confirmation prompt (required in non-interactive use)
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
+    /// Show configured language servers
+    List {
+        /// List available registry entries instead of configured ones
+        #[arg(long)]
+        available: bool,
+    },
+
+    /// Refresh registry-sourced entries in .ctx/config.toml
+    ///
+    /// Re-fetches each registry-managed `[lsp.<language>]` entry (marked
+    /// `source = "registry"`), shows a per-key diff against the current
+    /// config, and rewrites the entry after confirmation. Hand-written
+    /// entries are never updated.
+    Update {
+        /// Only refresh this language
+        language: Option<String>,
+
+        /// Apply changes without prompting
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
+    /// Health-check configured language servers
+    ///
+    /// Probes every `[lsp.<language>]` entry: binary on PATH, spawn +
+    /// initialize handshake, and whether the requested capabilities were
+    /// advertised. Exit codes: 0 = all servers pass, 1 = at least one
+    /// failure, 2 = operational error.
     Doctor,
 }
 

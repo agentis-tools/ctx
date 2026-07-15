@@ -1,6 +1,6 @@
 //! Go-specific code parsing using tree-sitter.
 
-use tree_sitter::{Node, Parser, Query, QueryCursor};
+use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::db::{Edge, EdgeKind, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
 use crate::parser::{
@@ -30,14 +30,14 @@ impl GoParser {
     /// Create a new Go parser.
     pub fn new() -> Self {
         let mut parser = Parser::new();
-        let language = tree_sitter_go::language();
+        let language: tree_sitter::Language = tree_sitter_go::LANGUAGE.into();
         parser
-            .set_language(language)
+            .set_language(&language)
             .expect("Failed to set Go language");
 
         // Query for extracting symbols (functions, structs, interfaces, etc.)
         let symbols_query = Query::new(
-            language,
+            &language,
             r#"
             ; Top-level functions
             (function_declaration
@@ -105,7 +105,7 @@ impl GoParser {
 
         // Query for extracting function calls
         let calls_query = Query::new(
-            language,
+            &language,
             r#"
             ; Function calls
             (call_expression
@@ -209,12 +209,12 @@ impl GoParser {
         edges: &mut Vec<Edge>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(&self.symbols_query, *root, source.as_bytes());
+        let mut matches = cursor.matches(&self.symbols_query, *root, source.as_bytes());
 
         // Track which definitions we've processed (to avoid duplicates)
         let mut processed_defs = std::collections::HashSet::new();
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             // Find the definition capture
             let def_capture = m.captures.iter().find(|c| {
                 let name = &self.symbols_query.capture_names()[c.index as usize];
@@ -238,13 +238,13 @@ impl GoParser {
 
             // Import definitions produce import edges rather than symbols.
             if def_name.starts_with("import.") {
-                push_go_import_edges(&self.symbols_query, &m, source, file_path, edges);
+                push_go_import_edges(&self.symbols_query, m, source, file_path, edges);
                 continue;
             }
 
             // Everything else is a symbol definition.
             if let Some(symbol) =
-                build_go_symbol(&self.symbols_query, &m, def_node, source, file_path)
+                build_go_symbol(&self.symbols_query, m, def_node, source, file_path)
             {
                 symbols.push(symbol);
             }
@@ -261,7 +261,7 @@ fn push_go_import_edges(
     edges: &mut Vec<Edge>,
 ) {
     for capture in m.captures {
-        let capture_name = &query.capture_names()[capture.index as usize];
+        let capture_name = query.capture_names()[capture.index as usize];
         if capture_name == "import.path" {
             let import_path = capture
                 .node
@@ -339,7 +339,7 @@ fn build_go_symbol(
     let parent_id = if kind == SymbolKind::Method {
         // Extract receiver type for parent reference
         m.captures.iter().find_map(|c| {
-            let capture_name = &query.capture_names()[c.index as usize];
+            let capture_name = query.capture_names()[c.index as usize];
             if capture_name == "method.receiver_type" {
                 let receiver_text = c.node.utf8_text(source.as_bytes()).ok()?;
                 // Clean up pointer receivers (*Type -> Type)
@@ -388,7 +388,7 @@ fn build_go_signature(
             let mut receiver = None;
 
             for capture in m.captures {
-                let capture_name = &query.capture_names()[capture.index as usize];
+                let capture_name = query.capture_names()[capture.index as usize];
                 let text = capture.node.utf8_text(source.as_bytes()).ok()?;
 
                 if capture_name.ends_with(".name") {
@@ -420,7 +420,7 @@ fn build_go_signature(
         }
         SymbolKind::Struct => {
             let name = m.captures.iter().find_map(|c| {
-                let capture_name = &query.capture_names()[c.index as usize];
+                let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "struct.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
                 } else {
@@ -431,7 +431,7 @@ fn build_go_signature(
         }
         SymbolKind::Interface => {
             let name = m.captures.iter().find_map(|c| {
-                let capture_name = &query.capture_names()[c.index as usize];
+                let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "interface.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
                 } else {
@@ -442,7 +442,7 @@ fn build_go_signature(
         }
         SymbolKind::Type => {
             let name = m.captures.iter().find_map(|c| {
-                let capture_name = &query.capture_names()[c.index as usize];
+                let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "type.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
                 } else {
@@ -453,7 +453,7 @@ fn build_go_signature(
         }
         SymbolKind::Const => {
             let name = m.captures.iter().find_map(|c| {
-                let capture_name = &query.capture_names()[c.index as usize];
+                let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "const.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
                 } else {
@@ -464,7 +464,7 @@ fn build_go_signature(
         }
         SymbolKind::Variable => {
             let name = m.captures.iter().find_map(|c| {
-                let capture_name = &query.capture_names()[c.index as usize];
+                let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "var.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
                 } else {

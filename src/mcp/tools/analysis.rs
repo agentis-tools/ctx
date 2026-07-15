@@ -1,6 +1,6 @@
 //! Analysis-related MCP tools.
 
-use rmcp::model::{CallToolResult, Content, ErrorCode, Tool};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
 use super::{parse_params, schema_for, CallGraphParams, SmartContextParams};
@@ -62,7 +62,7 @@ pub async fn get_callers(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Function '{}' not found",
             params.function
         ))]));
@@ -77,7 +77,7 @@ pub async fn get_callers(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No callers found for '{}'",
             sym.name
         ))]));
@@ -100,7 +100,7 @@ pub async fn get_callers(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 /// Execute the get_callees tool.
@@ -123,7 +123,7 @@ pub async fn get_callees(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Function '{}' not found",
             params.function
         ))]));
@@ -138,7 +138,7 @@ pub async fn get_callees(
         .map_err(|e| internal_error(e.to_string()))?;
 
     if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No function calls found in '{}'",
             sym.name
         ))]));
@@ -155,7 +155,7 @@ pub async fn get_callees(
         ));
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 /// Execute the smart_context tool.
@@ -273,7 +273,7 @@ pub async fn smart_context(
     .map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
 
     if result.selected_files.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No relevant files found for task: \"{}\"",
             params.task
         ))]));
@@ -317,7 +317,7 @@ pub async fn smart_context(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
 }
 
 #[cfg(test)]

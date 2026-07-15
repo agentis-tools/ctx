@@ -471,12 +471,14 @@ ctx uses minimal environment variables:
 | `OLLAMA_HOST` | Ollama server URL (default `http://localhost:11434`) | Only for the Ollama provider |
 | `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) | Only for the Ollama provider |
 | `OLLAMA_API_KEY` | Optional bearer token for a remote/authenticated Ollama host | No |
+| `CTX_LSP_REGISTRY_BASE_URL` | Alternate base URL for the `ctx lsp` community registry (mirrors/testing) | No |
 
 ### Project config (`.ctx/config.toml`)
 
 Per-project defaults live in an optional, **committed** `.ctx/config.toml` so a
-team shares one setup instead of passing flags/env vars every time. Today it
-configures the embedding backend:
+team shares one setup instead of passing flags/env vars every time. It
+configures the embedding backend and registers language servers for LSP-backed
+indexing:
 
 ```toml
 [embedding]
@@ -488,6 +490,54 @@ model = "qwen3-embedding:8b"   # Ollama/OpenAI model name
 Resolution is always **CLI flag > environment variable > `.ctx/config.toml` >
 built-in default**, so the file never overrides an explicit request. `.ctx/` is
 otherwise git-ignored; the repo's `.gitignore` keeps `config.toml` and `rules.toml` tracked.
+
+### Language servers (`[lsp.<language>]`)
+
+Each `[lsp.<language>]` table registers a stdio language server that `ctx index` uses to
+extract (or refine) code intelligence for the files it claims. The table key is the language
+name stored on indexed files and symbols:
+
+```toml
+[lsp.kotlin]
+command = "kotlin-language-server"
+extensions = ["kt", "kts"]          # required: kotlin is not a built-in language
+backend = "lsp"                     # tree-sitter | lsp | hybrid (default hybrid)
+
+[lsp.python]
+command = "pyright-langserver"
+args = ["--stdio"]
+# extensions default to the built-in set ("py", "pyi") for built-in language names
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `command` | string | — (required) | Server executable; resolved via `PATH` unless it contains a path separator |
+| `args` | array of strings | `[]` | Arguments passed to the server |
+| `extensions` | array of strings | built-in set for built-in language names | File extensions (without dots) this server claims; required for non-built-in language names |
+| `root_markers` | array of strings | `[]` | Workspace-root marker files; informational, reported by `ctx lsp doctor` |
+| `capabilities` | array of strings | `[]` | Capabilities the server is expected to advertise; checked by `ctx lsp doctor` |
+| `backend` | string | `"hybrid"` | `"tree-sitter"`, `"lsp"`, or `"hybrid"` — see [Add a language via LSP](lsp-languages.md#backend-modes) |
+| `initialization_options` | any value | unset | Passed verbatim as LSP `initializationOptions` |
+| `env` | table of strings | `{}` | Extra environment variables for the server process |
+| `timeout_ms` | integer | `10000` | Per-request timeout in milliseconds |
+| `source` | string | unset | Provenance written by `ctx lsp add` (`"registry"` marks the entry as registry-managed); accepted and ignored by the indexer |
+| `source_server` | string | unset | Provenance written by `ctx lsp add`: the registry server name the entry was installed from |
+
+Entries installed with [`ctx lsp add`](commands/lsp.md) carry the `source` / `source_server`
+provenance keys so `ctx lsp update` can refresh them later; entries without
+`source = "registry"` are treated as hand-written and never touched by those commands.
+
+`[lsp.*]` configuration is **never fatal** to indexing:
+
+- An invalid block (empty `command`, or missing `extensions` for a non-built-in language name)
+  is skipped with a stderr warning; the remaining blocks and the built-in grammars keep working.
+- Unknown keys are tolerated, so configs written by newer ctx versions still load.
+- When two blocks claim the same extension, the first block in table-key order wins and a
+  warning names both blocks.
+- A configured server that is missing or crashes degrades gracefully at index time: warning on
+  stderr, tree-sitter fallback for built-in languages, exit code unaffected.
+
+Without any `[lsp.*]` block the LSP subsystem is completely inert — no server is ever spawned.
 
 ### Architecture policy (`.ctx/rules.toml`)
 

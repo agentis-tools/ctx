@@ -51,7 +51,10 @@ fn stderr_of(out: &Output) -> String {
 }
 
 fn sha256(data: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(data))
+    Sha256::digest(data)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 // ============================================================================
