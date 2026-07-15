@@ -12,8 +12,8 @@
 //! deliberately *not* a config key: the registry location is a distribution
 //! concern, not a per-project setting.
 //!
-//! This module is internal groundwork for the future `ctx lsp` commands; it
-//! has no CLI surface yet.
+//! The `ctx lsp` commands (`add`, `list --available`, `update`) are the CLI
+//! surface over this client.
 
 use std::collections::BTreeMap;
 use std::time::Duration;

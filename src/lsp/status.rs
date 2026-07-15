@@ -5,8 +5,7 @@
 //! touching the SQLite schema. `.ctx/` is never indexed, so the sidecar never
 //! shows up in query results.
 //!
-//! [`doctor`] powers a future `ctx lsp doctor` command; it has no CLI wiring
-//! in this crate yet.
+//! [`doctor`] powers the `ctx lsp doctor` command.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -69,8 +68,7 @@ pub(crate) fn write_status_file(root: &Path, entries: &[LspStatusEntry]) -> std:
     std::fs::write(ctx_dir.join(STATUS_FILE), text)
 }
 
-/// Result of probing one configured server (consumed by a future
-/// `ctx lsp doctor`).
+/// Result of probing one configured server (consumed by `ctx lsp doctor`).
 #[derive(Debug, Clone, Serialize)]
 pub struct LspHealthReport {
     pub language: String,
@@ -178,7 +176,9 @@ fn capability_key(name: &str) -> String {
 }
 
 /// Resolve a command to an executable path (explicit path or PATH search).
-fn find_executable(command: &str) -> Option<PathBuf> {
+/// Also used by `ctx lsp add` to warn when a freshly installed server's
+/// binary is not available yet.
+pub fn find_executable(command: &str) -> Option<PathBuf> {
     let candidate = Path::new(command);
     if candidate.components().count() > 1 {
         return if candidate.is_file() {

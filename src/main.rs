@@ -347,6 +347,11 @@ fn run(args: Args) -> Result<Outcome> {
             // problems; compat exits 3 on version mismatch).
             return commands::run_harness(cmd, json);
         }
+        Some(Command::Lsp { cmd }) => {
+            // LSP registry command: returns its own Outcome (doctor exits 1
+            // when a configured server fails its health probe).
+            return commands::run_lsp(cmd, json);
+        }
         Some(Command::SelfUpdate { version }) => {
             // Update command: returns its own Outcome (Clean when updated or
             // already up to date; any failure maps to exit 2 in main).

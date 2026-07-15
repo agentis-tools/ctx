@@ -7,11 +7,9 @@
 //! The only writer today manages `[lsp.<lang>]` tables installed from the
 //! community LSP registry ([`crate::lsp_registry`]). Registry-owned tables are
 //! marked with `source = "registry"` / `source_server = "<name>"` provenance
-//! keys so a future `ctx lsp update` can tell curated entries apart from
-//! hand-written ones.
-//!
-//! This module is internal groundwork for the future `ctx lsp` commands; it
-//! has no CLI surface yet.
+//! keys so `ctx lsp update` can tell curated entries apart from hand-written
+//! ones. `ctx lsp add` and `ctx lsp update` are the CLI surface over this
+//! module.
 
 use std::fs;
 use std::path::{Path, PathBuf};
