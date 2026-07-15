@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use crate::db::{Edge, ParseResult};
 
-pub use config::{LspBackend, LspServerConfig};
+pub use config::{LspBackend, LspConfig, LspServerConfig};
 
 use client::LspClient;
 use extract::ExtractedSymbol;
@@ -71,15 +71,11 @@ pub struct LspManager {
 impl LspManager {
     /// Build a manager from the project config. Returns `None` when no valid
     /// `[lsp.*]` block exists — the subsystem then stays completely inert.
-    pub fn from_config(
-        root: &Path,
-        ctx_config: &crate::config::CtxConfig,
-        verbose: bool,
-    ) -> Option<Self> {
-        if ctx_config.lsp.is_empty() {
+    pub fn from_config(root: &Path, lsp_config: &LspConfig, verbose: bool) -> Option<Self> {
+        if lsp_config.lsp.is_empty() {
             return None;
         }
-        let (servers, extension_claims) = config::validate(&ctx_config.lsp);
+        let (servers, extension_claims) = config::validate(&lsp_config.lsp);
         if servers.is_empty() {
             return None;
         }
@@ -510,17 +506,17 @@ mod tests {
     }
 
     fn manager_with(toml_text: &str) -> LspManager {
-        let cfg: crate::config::CtxConfig = toml::from_str(toml_text).unwrap();
+        let cfg: LspConfig = toml::from_str(toml_text).unwrap();
         LspManager::from_config(Path::new("/tmp/w"), &cfg, false).unwrap()
     }
 
     #[test]
     fn from_config_is_none_without_lsp_blocks() {
-        let cfg = crate::config::CtxConfig::default();
+        let cfg = LspConfig::default();
         assert!(LspManager::from_config(Path::new("/tmp/w"), &cfg, false).is_none());
 
         // Blocks that all fail validation also yield None.
-        let cfg: crate::config::CtxConfig = toml::from_str(
+        let cfg: LspConfig = toml::from_str(
             r#"
 [lsp.kotlin]
 command = ""

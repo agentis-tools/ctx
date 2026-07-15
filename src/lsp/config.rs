@@ -18,8 +18,50 @@
 //! `ctx index` keeps working with the remaining (or builtin) backends.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::Deserialize;
+
+/// The `[lsp.*]` sections of `.ctx/config.toml`, loaded independently of
+/// [`crate::config::CtxConfig`] so the optional LSP subsystem never changes
+/// that struct's public shape. Unknown keys are ignored so older binaries
+/// tolerate newer config files.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct LspConfig {
+    /// Language servers keyed by language name (`[lsp.kotlin]`,
+    /// `[lsp.python]`, ...). Empty map when no LSP is configured — the LSP
+    /// subsystem then never spawns anything.
+    pub lsp: BTreeMap<String, LspServerConfig>,
+}
+
+impl LspConfig {
+    /// Load `<root>/.ctx/config.toml`. A missing file yields defaults; a
+    /// malformed file yields defaults with a warning (never fatal — config
+    /// is optional, matching [`crate::config::CtxConfig::load`]).
+    pub fn load(root: &Path) -> Self {
+        Self::load_file(
+            &root
+                .join(crate::index::CTX_DIR)
+                .join(crate::config::CONFIG_FILE),
+        )
+    }
+
+    /// Load from an explicit path (used by tests and [`LspConfig::load`]).
+    pub fn load_file(path: &Path) -> Self {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(_) => return Self::default(), // absent/unreadable → defaults
+        };
+        match toml::from_str(&text) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Warning: ignoring malformed {} ({e})", path.display());
+                Self::default()
+            }
+        }
+    }
+}
 
 /// Per-language extraction backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -293,5 +335,72 @@ extensions = [".KT", " kts "]
         assert_eq!(servers["kotlin"].extensions, vec!["kt", "kts"]);
         assert_eq!(claims["kt"], "kotlin");
         assert_eq!(claims["kts"], "kotlin");
+    }
+
+    fn write_temp(contents: &str) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(contents.as_bytes()).unwrap();
+        f
+    }
+
+    #[test]
+    fn load_parses_lsp_sections_and_ignores_other_tables() {
+        let f = write_temp(
+            r#"
+[embedding]
+provider = "local"
+
+[lsp.kotlin]
+command = "kotlin-language-server"
+extensions = ["kt", "kts"]
+backend = "lsp"
+timeout_ms = 15000
+env = { JAVA_HOME = "/opt/java" }
+
+[lsp.python]
+command = "pyright-langserver"
+args = ["--stdio"]
+initialization_options = { python = { venvPath = ".venv" } }
+"#,
+        );
+        let cfg = LspConfig::load_file(f.path());
+        assert_eq!(cfg.lsp.len(), 2);
+
+        let kotlin = &cfg.lsp["kotlin"];
+        assert_eq!(kotlin.command, "kotlin-language-server");
+        assert_eq!(kotlin.extensions, vec!["kt", "kts"]);
+        assert_eq!(kotlin.backend, LspBackend::Lsp);
+        assert_eq!(kotlin.timeout_ms, Some(15000));
+        assert_eq!(kotlin.env["JAVA_HOME"], "/opt/java");
+
+        let python = &cfg.lsp["python"];
+        assert_eq!(python.args, vec!["--stdio"]);
+        assert_eq!(python.backend, LspBackend::Hybrid, "default");
+        assert!(python.initialization_options.is_some());
+    }
+
+    #[test]
+    fn load_malformed_file_falls_back_to_defaults() {
+        // A type error anywhere in the file keeps load fault-tolerant.
+        let f = write_temp(
+            r#"
+[lsp.kotlin]
+command = 42
+"#,
+        );
+        assert!(LspConfig::load_file(f.path()).lsp.is_empty());
+
+        let f = write_temp("this is not valid toml : : :");
+        assert!(LspConfig::load_file(f.path()).lsp.is_empty());
+    }
+
+    #[test]
+    fn load_missing_file_is_default() {
+        assert!(
+            LspConfig::load_file(std::path::Path::new("/nonexistent/config.toml"))
+                .lsp
+                .is_empty()
+        );
     }
 }

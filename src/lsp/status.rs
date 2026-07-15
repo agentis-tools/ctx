@@ -12,7 +12,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-use crate::config::CtxConfig;
 use crate::index::CTX_DIR;
 
 use super::client::LspClient;
@@ -100,8 +99,8 @@ pub struct LspHealthReport {
 
 /// Probe every configured server: PATH check, spawn + handshake, capability
 /// diff, recent stderr. Never fatal; one report per valid `[lsp.*]` block.
-pub fn doctor(root: &Path, ctx_config: &CtxConfig) -> Vec<LspHealthReport> {
-    let (servers, _) = config::validate(&ctx_config.lsp);
+pub fn doctor(root: &Path, lsp_config: &config::LspConfig) -> Vec<LspHealthReport> {
+    let (servers, _) = config::validate(&lsp_config.lsp);
     servers
         .iter()
         .map(|(language, cfg)| probe_server(root, language, cfg))
@@ -232,7 +231,7 @@ mod tests {
 
     #[test]
     fn doctor_reports_missing_binary_without_spawning() {
-        let cfg: CtxConfig = toml::from_str(
+        let cfg: config::LspConfig = toml::from_str(
             r#"
 [lsp.kotlin]
 command = "definitely-not-on-path-xyz"

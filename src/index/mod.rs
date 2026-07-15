@@ -117,7 +117,7 @@ impl Indexer {
         let db = Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))?;
 
         // Optional LSP extraction backend (inert without [lsp.*] config).
-        let config = crate::config::CtxConfig::load(&root);
+        let config = crate::lsp::LspConfig::load(&root);
         let lsp = LspManager::from_config(&root, &config, verbose);
 
         Ok(Self {

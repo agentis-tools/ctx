@@ -2,33 +2,27 @@
 //!
 //! An optional, committed TOML file that sets per-project defaults so teams
 //! don't have to pass the same flags/env vars on every invocation. Currently it
-//! configures the embedding backend and optional LSP extraction backends; more
-//! sections can be added over time.
+//! configures the embedding backend; more sections can be added over time.
+//! (The `[lsp.*]` sections of the same file are loaded separately by
+//! [`crate::lsp::LspConfig`].)
 //!
 //! ```toml
 //! [embedding]
 //! provider = "ollama"            # local | openai | ollama
 //! model = "qwen3-embedding:8b"   # provider-specific (Ollama/OpenAI model)
 //! # host = "http://localhost:11434"  # Ollama only
-//!
-//! [lsp.kotlin]                   # see crate::lsp::config::LspServerConfig
-//! command = "kotlin-language-server"
-//! extensions = ["kt", "kts"]
-//! backend = "lsp"                # tree-sitter | lsp | hybrid (default)
 //! ```
 //!
 //! Precedence for the resolved settings is always **CLI flag > environment
 //! variable > this file > built-in default**, so the config never overrides an
 //! explicit request.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Deserialize;
 
 use crate::embeddings::Provider;
 use crate::index::CTX_DIR;
-use crate::lsp::LspServerConfig;
 
 /// Config file name inside `.ctx/`.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -40,10 +34,6 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub struct CtxConfig {
     /// Embedding backend defaults.
     pub embedding: EmbeddingConfig,
-    /// Language servers registered as extraction backends, keyed by language
-    /// name (`[lsp.kotlin]`, `[lsp.python]`, ...). Empty map when no LSP is
-    /// configured — the LSP subsystem then never spawns anything.
-    pub lsp: BTreeMap<String, LspServerConfig>,
 }
 
 /// `[embedding]` section: default provider and provider-specific settings.
@@ -128,56 +118,6 @@ whatever = true
         );
         let cfg = CtxConfig::load_file(f.path());
         assert_eq!(cfg.embedding.provider, Some(Provider::Openai));
-        assert!(cfg.lsp.is_empty());
-    }
-
-    #[test]
-    fn parses_lsp_sections() {
-        let f = write_temp(
-            r#"
-[embedding]
-provider = "local"
-
-[lsp.kotlin]
-command = "kotlin-language-server"
-extensions = ["kt", "kts"]
-backend = "lsp"
-timeout_ms = 15000
-env = { JAVA_HOME = "/opt/java" }
-
-[lsp.python]
-command = "pyright-langserver"
-args = ["--stdio"]
-initialization_options = { python = { venvPath = ".venv" } }
-"#,
-        );
-        let cfg = CtxConfig::load_file(f.path());
-        assert_eq!(cfg.lsp.len(), 2);
-
-        let kotlin = &cfg.lsp["kotlin"];
-        assert_eq!(kotlin.command, "kotlin-language-server");
-        assert_eq!(kotlin.extensions, vec!["kt", "kts"]);
-        assert_eq!(kotlin.backend, crate::lsp::LspBackend::Lsp);
-        assert_eq!(kotlin.timeout_ms, Some(15000));
-        assert_eq!(kotlin.env["JAVA_HOME"], "/opt/java");
-
-        let python = &cfg.lsp["python"];
-        assert_eq!(python.args, vec!["--stdio"]);
-        assert_eq!(python.backend, crate::lsp::LspBackend::Hybrid, "default");
-        assert!(python.initialization_options.is_some());
-    }
-
-    #[test]
-    fn malformed_lsp_block_falls_back_to_defaults() {
-        // A type error anywhere in the file keeps load fault-tolerant.
-        let f = write_temp(
-            r#"
-[lsp.kotlin]
-command = 42
-"#,
-        );
-        let cfg = CtxConfig::load_file(f.path());
-        assert!(cfg.lsp.is_empty());
     }
 
     #[test]
