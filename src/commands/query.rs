@@ -99,7 +99,45 @@ enum CallersOutcome {
     Found {
         target: Box<db::Symbol>,
         callers: Vec<CallerEntry>,
+        unresolved_callers: Vec<CallerEntry>,
     },
+}
+
+/// Whether an unresolved call's source text is credible evidence for `target`.
+///
+/// Methods and other qualified symbols require their qualified name. A bare
+/// symbol accepts only a bare call: receiver/type-qualified calls are evidence
+/// for a different symbol even when the final name is the same.
+fn unresolved_context_matches(target: &db::Symbol, context: Option<&str>) -> bool {
+    let qualified_name = target
+        .qualified_name
+        .as_deref()
+        .filter(|qualified| *qualified != target.name);
+
+    if let Some(qualified_name) = qualified_name {
+        return context.is_some_and(|context| context.contains(qualified_name));
+    }
+
+    let Some(context) = context else {
+        return true;
+    };
+
+    context.match_indices(&target.name).any(|(offset, _)| {
+        let prefix = context[..offset].trim_end();
+        !prefix.ends_with("::") && !prefix.ends_with('.') && !prefix.ends_with("->")
+    })
+}
+
+fn sort_caller_entries(entries: &mut [CallerEntry]) {
+    entries.sort_by(|left, right| {
+        left.symbol
+            .file_path
+            .cmp(&right.symbol.file_path)
+            .then_with(|| left.symbol.line_start.cmp(&right.symbol.line_start))
+            .then_with(|| left.symbol.id.cmp(&right.symbol.id))
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.context.cmp(&right.context))
+    });
 }
 
 /// Look up the callers of `function`, without printing anything.
@@ -122,53 +160,13 @@ fn collect_callers(
 
     let sym = &symbols[0];
 
-    // Get callers for this specific symbol
-    // Strategy:
-    // 1. Get edges resolved to this symbol's ID (most accurate)
-    // 2. Get edges by name, filtered to likely matches based on context
-    let id_edges = db.get_incoming_edges(&sym.id)?;
-    let name_edges = db.get_incoming_edges(&sym.name)?;
-
-    // Build patterns for context matching
-    // For "src/foo.rs::MyType::method@10", we check for:
-    // - Full qualified name: "MyType::method"
-    // - Just the parent type: "MyType::" (for cases like "MyType::new()")
-    let qualified_name = sym.qualified_name.as_deref().unwrap_or(&sym.name);
-    let parent_prefix = qualified_name
-        .rsplit_once("::")
-        .map(|(parent, _)| format!("{}::", parent));
-
-    // Start with ID-resolved edges (most accurate)
-    let mut edges = id_edges;
-    let has_id_edges = !edges.is_empty();
-
-    // Add name-based edges that aren't duplicates and likely refer to this symbol
-    for edge in name_edges {
-        // Skip if already have this edge (by source_id + line)
-        let is_duplicate = edges
-            .iter()
-            .any(|e| e.source_id == edge.source_id && e.line == edge.line);
-        if is_duplicate {
+    // Ordinary caller results are identity-based: only resolved call edges to
+    // the selected symbol may appear here.
+    let mut callers = Vec::new();
+    for edge in db.get_incoming_edges(&sym.id)? {
+        if edge.kind != db::EdgeKind::Calls || edge.target_id.as_deref() != Some(sym.id.as_str()) {
             continue;
         }
-
-        // Determine if this edge likely refers to our symbol
-        let likely_match = if let Some(ref ctx) = edge.context {
-            // Check if context contains our qualified name or parent type
-            ctx.contains(qualified_name) || parent_prefix.as_ref().is_some_and(|p| ctx.contains(p))
-        } else {
-            // No context - include only if we have no ID-resolved edges
-            // (fallback for completely unresolved graphs)
-            !has_id_edges
-        };
-
-        if likely_match {
-            edges.push(edge);
-        }
-    }
-
-    let mut callers = Vec::new();
-    for edge in edges {
         if let Some(s) = db.get_symbol(&edge.source_id)? {
             callers.push(CallerEntry {
                 symbol: s,
@@ -177,10 +175,39 @@ fn collect_callers(
             });
         }
     }
+    sort_caller_entries(&mut callers);
+
+    // Preserve conservative, potentially useful name evidence separately.
+    // Cross-language edges and edges resolved to any symbol are excluded.
+    let target_language = db.get_file_language(&sym.file_path)?;
+    let mut unresolved_callers = Vec::new();
+    if target_language.is_some() {
+        for edge in db.get_incoming_edges(&sym.name)? {
+            if edge.kind != db::EdgeKind::Calls
+                || edge.target_id.is_some()
+                || edge.target_name != sym.name
+                || !unresolved_context_matches(sym, edge.context.as_deref())
+            {
+                continue;
+            }
+            if let Some(source) = db.get_symbol(&edge.source_id)? {
+                if db.get_file_language(&source.file_path)? != target_language {
+                    continue;
+                }
+                unresolved_callers.push(CallerEntry {
+                    symbol: source,
+                    line: edge.line,
+                    context: edge.context,
+                });
+            }
+        }
+    }
+    sort_caller_entries(&mut unresolved_callers);
 
     Ok(CallersOutcome::Found {
         target: Box::new(symbols.into_iter().next().expect("checked non-empty")),
         callers,
+        unresolved_callers,
     })
 }
 
@@ -190,16 +217,30 @@ fn callers_data(outcome: &CallersOutcome) -> serde_json::Value {
         CallersOutcome::NotFound => serde_json::json!({
             "target": serde_json::Value::Null,
             "callers": [],
+            "unresolved_callers": [],
             "ambiguous": [],
         }),
         CallersOutcome::Ambiguous(symbols) => serde_json::json!({
             "target": serde_json::Value::Null,
             "callers": [],
+            "unresolved_callers": [],
             "ambiguous": symbols.iter().map(SymbolRef::from).collect::<Vec<_>>(),
         }),
-        CallersOutcome::Found { target, callers } => serde_json::json!({
+        CallersOutcome::Found {
+            target,
+            callers,
+            unresolved_callers,
+        } => serde_json::json!({
             "target": SymbolRef::from(target.as_ref()),
             "callers": callers
+                .iter()
+                .map(|c| serde_json::json!({
+                    "symbol": SymbolRef::from(&c.symbol),
+                    "line": c.line,
+                    "context": c.context,
+                }))
+                .collect::<Vec<_>>(),
+            "unresolved_callers": unresolved_callers
                 .iter()
                 .map(|c| serde_json::json!({
                     "symbol": SymbolRef::from(&c.symbol),
@@ -246,27 +287,54 @@ fn query_callers(
                 ),
             );
         }
-        CallersOutcome::Found { target, callers } => {
-            if callers.is_empty() {
+        CallersOutcome::Found {
+            target,
+            callers,
+            unresolved_callers,
+        } => {
+            if callers.is_empty() && unresolved_callers.is_empty() {
                 eprintln!("No callers found for '{}' ({})", function, target.file_path);
                 return Ok(());
             }
 
-            println!(
-                "Functions that call '{}' ({}):",
-                target.name, target.file_path
-            );
-            println!("{}", "-".repeat(60));
-
-            for entry in callers {
+            if !callers.is_empty() {
                 println!(
-                    "  {} ({}:{})",
-                    entry.symbol.name,
-                    entry.symbol.file_path,
-                    entry.line.unwrap_or(entry.symbol.line_start)
+                    "Functions that call '{}' ({}):",
+                    target.name, target.file_path
                 );
-                if let Some(ctx) = entry.context {
-                    println!("    > {}", ctx);
+                println!("{}", "-".repeat(60));
+
+                for entry in callers {
+                    println!(
+                        "  {} ({}:{})",
+                        entry.symbol.name,
+                        entry.symbol.file_path,
+                        entry.line.unwrap_or(entry.symbol.line_start)
+                    );
+                    if let Some(ctx) = entry.context {
+                        println!("    > {}", ctx);
+                    }
+                }
+            } else {
+                eprintln!(
+                    "No resolved callers found for '{}' ({})",
+                    function, target.file_path
+                );
+            }
+
+            if !unresolved_callers.is_empty() {
+                println!("\nUnresolved same-language call evidence:");
+                println!("{}", "-".repeat(60));
+                for entry in unresolved_callers {
+                    println!(
+                        "  {} ({}:{})",
+                        entry.symbol.name,
+                        entry.symbol.file_path,
+                        entry.line.unwrap_or(entry.symbol.line_start)
+                    );
+                    if let Some(ctx) = entry.context {
+                        println!("    > {}", ctx);
+                    }
                 }
             }
         }
@@ -818,6 +886,7 @@ mod tests {
         assert_eq!(callers[0]["symbol"]["name"], "callerfn");
         assert_eq!(callers[0]["line"], 12);
         assert_eq!(callers[0]["context"], "targetfn()");
+        assert_eq!(data["unresolved_callers"], serde_json::json!([]));
     }
 
     #[test]
@@ -828,6 +897,7 @@ mod tests {
 
         assert!(data["target"].is_null());
         assert_eq!(data["callers"], serde_json::json!([]));
+        assert_eq!(data["unresolved_callers"], serde_json::json!([]));
         assert_eq!(data["ambiguous"], serde_json::json!([]));
     }
 
@@ -859,9 +929,155 @@ mod tests {
 
         assert!(data["target"].is_null());
         assert_eq!(data["callers"], serde_json::json!([]));
+        assert_eq!(data["unresolved_callers"], serde_json::json!([]));
         let ambiguous = data["ambiguous"].as_array().unwrap();
         assert_eq!(ambiguous.len(), 2);
         assert_eq!(ambiguous[0]["name"], "targetfn");
+    }
+
+    #[test]
+    fn test_callers_separate_same_language_unresolved_evidence() {
+        let db = seeded_db();
+        for (path, language) in [
+            ("src/a.rs", "rust"),
+            ("src/z.rs", "rust"),
+            ("tests/helpers.py", "python"),
+        ] {
+            db.upsert_file(
+                &FileRecord {
+                    path: path.to_string(),
+                    content_hash: format!("hash-{path}"),
+                    size_bytes: 1,
+                    language: Some(language.to_string()),
+                    last_indexed: 0,
+                },
+                None,
+            )
+            .unwrap();
+        }
+
+        for (id, name, file, line) in [
+            ("src/a.rs::early", "early", "src/a.rs", 5),
+            ("src/z.rs::late", "late", "src/z.rs", 20),
+            ("src/z.rs::other", "targetfn", "src/z.rs", 1),
+            (
+                "tests/helpers.py::python_caller",
+                "python_caller",
+                "tests/helpers.py",
+                3,
+            ),
+        ] {
+            db.insert_symbol(&make_symbol(id, name, file, line))
+                .unwrap();
+        }
+
+        let edges = [
+            // Same-language bare calls remain useful, deterministic evidence.
+            Edge {
+                source_id: "src/z.rs::late".to_string(),
+                target_id: None,
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(22),
+                col: None,
+                context: Some("targetfn()".to_string()),
+            },
+            Edge {
+                source_id: "src/a.rs::early".to_string(),
+                target_id: None,
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(7),
+                col: None,
+                context: Some("targetfn()".to_string()),
+            },
+            // Cross-language evidence is never associated with the Rust target.
+            Edge {
+                source_id: "tests/helpers.py::python_caller".to_string(),
+                target_id: None,
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(4),
+                col: None,
+                context: Some("targetfn()".to_string()),
+            },
+            // Qualified syntax is not evidence for an unqualified free function.
+            Edge {
+                source_id: "src/z.rs::late".to_string(),
+                target_id: None,
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(23),
+                col: None,
+                context: Some("Other::targetfn()".to_string()),
+            },
+            // An edge resolved to the same-named symbol in another file belongs
+            // in neither result set for the selected target.
+            Edge {
+                source_id: "src/z.rs::late".to_string(),
+                target_id: Some("src/z.rs::other".to_string()),
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(24),
+                col: None,
+                context: Some("targetfn()".to_string()),
+            },
+            // Incoming non-call relationships are not callers.
+            Edge {
+                source_id: "src/z.rs::late".to_string(),
+                target_id: Some("src/x.rs::targetfn".to_string()),
+                target_name: "targetfn".to_string(),
+                kind: EdgeKind::Uses,
+                line: Some(25),
+                col: None,
+                context: Some("targetfn".to_string()),
+            },
+        ];
+        for edge in edges {
+            db.insert_edge(&edge).unwrap();
+        }
+
+        let outcome = collect_callers(&db, "targetfn", Some("src/x.rs")).unwrap();
+        let data = callers_data(&outcome);
+
+        let callers = data["callers"].as_array().unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0]["symbol"]["name"], "callerfn");
+
+        let unresolved = data["unresolved_callers"].as_array().unwrap();
+        assert_eq!(unresolved.len(), 2);
+        assert_eq!(unresolved[0]["symbol"]["name"], "early");
+        assert_eq!(unresolved[1]["symbol"]["name"], "late");
+    }
+
+    #[test]
+    fn test_qualified_unresolved_callers_require_qualified_context() {
+        let db = seeded_db();
+        let mut target = make_symbol("src/x.rs::Worker::run", "run", "src/x.rs", 30);
+        target.kind = SymbolKind::Method;
+        target.qualified_name = Some("Worker::run".to_string());
+        db.insert_symbol(&target).unwrap();
+
+        for (line, context) in [(40, "run()"), (41, "Other::run()"), (42, "Worker::run()")] {
+            db.insert_edge(&Edge {
+                source_id: "src/x.rs::callerfn".to_string(),
+                target_id: None,
+                target_name: "run".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(line),
+                col: None,
+                context: Some(context.to_string()),
+            })
+            .unwrap();
+        }
+
+        let outcome = collect_callers(&db, "run", Some("src/x.rs")).unwrap();
+        let data = callers_data(&outcome);
+        assert_eq!(data["callers"], serde_json::json!([]));
+        let unresolved = data["unresolved_callers"].as_array().unwrap();
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0]["line"], 42);
+        assert_eq!(unresolved[0]["context"], "Worker::run()");
     }
 
     #[test]
