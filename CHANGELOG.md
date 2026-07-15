@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relationships only. The documented default of 3 now takes effect: existing invocations that pass
   no flags return transitive results grouped under new `Distance N:` headings, where they
   previously returned direct relationships. Pass `--depth 1` to retain the old output.
+- BREAKING: `ctx query impact --json` now reports indexed qualified names and source line ranges
+  while keeping same-named symbols distinct by identity (#63). `line_start` and `line_end` were
+  previously always `0` and `qualified_name` always `null`; both now carry real indexed values.
+  Consumers that treated `0` as "no location" must read the value rather than the sentinel.
 - BREAKING: `ctx explain` now separates calls from other relationships for every language, not only
   Rust (#62). `Calls (N)` previously counted and listed every outgoing edge, so an import or a trait
   implementation was reported under a heading that said "Calls"; `extends`, `implements`, `imports`,
@@ -90,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Made CI report its checks on every pull request so branch protection can require them. The
+  workflow-level `paths-ignore` meant a docs-only pull request never ran CI, and a check that never
+  runs never reports -- so any required check would have stayed pending forever and blocked the
+  merge. Docs-only runs now skip the expensive jobs individually via a `changes` filter, which
+  reports a skipped status that branch protection accepts.
 - Added an internal LSP registry client (`lsp_registry`) and a format-preserving
   `.ctx/config.toml` writer (`config_edit`) as groundwork for the future `ctx lsp`
   commands. Internal only: no CLI surface, config contract, or documented behavior

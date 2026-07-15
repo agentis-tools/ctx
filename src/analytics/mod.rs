@@ -29,6 +29,21 @@ pub struct ImpactNode {
     pub distance: i32,
 }
 
+/// A node in impact analysis with its indexed source location.
+///
+/// This complements [`ImpactNode`] without changing that existing public type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocatedImpactNode {
+    pub symbol_id: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub file_path: String,
+    pub kind: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub distance: i32,
+}
+
 /// Complexity analysis result for a function.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComplexityResult {
