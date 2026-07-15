@@ -16,13 +16,13 @@
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 
-use ctx::config::CtxConfig;
 use ctx::config_edit::{
     from_registry, registry_owned_languages, upsert_lsp_entry, LspConfigEntry, SOURCE_REGISTRY,
 };
 use ctx::error::{CtxError, Result};
 use ctx::exit::Outcome;
 use ctx::lsp::status::{doctor, find_executable, LspHealthReport};
+use ctx::lsp::LspConfig;
 use ctx::lsp::LspServerConfig;
 use ctx::lsp_registry::{
     fetch_index, fetch_language, install_hint_for_current_os, registry_base_url,
@@ -56,7 +56,7 @@ fn run_add(
     yes: bool,
     json: bool,
 ) -> Result<Outcome> {
-    let config = CtxConfig::load(root);
+    let config = LspConfig::load(root);
     let existing = config.lsp.get(language);
 
     // A hand-written entry is never touched; refuse before any network call.
@@ -186,7 +186,7 @@ fn run_add(
 // ============================================================================
 
 fn run_list(root: &Path, available: bool, json: bool) -> Result<Outcome> {
-    let config = CtxConfig::load(root);
+    let config = LspConfig::load(root);
 
     if available {
         let base = registry_base_url();
@@ -282,7 +282,7 @@ fn source_label(cfg: &LspServerConfig) -> &'static str {
 
 fn run_update(root: &Path, language: Option<&str>, yes: bool, json: bool) -> Result<Outcome> {
     let owned = registry_owned_languages(root)?;
-    let config = CtxConfig::load(root);
+    let config = LspConfig::load(root);
 
     let targets: Vec<String> = match language {
         Some(lang) if owned.iter().any(|l| l == lang) => vec![lang.to_string()],
@@ -449,7 +449,7 @@ fn entry_matches_config(current: &LspServerConfig, proposed: &LspConfigEntry) ->
 // ============================================================================
 
 fn run_doctor(root: &Path, json: bool) -> Result<Outcome> {
-    let config = CtxConfig::load(root);
+    let config = LspConfig::load(root);
     if config.lsp.is_empty() {
         if json {
             ctx::json::emit(
