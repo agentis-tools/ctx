@@ -105,6 +105,10 @@ notify = "8.2"
 notify-debouncer-mini = "0.7"
 dirs = "6.0.0"
 
+# Language Server Protocol types for the pluggable LSP extraction backend
+# (types only; the JSON-RPC stdio transport is hand-rolled in src/lsp/)
+lsp-types = "0.97"
+
 # Windows release artifacts are .zip (see .github/workflows/release.yml);
 # zip is already in the dependency graph transitively via libduckdb-sys
 [target.'cfg(windows)'.dependencies]

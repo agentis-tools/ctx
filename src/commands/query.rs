@@ -2,6 +2,7 @@
 //!
 //! Handles codebase queries: find symbols, callers, dependencies, graph traversal.
 
+use std::collections::{HashSet, VecDeque};
 use std::env;
 
 use crate::cli::QueryCommand;
@@ -87,6 +88,7 @@ struct CallerEntry {
     symbol: db::Symbol,
     line: Option<u32>,
     context: Option<String>,
+    distance: u32,
 }
 
 /// Result of looking up the callers of a symbol.
@@ -130,12 +132,16 @@ fn unresolved_context_matches(target: &db::Symbol, context: Option<&str>) -> boo
 
 fn sort_caller_entries(entries: &mut [CallerEntry]) {
     entries.sort_by(|left, right| {
-        left.symbol
-            .file_path
-            .cmp(&right.symbol.file_path)
-            .then_with(|| left.symbol.line_start.cmp(&right.symbol.line_start))
+        left.distance
+            .cmp(&right.distance)
+            .then_with(|| left.symbol.file_path.cmp(&right.symbol.file_path))
+            .then_with(|| {
+                left.line
+                    .unwrap_or(left.symbol.line_start)
+                    .cmp(&right.line.unwrap_or(right.symbol.line_start))
+            })
+            .then_with(|| left.symbol.name.cmp(&right.symbol.name))
             .then_with(|| left.symbol.id.cmp(&right.symbol.id))
-            .then_with(|| left.line.cmp(&right.line))
             .then_with(|| left.context.cmp(&right.context))
     });
 }
@@ -145,6 +151,7 @@ fn collect_callers(
     db: &db::Database,
     function: &str,
     file_pattern: Option<&str>,
+    depth: i32,
 ) -> Result<CallersOutcome> {
     // First, find the symbol(s) matching the function name with optional file filter
     let symbols = db.find_symbols_filtered(function, 100, file_pattern, None)?;
@@ -160,19 +167,41 @@ fn collect_callers(
 
     let sym = &symbols[0];
 
-    // Ordinary caller results are identity-based: only resolved call edges to
-    // the selected symbol may appear here.
+    // Traverse resolved call edges breadth-first. Identity-based visitation
+    // makes cycles safe and keeps the shortest distance through diamonds.
     let mut callers = Vec::new();
-    for edge in db.get_incoming_edges(&sym.id)? {
-        if edge.kind != db::EdgeKind::Calls || edge.target_id.as_deref() != Some(sym.id.as_str()) {
+    let mut visited = HashSet::from([sym.id.clone()]);
+    let mut queue = VecDeque::from([(sym.id.clone(), 0_u32)]);
+    let max_depth = u32::try_from(depth).unwrap_or(0);
+
+    while let Some((target_id, parent_distance)) = queue.pop_front() {
+        if parent_distance >= max_depth {
             continue;
         }
-        if let Some(s) = db.get_symbol(&edge.source_id)? {
-            callers.push(CallerEntry {
-                symbol: s,
-                line: edge.line,
-                context: edge.context,
-            });
+        let distance = parent_distance + 1;
+        let mut edges = db.get_incoming_edges(&target_id)?;
+        edges.sort_by(|left, right| {
+            left.source_id
+                .cmp(&right.source_id)
+                .then_with(|| left.line.cmp(&right.line))
+                .then_with(|| left.context.cmp(&right.context))
+        });
+        for edge in edges {
+            if edge.kind != db::EdgeKind::Calls
+                || edge.target_id.as_deref() != Some(target_id.as_str())
+                || !visited.insert(edge.source_id.clone())
+            {
+                continue;
+            }
+            if let Some(source) = db.get_symbol(&edge.source_id)? {
+                queue.push_back((source.id.clone(), distance));
+                callers.push(CallerEntry {
+                    symbol: source,
+                    line: edge.line,
+                    context: edge.context,
+                    distance,
+                });
+            }
         }
     }
     sort_caller_entries(&mut callers);
@@ -181,12 +210,21 @@ fn collect_callers(
     // Cross-language edges and edges resolved to any symbol are excluded.
     let target_language = db.get_file_language(&sym.file_path)?;
     let mut unresolved_callers = Vec::new();
-    if target_language.is_some() {
-        for edge in db.get_incoming_edges(&sym.name)? {
+    let mut unresolved_sources = HashSet::new();
+    if max_depth > 0 && target_language.is_some() {
+        let mut edges = db.get_incoming_edges(&sym.name)?;
+        edges.sort_by(|left, right| {
+            left.source_id
+                .cmp(&right.source_id)
+                .then_with(|| left.line.cmp(&right.line))
+                .then_with(|| left.context.cmp(&right.context))
+        });
+        for edge in edges {
             if edge.kind != db::EdgeKind::Calls
                 || edge.target_id.is_some()
                 || edge.target_name != sym.name
                 || !unresolved_context_matches(sym, edge.context.as_deref())
+                || !unresolved_sources.insert(edge.source_id.clone())
             {
                 continue;
             }
@@ -198,6 +236,7 @@ fn collect_callers(
                     symbol: source,
                     line: edge.line,
                     context: edge.context,
+                    distance: 1,
                 });
             }
         }
@@ -238,6 +277,7 @@ fn callers_data(outcome: &CallersOutcome) -> serde_json::Value {
                     "symbol": SymbolRef::from(&c.symbol),
                     "line": c.line,
                     "context": c.context,
+                    "distance": c.distance,
                 }))
                 .collect::<Vec<_>>(),
             "unresolved_callers": unresolved_callers
@@ -246,6 +286,7 @@ fn callers_data(outcome: &CallersOutcome) -> serde_json::Value {
                     "symbol": SymbolRef::from(&c.symbol),
                     "line": c.line,
                     "context": c.context,
+                    "distance": c.distance,
                 }))
                 .collect::<Vec<_>>(),
             "ambiguous": [],
@@ -258,9 +299,10 @@ fn query_callers(
     db: &db::Database,
     function: &str,
     file_pattern: Option<&str>,
+    depth: i32,
     json: bool,
 ) -> Result<()> {
-    let outcome = collect_callers(db, function, file_pattern)?;
+    let outcome = collect_callers(db, function, file_pattern, depth)?;
 
     if json {
         return ctx::json::emit("query.callers", callers_data(&outcome));
@@ -304,7 +346,12 @@ fn query_callers(
                 );
                 println!("{}", "-".repeat(60));
 
+                let mut current_distance = 0;
                 for entry in callers {
+                    if entry.distance != current_distance {
+                        current_distance = entry.distance;
+                        println!("\nDistance {}:", current_distance);
+                    }
                     println!(
                         "  {} ({}:{})",
                         entry.symbol.name,
@@ -325,6 +372,7 @@ fn query_callers(
             if !unresolved_callers.is_empty() {
                 println!("\nUnresolved same-language call evidence:");
                 println!("{}", "-".repeat(60));
+                println!("\nDistance 1:");
                 for entry in unresolved_callers {
                     println!(
                         "  {} ({}:{})",
@@ -348,9 +396,56 @@ enum DepsOutcome {
     Ambiguous(Vec<db::Symbol>),
     Found {
         target: Box<db::Symbol>,
-        /// Outgoing edges with the resolved target symbol (if any).
-        deps: Vec<(db::Edge, Option<db::Symbol>)>,
+        deps: Vec<DependencyEntry>,
     },
+}
+
+/// One outgoing dependency reached during breadth-first traversal.
+struct DependencyEntry {
+    edge: db::Edge,
+    resolved: Option<db::Symbol>,
+    source_file: String,
+    distance: u32,
+}
+
+fn sort_dependency_entries(entries: &mut [DependencyEntry]) {
+    entries.sort_by(|left, right| {
+        let left_file = left
+            .resolved
+            .as_ref()
+            .map_or(left.source_file.as_str(), |symbol| {
+                symbol.file_path.as_str()
+            });
+        let right_file = right
+            .resolved
+            .as_ref()
+            .map_or(right.source_file.as_str(), |symbol| {
+                symbol.file_path.as_str()
+            });
+        let left_name = left
+            .resolved
+            .as_ref()
+            .map_or(left.edge.target_name.as_str(), |symbol| {
+                symbol.name.as_str()
+            });
+        let right_name = right
+            .resolved
+            .as_ref()
+            .map_or(right.edge.target_name.as_str(), |symbol| {
+                symbol.name.as_str()
+            });
+        let left_id = left.edge.target_id.as_deref().unwrap_or("");
+        let right_id = right.edge.target_id.as_deref().unwrap_or("");
+
+        left.distance
+            .cmp(&right.distance)
+            .then_with(|| left_file.cmp(right_file))
+            .then_with(|| left.edge.line.cmp(&right.edge.line))
+            .then_with(|| left_name.cmp(right_name))
+            .then_with(|| left_id.cmp(right_id))
+            .then_with(|| left.edge.kind.as_str().cmp(right.edge.kind.as_str()))
+            .then_with(|| left.edge.context.cmp(&right.edge.context))
+    });
 }
 
 /// Look up the dependencies of `symbol`, without printing anything.
@@ -359,6 +454,7 @@ fn collect_deps(
     symbol: &str,
     file_pattern: Option<&str>,
     kind_filter: Option<&str>,
+    depth: i32,
 ) -> Result<DepsOutcome> {
     let symbols = db.find_symbols_filtered(symbol, 100, file_pattern, kind_filter)?;
 
@@ -371,16 +467,54 @@ fn collect_deps(
     }
 
     let sym = symbols.into_iter().next().expect("checked non-empty");
-    let edges = db.get_outgoing_edges(&sym.id)?;
-
     let mut deps = Vec::new();
-    for edge in edges {
-        let resolved = match &edge.target_id {
-            Some(id) => db.get_symbol(id)?,
-            None => None,
-        };
-        deps.push((edge, resolved));
+    let max_depth = u32::try_from(depth).unwrap_or(0);
+    let mut visited = HashSet::from([sym.id.clone()]);
+    let mut queue = VecDeque::from([(sym.clone(), 0_u32)]);
+
+    while let Some((source, parent_distance)) = queue.pop_front() {
+        if parent_distance >= max_depth {
+            continue;
+        }
+        let distance = parent_distance + 1;
+        let mut edges = db.get_outgoing_edges(&source.id)?;
+        edges.sort_by(|left, right| {
+            left.line
+                .cmp(&right.line)
+                .then_with(|| left.target_name.cmp(&right.target_name))
+                .then_with(|| left.target_id.cmp(&right.target_id))
+                .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
+        });
+        for edge in edges {
+            let resolved = match &edge.target_id {
+                Some(id) => db.get_symbol(id)?,
+                None => None,
+            };
+
+            if let Some(target) = resolved {
+                if !visited.insert(target.id.clone()) {
+                    continue;
+                }
+                queue.push_back((target.clone(), distance));
+                deps.push(DependencyEntry {
+                    edge,
+                    resolved: Some(target),
+                    source_file: source.file_path.clone(),
+                    distance,
+                });
+            } else {
+                // Unresolved relationships are useful evidence but cannot be
+                // traversed safely, so they are always leaves.
+                deps.push(DependencyEntry {
+                    edge,
+                    resolved: None,
+                    source_file: source.file_path.clone(),
+                    distance,
+                });
+            }
+        }
     }
+    sort_dependency_entries(&mut deps);
 
     Ok(DepsOutcome::Found {
         target: Box::new(sym),
@@ -405,11 +539,12 @@ fn deps_data(outcome: &DepsOutcome) -> serde_json::Value {
             "target": SymbolRef::from(target.as_ref()),
             "dependencies": deps
                 .iter()
-                .map(|(edge, resolved)| serde_json::json!({
-                    "kind": edge.kind.as_str(),
-                    "target_name": edge.target_name,
-                    "line": edge.line,
-                    "resolved": resolved.as_ref().map(SymbolRef::from),
+                .map(|entry| serde_json::json!({
+                    "kind": entry.edge.kind.as_str(),
+                    "target_name": entry.edge.target_name,
+                    "line": entry.edge.line,
+                    "resolved": entry.resolved.as_ref().map(SymbolRef::from),
+                    "distance": entry.distance,
                 }))
                 .collect::<Vec<_>>(),
             "ambiguous": [],
@@ -423,9 +558,10 @@ fn query_deps(
     symbol: &str,
     file_pattern: Option<&str>,
     kind_filter: Option<&str>,
+    depth: i32,
     json: bool,
 ) -> Result<()> {
-    let outcome = collect_deps(db, symbol, file_pattern, kind_filter)?;
+    let outcome = collect_deps(db, symbol, file_pattern, kind_filter, depth)?;
 
     if json {
         return ctx::json::emit("query.deps", deps_data(&outcome));
@@ -464,12 +600,17 @@ fn query_deps(
             println!("Dependencies of '{}' ({}):", target.name, target.file_path);
             println!("{}", "-".repeat(60));
 
-            for (edge, _) in deps {
+            let mut current_distance = 0;
+            for entry in deps {
+                if entry.distance != current_distance {
+                    current_distance = entry.distance;
+                    println!("\nDistance {}:", current_distance);
+                }
                 println!(
                     "  {} {} (line {})",
-                    edge.kind.as_str(),
-                    edge.target_name,
-                    edge.line.unwrap_or(0)
+                    entry.edge.kind.as_str(),
+                    entry.edge.target_name,
+                    entry.edge.line.unwrap_or(0)
                 );
             }
         }
@@ -596,15 +737,15 @@ pub fn run_query(query: QueryCommand, json: bool) -> Result<()> {
         } => query_find(&db, &pattern, limit, kind, file, json),
         QueryCommand::Callers {
             function,
-            depth: _,
+            depth,
             file,
-        } => query_callers(&db, &function, file.as_deref(), json),
+        } => query_callers(&db, &function, file.as_deref(), depth, json),
         QueryCommand::Deps {
             symbol,
-            depth: _,
+            depth,
             file,
             kind,
-        } => query_deps(&db, &symbol, file.as_deref(), kind.as_deref(), json),
+        } => query_deps(&db, &symbol, file.as_deref(), kind.as_deref(), depth, json),
         QueryCommand::Graph {
             start,
             depth,
@@ -846,6 +987,90 @@ mod tests {
         db
     }
 
+    fn traversal_db(include_caller_cycle: bool) -> Database {
+        let db = Database::open_in_memory().unwrap();
+        let symbols = [
+            ("src/root.rs::root", "root", "src/root.rs", 1),
+            ("a/alpha.rs::alpha", "alpha", "a/alpha.rs", 20),
+            ("z/zed.rs::zed", "zed", "z/zed.rs", 30),
+            ("m/mid.rs::mid", "mid", "m/mid.rs", 10),
+            ("d/deep.rs::deep", "deep", "d/deep.rs", 40),
+            ("u/probe.rs::probe", "probe", "u/probe.rs", 50),
+            (
+                "u/indirect.rs::indirect_probe",
+                "indirect_probe",
+                "u/indirect.rs",
+                60,
+            ),
+            ("vendor/ext.rs::external", "external", "vendor/ext.rs", 1),
+            ("vendor/ghost.rs::ghost", "ghost", "vendor/ghost.rs", 1),
+        ];
+        for (_, _, file, _) in symbols {
+            db.upsert_file(
+                &FileRecord {
+                    path: file.to_string(),
+                    content_hash: format!("hash-{file}"),
+                    size_bytes: 1,
+                    language: Some("rust".to_string()),
+                    last_indexed: 0,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        for (id, name, file, line) in symbols {
+            db.insert_symbol(&make_symbol(id, name, file, line))
+                .unwrap();
+        }
+
+        let resolved_call = |source: &str, target: &str, name: &str, line: u32| Edge {
+            source_id: source.to_string(),
+            target_id: Some(target.to_string()),
+            target_name: name.to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(line),
+            col: None,
+            context: Some(format!("{name}()")),
+        };
+        for edge in [
+            // Insert reverse lexical order to exercise stable result sorting.
+            resolved_call("z/zed.rs::zed", "src/root.rs::root", "root", 31),
+            resolved_call("a/alpha.rs::alpha", "src/root.rs::root", "root", 21),
+            // Diamond: mid reaches the root through both direct callers.
+            resolved_call("m/mid.rs::mid", "z/zed.rs::zed", "zed", 12),
+            resolved_call("m/mid.rs::mid", "a/alpha.rs::alpha", "alpha", 11),
+            resolved_call("d/deep.rs::deep", "m/mid.rs::mid", "mid", 41),
+        ] {
+            db.insert_edge(&edge).unwrap();
+        }
+        if include_caller_cycle {
+            // Cycle back to the root; the root must never be emitted.
+            db.insert_edge(&resolved_call(
+                "src/root.rs::root",
+                "d/deep.rs::deep",
+                "deep",
+                3,
+            ))
+            .unwrap();
+        }
+        for (source, target, line) in [
+            ("u/probe.rs::probe", "root", 51),
+            ("u/indirect.rs::indirect_probe", "alpha", 61),
+        ] {
+            db.insert_edge(&Edge {
+                source_id: source.to_string(),
+                target_id: None,
+                target_name: target.to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(line),
+                col: None,
+                context: Some(format!("{target}()")),
+            })
+            .unwrap();
+        }
+        db
+    }
+
     #[test]
     fn test_find_data_payload() {
         let db = seeded_db();
@@ -875,7 +1100,7 @@ mod tests {
     #[test]
     fn test_callers_data_found() {
         let db = seeded_db();
-        let outcome = collect_callers(&db, "targetfn", None).unwrap();
+        let outcome = collect_callers(&db, "targetfn", None, 3).unwrap();
         let data = callers_data(&outcome);
 
         assert_eq!(data["target"]["name"], "targetfn");
@@ -886,13 +1111,53 @@ mod tests {
         assert_eq!(callers[0]["symbol"]["name"], "callerfn");
         assert_eq!(callers[0]["line"], 12);
         assert_eq!(callers[0]["context"], "targetfn()");
+        assert_eq!(callers[0]["distance"], 1);
         assert_eq!(data["unresolved_callers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_callers_bfs_depth_cycle_diamond_and_unresolved_root_only() {
+        let db = traversal_db(true);
+
+        let depth_one = callers_data(&collect_callers(&db, "root", None, 1).unwrap());
+        let callers = depth_one["callers"].as_array().unwrap();
+        assert_eq!(callers.len(), 2);
+        assert_eq!(callers[0]["symbol"]["name"], "alpha");
+        assert_eq!(callers[1]["symbol"]["name"], "zed");
+        assert!(callers.iter().all(|entry| entry["distance"] == 1));
+        let unresolved = depth_one["unresolved_callers"].as_array().unwrap();
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0]["symbol"]["name"], "probe");
+        assert_eq!(unresolved[0]["distance"], 1);
+
+        let depth_three = callers_data(&collect_callers(&db, "root", None, 3).unwrap());
+        let callers = depth_three["callers"].as_array().unwrap();
+        let names_and_distances = callers
+            .iter()
+            .map(|entry| {
+                (
+                    entry["symbol"]["name"].as_str().unwrap(),
+                    entry["distance"].as_u64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names_and_distances,
+            vec![("alpha", 1), ("zed", 1), ("mid", 2), ("deep", 3)]
+        );
+        assert!(!serde_json::to_string(&depth_three)
+            .unwrap()
+            .contains("indirect_probe"));
+
+        let depth_zero = callers_data(&collect_callers(&db, "root", None, 0).unwrap());
+        assert_eq!(depth_zero["callers"], serde_json::json!([]));
+        assert_eq!(depth_zero["unresolved_callers"], serde_json::json!([]));
     }
 
     #[test]
     fn test_callers_data_not_found() {
         let db = seeded_db();
-        let outcome = collect_callers(&db, "missingfn", None).unwrap();
+        let outcome = collect_callers(&db, "missingfn", None, 3).unwrap();
         let data = callers_data(&outcome);
 
         assert!(data["target"].is_null());
@@ -924,7 +1189,7 @@ mod tests {
         ))
         .unwrap();
 
-        let outcome = collect_callers(&db, "targetfn", None).unwrap();
+        let outcome = collect_callers(&db, "targetfn", None, 3).unwrap();
         let data = callers_data(&outcome);
 
         assert!(data["target"].is_null());
@@ -1037,7 +1302,7 @@ mod tests {
             db.insert_edge(&edge).unwrap();
         }
 
-        let outcome = collect_callers(&db, "targetfn", Some("src/x.rs")).unwrap();
+        let outcome = collect_callers(&db, "targetfn", Some("src/x.rs"), 3).unwrap();
         let data = callers_data(&outcome);
 
         let callers = data["callers"].as_array().unwrap();
@@ -1071,7 +1336,7 @@ mod tests {
             .unwrap();
         }
 
-        let outcome = collect_callers(&db, "run", Some("src/x.rs")).unwrap();
+        let outcome = collect_callers(&db, "run", Some("src/x.rs"), 3).unwrap();
         let data = callers_data(&outcome);
         assert_eq!(data["callers"], serde_json::json!([]));
         let unresolved = data["unresolved_callers"].as_array().unwrap();
@@ -1083,7 +1348,7 @@ mod tests {
     #[test]
     fn test_deps_data_found() {
         let db = seeded_db();
-        let outcome = collect_deps(&db, "callerfn", None, None).unwrap();
+        let outcome = collect_deps(&db, "callerfn", None, None, 3).unwrap();
         let data = deps_data(&outcome);
 
         assert_eq!(data["target"]["name"], "callerfn");
@@ -1094,6 +1359,114 @@ mod tests {
         assert_eq!(deps[0]["line"], 12);
         assert_eq!(deps[0]["resolved"]["name"], "targetfn");
         assert_eq!(deps[0]["resolved"]["file"], "src/x.rs");
+        assert_eq!(deps[0]["distance"], 1);
+    }
+
+    #[test]
+    fn test_deps_bfs_depth_cycle_diamond_kinds_and_unresolved_leaves() {
+        let db = traversal_db(false);
+        for edge in [
+            Edge {
+                source_id: "src/root.rs::root".to_string(),
+                target_id: Some("a/alpha.rs::alpha".to_string()),
+                target_name: "alpha".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(70),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "src/root.rs::root".to_string(),
+                target_id: Some("z/zed.rs::zed".to_string()),
+                target_name: "zed".to_string(),
+                kind: EdgeKind::Uses,
+                line: Some(71),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "src/root.rs::root".to_string(),
+                target_id: None,
+                target_name: "external".to_string(),
+                kind: EdgeKind::Imports,
+                line: Some(72),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "a/alpha.rs::alpha".to_string(),
+                target_id: Some("m/mid.rs::mid".to_string()),
+                target_name: "mid".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(22),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "z/zed.rs::zed".to_string(),
+                target_id: Some("m/mid.rs::mid".to_string()),
+                target_name: "mid".to_string(),
+                kind: EdgeKind::Uses,
+                line: Some(32),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "m/mid.rs::mid".to_string(),
+                target_id: Some("d/deep.rs::deep".to_string()),
+                target_name: "deep".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(13),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "d/deep.rs::deep".to_string(),
+                target_id: Some("src/root.rs::root".to_string()),
+                target_name: "root".to_string(),
+                kind: EdgeKind::Calls,
+                line: Some(42),
+                col: None,
+                context: None,
+            },
+            Edge {
+                source_id: "vendor/ext.rs::external".to_string(),
+                target_id: Some("vendor/ghost.rs::ghost".to_string()),
+                target_name: "ghost".to_string(),
+                kind: EdgeKind::Uses,
+                line: Some(2),
+                col: None,
+                context: None,
+            },
+        ] {
+            db.insert_edge(&edge).unwrap();
+        }
+
+        let depth_one = deps_data(&collect_deps(&db, "root", None, None, 1).unwrap());
+        let deps = depth_one["dependencies"].as_array().unwrap();
+        assert_eq!(deps.len(), 3);
+        assert_eq!(deps[0]["target_name"], "alpha");
+        assert_eq!(deps[0]["kind"], "calls");
+        assert_eq!(deps[1]["target_name"], "external");
+        assert!(deps[1]["resolved"].is_null());
+        assert_eq!(deps[2]["target_name"], "zed");
+        assert_eq!(deps[2]["kind"], "uses");
+        assert!(deps.iter().all(|entry| entry["distance"] == 1));
+
+        let depth_three = deps_data(&collect_deps(&db, "root", None, None, 3).unwrap());
+        let serialized = serde_json::to_string(&depth_three).unwrap();
+        let deps = depth_three["dependencies"].as_array().unwrap();
+        assert_eq!(
+            deps.iter()
+                .filter(|entry| entry["target_name"] == "mid")
+                .count(),
+            1
+        );
+        assert!(deps
+            .iter()
+            .any(|entry| entry["target_name"] == "deep" && entry["distance"] == 3));
+        assert!(!serialized.contains("ghost"));
+        assert!(!deps.iter().any(|entry| entry["resolved"]["name"] == "root"));
     }
 
     #[test]

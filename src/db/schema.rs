@@ -1757,6 +1757,76 @@ impl Database {
         Ok(qualified_resolved + context_resolved + unique_resolved + same_file_unique)
     }
 
+    /// Unresolved edges that carry a call-site location, joined to the file
+    /// containing their source symbol.
+    ///
+    /// Used by the LSP Stage B resolver ([`crate::lsp::resolve`]) to ask a
+    /// language server `textDocument/definition` at each call site after
+    /// [`Database::resolve_edge_targets`] has done the cheap SQL passes.
+    pub fn unresolved_edges_with_location(&self) -> Result<Vec<UnresolvedEdgeLocation>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.id, s.file_path, e.line, COALESCE(e.col, 0), e.target_name
+            FROM edges e
+            JOIN symbols s ON s.id = e.source_id
+            WHERE e.target_id IS NULL AND e.line IS NOT NULL
+            ORDER BY s.file_path, e.line
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(UnresolvedEdgeLocation {
+                edge_id: row.get(0)?,
+                source_file: row.get(1)?,
+                line: row.get(2)?,
+                col: row.get(3)?,
+                target_name: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Set the resolved target of one edge by rowid.
+    ///
+    /// This is a direct `UPDATE` used by LSP Stage B for cross-file targets:
+    /// unlike the `store_edges` insert path it never rewrites ids against the
+    /// source file's path, which would corrupt a cross-file target id into
+    /// `current_file::name`. Only still-unresolved edges are updated.
+    pub fn set_edge_target(&self, edge_id: i64, target_id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE edges SET target_id = ? WHERE id = ? AND target_id IS NULL",
+            params![target_id, edge_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Find the symbol at a (1-based) line of a file: an exact `line_start`
+    /// match first, then the innermost symbol whose span contains the line.
+    pub fn symbol_id_at_line(&self, file_path: &str, line: u32) -> Result<Option<String>> {
+        if let Some(id) = self
+            .conn
+            .query_row(
+                "SELECT id FROM symbols WHERE file_path = ? AND line_start = ? LIMIT 1",
+                params![file_path, line],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            return Ok(Some(id));
+        }
+        self.conn
+            .query_row(
+                r#"
+                SELECT id FROM symbols
+                WHERE file_path = ? AND line_start <= ? AND line_end >= ?
+                ORDER BY (line_end - line_start) ASC, line_start DESC
+                LIMIT 1
+                "#,
+                params![file_path, line, line],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
     /// Insert (or replace) a batch of MinHash fingerprints in one transaction.
     pub fn insert_fingerprints_batch(&self, fingerprints: &[Fingerprint]) -> Result<usize> {
         if fingerprints.is_empty() {
@@ -1974,6 +2044,24 @@ pub struct SymbolMetrics {
     pub fan_in: i64,
     pub fan_out: i64,
     pub complexity: i64,
+}
+
+/// An unresolved edge with a call-site location, joined to the file that
+/// contains its source symbol (see
+/// [`Database::unresolved_edges_with_location`]).
+#[derive(Debug, Clone)]
+pub struct UnresolvedEdgeLocation {
+    /// Rowid of the edge (`edges.id`).
+    pub edge_id: i64,
+    /// File containing the edge's source symbol.
+    pub source_file: String,
+    /// 1-based line of the reference.
+    pub line: u32,
+    /// 0-based column of the reference (0 when unknown).
+    pub col: u32,
+    /// Recorded callee name (`edges.target_name`); the Stage B resolver only
+    /// accepts definition targets whose symbol name matches it.
+    pub target_name: String,
 }
 
 /// A resolved relationship edge whose endpoints live in different files

@@ -63,6 +63,7 @@ const sidebars: SidebarsConfig = {
         'commands/diff',
         'commands/audit',
         'commands/harness',
+        'commands/lsp',
         'commands/self-update',
         'commands/shell',
         'commands/serve',
@@ -84,6 +85,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'configuration',
         'language-support',
+        'lsp-languages',
         'json-output',
         'reference/exit-codes',
         'sql-schema',

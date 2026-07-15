@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ctx lsp` command group for community-registry LSP management: `ctx lsp add
+  <language>` installs a curated `[lsp.<language>]` entry into
+  `.ctx/config.toml` after confirmation (`--yes`/`-y` for non-interactive use,
+  `--server <NAME>` to override the recommended server), `ctx lsp list`
+  shows configured servers (`--available` lists the registry), `ctx lsp
+  update` refreshes entries carrying `source = "registry"` provenance with a
+  per-key diff while preserving user-added keys (`timeout_ms`, `env`, ...),
+  and `ctx lsp doctor` health-checks every configured server (PATH lookup,
+  initialize handshake, capability diff; a malformed config file or invalid
+  `[lsp.*]` blocks are reported as failures; exit 1 on failures). All four
+  support the global `--json` flag.
+- Pluggable LSP extraction backend: any stdio language server can be registered
+  declaratively under `[lsp.<language>]` in `.ctx/config.toml`, with per-language
+  backend selection (`tree-sitter` (default) / `lsp` / `hybrid`), lazy server
+  startup, cross-file reference resolution via `textDocument/definition`, a
+  `.ctx/lsp_status.json` run sidecar, and graceful fallback to tree-sitter —
+  server failures never fail an indexing run.
+
 ### Fixed
 - Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
   files by repository-relative path before greedy packing (#60).
@@ -16,12 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in meaning: entries that previously appeared through bare name matching now surface under
   `unresolved_callers` or not at all, so consumers reading `callers` see fewer, higher-confidence
   entries than before.
+- BREAKING: `ctx query callers` and `ctx query deps` now honor `--depth` with cycle-safe
+  breadth-first traversal, shortest-distance identity deduplication, explicit JSON distances, and
+  distance-grouped human output while keeping unresolved relationships as non-recursive evidence
+  leaves (#58). `--depth` was previously parsed and discarded, so both commands returned direct
+  relationships only. The documented default of 3 now takes effect: existing invocations that pass
+  no flags return transitive results grouped under new `Distance N:` headings, where they
+  previously returned direct relationships. Pass `--depth 1` to retain the old output.
 - Positional file, directory, and glob patterns now scope `ctx smart`, `ctx similar`, and `ctx diff`
   as advertised, including semantic seeds, graph expansion, and renamed or deleted diff paths (#57).
   A scope that matches no changed files reports an empty result and warns, rather than failing as an
   operational error.
 
 ### Documentation
+- Documented the pluggable LSP support: a `ctx lsp` command reference
+  (`docs/commands/lsp.md`), an "Add a Language via LSP" guide covering manual
+  `[lsp.<language>]` authoring, backend modes, fallback behavior, and
+  troubleshooting (`docs/lsp-languages.md`), the full `[lsp.<language>]` key
+  reference in `docs/configuration.md`, and the LSP path in
+  `docs/language-support.md` — all mirrored to the documentation site.
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
 - Added symptom-first cookbook routing, per-recipe quick paths, canonical cross-cutting concepts,

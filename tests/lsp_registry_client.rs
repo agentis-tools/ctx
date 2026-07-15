@@ -2,10 +2,11 @@
 //! fetch manifests from a local mock HTTP server, map the chosen server to a
 //! config entry, and upsert it into a temp `.ctx/config.toml`.
 //!
-//! No CLI surface exists yet (it lands in a later PR), so these tests
-//! exercise the library functions directly, passing the mock server's URL as
-//! the explicit base. The `CTX_LSP_REGISTRY_BASE_URL` env override itself is
-//! covered by a unit test on the pure resolution helper in `lsp_registry`.
+//! These tests exercise the library functions directly, passing the mock
+//! server's URL as the explicit base; the `ctx lsp` CLI surface on top of
+//! them is covered end to end in `tests/lsp_registry.rs`. The
+//! `CTX_LSP_REGISTRY_BASE_URL` env override itself is covered by a unit test
+//! on the pure resolution helper in `lsp_registry`.
 
 use std::fs;
 

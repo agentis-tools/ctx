@@ -6,7 +6,7 @@ sidebar_position: 6
 
 # Language Support
 
-ctx uses tree-sitter for parsing, providing accurate symbol extraction across multiple programming languages. This page details what's extracted from each language and how relationships are tracked.
+ctx uses tree-sitter for parsing, providing accurate symbol extraction across multiple programming languages. This page details what's extracted from each language and how relationships are tracked. Languages without a built-in grammar can be added declaratively through any stdio language server — see [Languages beyond the built-in set (LSP)](#languages-beyond-the-built-in-set-lsp).
 
 ## Supported Languages Overview
 
@@ -21,6 +21,34 @@ ctx uses tree-sitter for parsing, providing accurate symbol extraction across mu
 | Go | `.go` | Full | Calls, Imports | Full |
 | Solidity | `.sol` | Full | Calls | Full |
 | YAML | `.yaml`, `.yml` | File tracking only | N/A | Partial |
+
+## Languages beyond the built-in set (LSP)
+
+Any language with a stdio language server can be indexed by registering the server under `[lsp.<language>]` in `.ctx/config.toml` — Kotlin, Scala, Ruby, Zig, and so on. ctx then extracts symbols via `textDocument/documentSymbol`, call edges via the call-hierarchy requests, and resolves cross-file references via `textDocument/definition`:
+
+```toml
+[lsp.kotlin]
+command = "kotlin-language-server"
+extensions = ["kt", "kts"]
+backend = "lsp"
+```
+
+For languages covered by the community registry, `ctx lsp add <language>` writes this block for you after showing what it would install. Server failures never break indexing: a missing or crashed server produces a stderr warning and ctx falls back to tree-sitter (built-in languages) or file-only records (dynamic languages).
+
+See [Add a language via LSP](lsp-languages.md) for the full key reference, and [`ctx lsp`](commands/lsp.md) for the registry commands.
+
+### Hybrid mode for built-in languages
+
+The built-in languages above can also be paired with a language server using `backend = "hybrid"` (the default for configured blocks). Tree-sitter still does the extraction — fast and offline — and the server is consulted only afterwards, to resolve cross-file references that static name resolution left unresolved or ambiguous (see [Cross-File Resolution](#cross-file-resolution) below). This tightens the call graph without giving up tree-sitter's speed:
+
+```toml
+[lsp.python]
+command = "pyright-langserver"
+args = ["--stdio"]
+# backend = "hybrid" is the default; extensions default to ["py", "pyi"]
+```
+
+Without any `[lsp.*]` block, nothing changes: no server is ever spawned and indexing behaves exactly as described on this page.
 
 ## Rust
 
@@ -468,6 +496,8 @@ Dependencies of 'myFunction':
   calls externalLib (line 15)         # Unresolved (external)
 ```
 
+Registering a language server with `backend = "hybrid"` narrows this limitation: after tree-sitter extraction, references that stayed unresolved are resolved via the server's `textDocument/definition` (see [Hybrid mode for built-in languages](#hybrid-mode-for-built-in-languages)).
+
 ### Dynamic Calls
 
 Dynamic or computed calls cannot be tracked:
@@ -536,7 +566,9 @@ callback(input);
 
 ## Adding Language Support
 
-To add support for a new language:
+The fastest way to add a language is to register its language server in `.ctx/config.toml` — no code involved; see [Add a language via LSP](lsp-languages.md).
+
+To add **built-in** tree-sitter support for a new language:
 
 1. Add the tree-sitter crate to `Cargo.toml`:
    ```toml
@@ -579,4 +611,4 @@ match extension {
 }
 ```
 
-Unknown extensions are skipped during indexing but included in context generation.
+Unknown extensions are skipped during indexing but included in context generation — unless an `[lsp.<language>]` block in `.ctx/config.toml` claims them, in which case they are indexed through the registered language server.
