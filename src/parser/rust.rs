@@ -174,7 +174,7 @@ impl RustParser {
         // for example `spawn(run_main)` or `.map(transform)`. Resolution is
         // deliberately deferred until the complete index is available.
         let function_references_query = Query::new(
-            language,
+            &language,
             r#"
             (arguments
                 (identifier) @reference.name
@@ -373,14 +373,13 @@ impl RustParser {
             .collect();
 
         let mut cursor = QueryCursor::new();
-        for query_match in cursor.matches(&self.function_references_query, *root, source.as_bytes())
-        {
+        let mut matches = cursor.matches(&self.function_references_query, *root, source.as_bytes());
+
+        while let Some(query_match) = matches.next() {
             let mut name_node = None;
             let mut path_node = None;
             for capture in query_match.captures {
-                match self.function_references_query.capture_names()[capture.index as usize]
-                    .as_str()
-                {
+                match self.function_references_query.capture_names()[capture.index as usize] {
                     "reference.name" => {
                         name_node = Some(capture.node);
                         path_node = Some(capture.node);

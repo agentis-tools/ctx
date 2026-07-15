@@ -200,3 +200,58 @@ fn main() { spawn(run_main); }
     );
     assert_eq!(impact["data"]["total"], 0);
 }
+
+/// Nothing in the syntax separates a function value from a constant in argument
+/// position, so the capture takes both. An identifier that names no function in
+/// the index is not a function value, and must not survive as an unresolved
+/// dependency leaf -- unlike an ambiguous name, which is genuine evidence.
+#[test]
+fn non_function_arguments_do_not_become_reference_edges() {
+    let temp = index_fixture(&[(
+        "src/main.rs",
+        r#"
+const MAX_RETRIES: i32 = 3;
+static GREETING: &str = "hi";
+
+fn retry(_limit: i32) {}
+fn announce(_text: &str) {}
+fn consume<T>(_callback: T) {}
+fn worker() {}
+
+fn main() {
+    retry(MAX_RETRIES);
+    announce(GREETING);
+    consume(worker);
+}
+"#,
+    )]);
+
+    let deps = json_command(
+        &temp,
+        &["--json", "query", "deps", "main", "--file", "src/main.rs"],
+    );
+    let references: Vec<_> = deps["data"]["dependencies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|dependency| dependency["kind"] == "uses")
+        .collect();
+
+    let names: Vec<_> = references
+        .iter()
+        .map(|reference| reference["target_name"].as_str().unwrap_or_default())
+        .collect();
+    assert!(
+        !names.contains(&"MAX_RETRIES"),
+        "a constant must not become a function reference: {names:?}"
+    );
+    assert!(
+        !names.contains(&"GREETING"),
+        "a static must not become a function reference: {names:?}"
+    );
+    assert!(
+        names.contains(&"worker"),
+        "a real function value must still be recorded: {names:?}"
+    );
+    assert_eq!(references.len(), 1, "unexpected references: {names:?}");
+}

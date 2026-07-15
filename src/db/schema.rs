@@ -23,7 +23,12 @@ use super::models::*;
 /// History:
 /// - v1: initial versioned schema
 /// - v2: adds `symbol_fingerprints` (MinHash near-duplicate detection)
-pub const SCHEMA_VERSION: i64 = 2;
+/// - v3: Rust function-value arguments recorded as `uses` edges. The tables are
+///   unchanged, but the parser now emits edges an older index does not contain,
+///   and content hashes would otherwise let unchanged files keep their stale
+///   edge set forever. The bump turns that silent staleness into the existing
+///   rebuild prompt.
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Default embedding dimension for vector search.
 /// This matches OpenAI text-embedding-ada-002 (1536) and text-embedding-3-small (1536).
@@ -1688,11 +1693,33 @@ impl Database {
                         && rust_function_item_path_matches(file_path, name, reference_path)
                 })
                 .collect();
-            if let [target] = matches.as_slice() {
-                rust_function_references_resolved += self.conn.execute(
-                    "UPDATE edges SET target_id = ?1 WHERE id = ?2 AND target_id IS NULL",
-                    params![target.0, edge_id],
-                )?;
+            // The capture takes every bare identifier in argument position,
+            // because nothing in the syntax separates `spawn(run_main)` from
+            // `retry(MAX_RETRIES)`; constants, statics, and unit variants all
+            // arrive here too. Candidate count is what tells them apart:
+            //
+            // - exactly one match: resolve it.
+            // - several matches: leave unresolved. The identifier does name a
+            //   function, we just cannot say which one, and that is real
+            //   evidence worth keeping as a leaf.
+            // - no match at all: the identifier names no function in the index,
+            //   so the edge asserts precisely what we failed to establish. Drop
+            //   it rather than leave a reference to a constant sitting in the
+            //   graph as an unresolved dependency.
+            match matches.as_slice() {
+                [target] => {
+                    rust_function_references_resolved += self.conn.execute(
+                        "UPDATE edges SET target_id = ?1 WHERE id = ?2 AND target_id IS NULL",
+                        params![target.0, edge_id],
+                    )?;
+                }
+                [] => {
+                    self.conn.execute(
+                        "DELETE FROM edges WHERE id = ?1 AND target_id IS NULL",
+                        params![edge_id],
+                    )?;
+                }
+                _ => {}
             }
         }
 
