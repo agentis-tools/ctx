@@ -289,7 +289,7 @@ pub fn get_changed_files_filtered(
                 .is_some_and(|path| filter.matches(path))
     });
     if files.is_empty() {
-        return Err(CtxError::NoChanges);
+        return Err(CtxError::NoChangesInScope);
     }
     Ok(files)
 }
