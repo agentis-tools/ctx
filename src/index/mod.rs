@@ -635,7 +635,7 @@ fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    result.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Compress source code using gzip.

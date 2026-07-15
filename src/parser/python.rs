@@ -1,6 +1,6 @@
 //! Python code parsing using tree-sitter.
 
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::db::{
     Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
@@ -29,10 +29,10 @@ pub struct PythonParser {
 impl PythonParser {
     /// Create a new Python parser.
     pub fn new() -> Self {
-        let language = tree_sitter_python::language();
+        let language: Language = tree_sitter_python::LANGUAGE.into();
         let mut parser = Parser::new();
         parser
-            .set_language(language)
+            .set_language(&language)
             .expect("Failed to set Python language");
 
         Self { parser, language }
@@ -41,7 +41,7 @@ impl PythonParser {
     /// Create the symbols query.
     fn create_symbols_query(&self) -> Query {
         Query::new(
-            self.language,
+            &self.language,
             r#"
             ; Functions (top-level only - not inside decorated_definition)
             (module
@@ -124,7 +124,7 @@ impl PythonParser {
     /// Create the calls query.
     fn create_calls_query(&self) -> Query {
         Query::new(
-            self.language,
+            &self.language,
             r#"
             ; Function calls
             (call
@@ -147,7 +147,7 @@ impl PythonParser {
     /// Create the inheritance query.
     fn create_inheritance_query(&self) -> Query {
         Query::new(
-            self.language,
+            &self.language,
             r#"
             ; Class inheritance
             (class_definition
@@ -245,21 +245,21 @@ impl PythonParser {
         exports: &mut Vec<String>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(query, *root, source.as_bytes());
+        let mut matches = cursor.matches(query, *root, source.as_bytes());
 
         // Track class context for methods
         let class_ranges: Vec<(u32, u32, String)> = self.find_class_ranges(root, source);
         let mut import_module: Option<String> = None;
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut name: Option<&str> = None;
             let mut kind: Option<SymbolKind> = None;
             let mut def_node: Option<Node> = None;
             let mut parent_class: Option<&str> = None;
 
             for capture in m.captures {
-                let capture_name = &query.capture_names()[capture.index as usize];
-                let capture_str = capture_name.as_str();
+                let capture_name = query.capture_names()[capture.index as usize];
+                let capture_str = capture_name;
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
@@ -351,19 +351,19 @@ impl PythonParser {
         edges: &mut Vec<Edge>,
     ) {
         let mut cursor = QueryCursor::new();
-        let matches = cursor.matches(query, *root, source.as_bytes());
+        let mut matches = cursor.matches(query, *root, source.as_bytes());
 
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut class_name: Option<&str> = None;
             let mut base_names: Vec<&str> = Vec::new();
             let mut class_node: Option<Node> = None;
 
             for capture in m.captures {
-                let capture_name = &query.capture_names()[capture.index as usize];
+                let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
-                match capture_name.as_str() {
+                match capture_name {
                     "class.name" | "class_attr.name" => {
                         class_name = Some(text);
                     }

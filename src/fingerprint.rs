@@ -106,12 +106,12 @@ pub struct Tok {
 /// tokenized with the solang-parser lexer in [`tokenize`] instead.
 fn ts_language(lang: Language) -> Option<tree_sitter::Language> {
     match lang {
-        Language::Rust => Some(tree_sitter_rust::language()),
-        Language::TypeScript => Some(tree_sitter_typescript::language_typescript()),
-        Language::Tsx => Some(tree_sitter_typescript::language_tsx()),
-        Language::JavaScript | Language::Jsx => Some(tree_sitter_javascript::language()),
-        Language::Python => Some(tree_sitter_python::language()),
-        Language::Go => Some(tree_sitter_go::language()),
+        Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
+        Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        Language::Tsx => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+        Language::JavaScript | Language::Jsx => Some(tree_sitter_javascript::LANGUAGE.into()),
+        Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
+        Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
         Language::Solidity | Language::Yaml | Language::Unknown => None,
     }
 }
@@ -168,7 +168,7 @@ pub fn tokenize(lang: Language, source: &str) -> Option<Vec<Tok>> {
         let mut parsers = cell.borrow_mut();
         let parser = parsers.entry(lang.as_str()).or_insert_with(|| {
             let mut p = Parser::new();
-            p.set_language(ts_lang)
+            p.set_language(&ts_lang)
                 .expect("grammar/version mismatch for fingerprint parser");
             p
         });
@@ -199,7 +199,7 @@ pub fn tokenize(lang: Language, source: &str) -> Option<Vec<Tok>> {
                 continue;
             }
             for i in (0..node.child_count()).rev() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     stack.push(child);
                 }
             }

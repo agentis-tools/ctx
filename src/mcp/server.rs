@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rmcp::model::{
-    CallToolRequestParam, CallToolResult, ErrorCode, Implementation, InitializeRequestParam,
-    InitializeResult, ListToolsResult, PaginatedRequestParam, ProtocolVersion, ServerCapabilities,
+    CallToolRequestParams, CallToolResult, ErrorCode, Implementation, InitializeRequestParams,
+    InitializeResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
     ServerInfo,
 };
 use rmcp::service::{RequestContext, RoleServer};
@@ -77,23 +77,14 @@ impl CtxServer {
 
 impl ServerHandler for CtxServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::LATEST,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "ctx".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                title: None,
-                icons: None,
-                website_url: None,
-            },
-            instructions: None,
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::LATEST)
+            .with_server_info(Implementation::new("ctx", env!("CARGO_PKG_VERSION")))
     }
 
     async fn initialize(
         &self,
-        _request: InitializeRequestParam,
+        _request: InitializeRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, rmcp::ErrorData> {
         Ok(self.get_info())
@@ -101,7 +92,7 @@ impl ServerHandler for CtxServer {
 
     async fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, rmcp::ErrorData> {
         Ok(ListToolsResult {
@@ -113,7 +104,7 @@ impl ServerHandler for CtxServer {
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let name = request.name.as_ref();
