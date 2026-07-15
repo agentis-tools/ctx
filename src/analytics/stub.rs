@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode};
+use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode, LocatedImpactNode};
 use crate::error::Result;
 
 /// Stub analytics engine that returns empty results.
@@ -25,6 +25,15 @@ impl Analytics {
 
     /// Impact analysis: returns empty list.
     pub fn impact_analysis(&self, _target_name: &str, _max_depth: i32) -> Result<Vec<ImpactNode>> {
+        Ok(Vec::new())
+    }
+
+    /// Located impact analysis: returns empty list.
+    pub fn impact_analysis_located(
+        &self,
+        _target_name: &str,
+        _max_depth: i32,
+    ) -> Result<Vec<LocatedImpactNode>> {
         Ok(Vec::new())
     }
 
@@ -72,5 +81,19 @@ impl Analytics {
         _max_depth: i32,
     ) -> Result<Vec<(String, String, String, String)>> {
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn located_impact_analysis_returns_empty_data() {
+        let analytics = Analytics::open(Path::new(".")).unwrap();
+        assert!(analytics
+            .impact_analysis_located("anything", 5)
+            .unwrap()
+            .is_empty());
     }
 }
