@@ -154,6 +154,12 @@ pub mod tree;
 // Project configuration (.ctx/config.toml)
 pub mod config;
 
+// Format-preserving writes to .ctx/config.toml (toml_edit)
+pub mod config_edit;
+
+// Community LSP server registry client (groundwork for `ctx lsp`)
+pub mod lsp_registry;
+
 // Architecture rules (ctx check)
 pub mod check;
 pub mod rules;

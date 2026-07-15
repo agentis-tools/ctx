@@ -44,6 +44,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "toml",
+ "toml_edit",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-javascript",
@@ -4747,6 +4748,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
