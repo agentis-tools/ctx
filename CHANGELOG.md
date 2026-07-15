@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in meaning: entries that previously appeared through bare name matching now surface under
   `unresolved_callers` or not at all, so consumers reading `callers` see fewer, higher-confidence
   entries than before.
->>>>>>> origin/main
 
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
