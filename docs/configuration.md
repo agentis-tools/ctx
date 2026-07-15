@@ -412,6 +412,9 @@ ctx index -p "src/**/*.ts" -p "lib/**/*.ts"
 
 # Mix globs and literal paths
 ctx index -p "src/**/*.rs" -p "Cargo.toml"
+
+# Positional paths scope the same way as -p
+ctx index src
 ```
 
 Include patterns support:

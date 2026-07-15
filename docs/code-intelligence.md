@@ -109,6 +109,9 @@ ctx index -i "tests/" -i "*.generated.ts"
 # Only index specific patterns
 ctx index -p "src/**/*.rs" -p "lib/"
 
+# Positional paths scope the same way (a bare directory means everything under it)
+ctx index src
+
 # Disable gitignore (index gitignored files)
 ctx index --no-gitignore
 

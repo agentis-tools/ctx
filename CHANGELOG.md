@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ctx index` now honors positional file patterns and paths (`ctx index src`,
+  `ctx index src/**`), scoping the index exactly like `-p/--pattern`. Previously the
+  positional arguments were accepted but silently ignored, so the whole repository was
+  indexed at full cost. The indexing banner now echoes the effective scope
+  (`Indexing codebase (scoped to: src)...`), and file discovery warns when include
+  patterns match no files instead of silently producing an empty result.
+
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
   harness regeneration after binary upgrades, and unresolved map focus behavior (#64).
