@@ -65,7 +65,11 @@ Wherever a symbol appears in a payload, it is a **SymbolRef object** (never a ba
 
 `qualified_name` is `null` when not known. Some commands attach extra fields alongside or inside a SymbolRef (e.g. `visibility` in `query.find`); additions are backwards-compatible, removals or renames are not.
 
-Note: `query.graph` and `query.impact` nodes come from graph traversal, which does not track line numbers; their SymbolRefs have `line_start`/`line_end` of `0` and `qualified_name` of `null`.
+Note: `query.graph` nodes come from graph traversal that does not carry source
+locations, so their SymbolRefs have `line_start`/`line_end` of `0` and
+`qualified_name` of `null`. `query.impact` nodes include the indexed qualified
+name and source range; legacy or malformed indexes can still report `0` for a
+missing bound.
 
 ## Commands
 
@@ -254,7 +258,7 @@ filters disambiguate only the root. Ambiguity is reported like `query.callers`.
   "depth": 5,
   "impacted": [
     {
-      "symbol": { "name": "run_search", "qualified_name": null, "kind": "function", "file": "src/commands/search.rs", "line_start": 0, "line_end": 0 },
+      "symbol": { "name": "run_search", "qualified_name": "commands::search::run_search", "kind": "function", "file": "src/commands/search.rs", "line_start": 14, "line_end": 41 },
       "distance": 1
     }
   ],
