@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- Caller lookup now reports only resolved `calls` edges to the selected symbol, while preserving
-  conservative same-language unresolved evidence in a separate section instead of mixing in
-  cross-language or same-name false positives (#61).
+- BREAKING: Caller lookup now reports only resolved `calls` edges to the selected symbol, while
+  preserving conservative same-language unresolved evidence in a separate section instead of mixing
+  in cross-language or same-name false positives (#61). The documented `callers` JSON array narrows
+  in meaning: entries that previously appeared through bare name matching now surface under
+  `unresolved_callers` or not at all, so consumers reading `callers` see fewer, higher-confidence
+  entries than before.
 
 ### Documentation
 - Updated verified cookbook guidance for snapshot backfill coverage, semantic context completeness,
