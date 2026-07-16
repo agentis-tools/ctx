@@ -213,10 +213,12 @@ Automatic expansion was less useful than `--changes-only` for this branch. Use i
 source, and retain an added file only after its source contains the relationship that led to it.
 Direct queries from distinctive symbols were much cleaner.
 
-:::caution Positional file patterns do not scope `ctx diff` in ctx 0.3.5
-The global help displays positional patterns after the revision, but a verified run with
-`scripts/version.py` still analyzed all 29 files. Use `git diff -- <paths>` for an exact stream and
-use ctx source/query commands to build symbol context within it.
+:::caution Historical ctx 0.3.5 pattern-scoping limitation
+In the pinned 0.3.5 experiment, global help displayed positional patterns after the revision, but a
+verified run with `scripts/version.py` still analyzed all 29 files. This was fixed after 0.3.5 in
+[issue #57](https://github.com/agentis-tools/ctx/issues/57): current builds scope changed files and
+graph expansion, with explicit rename and deletion handling. Use `git diff -- <paths>` when
+reproducing the pinned run exactly.
 :::
 
 ## 8. Review claims against their enforcement

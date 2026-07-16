@@ -23,6 +23,7 @@ use crate::analytics::Analytics;
 use crate::db::Database;
 use crate::error::{CtxError, Result};
 use crate::tokens::{count_tokens_with_encoding, select_by_token_budget, Encoding, HasTokenCount};
+use crate::walker::FilePatternFilter;
 
 /// Configuration for diff-aware context generation.
 #[derive(Debug, Clone)]
@@ -268,6 +269,34 @@ pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile
     Ok(detailed_files)
 }
 
+/// Get changed files restricted to positional file patterns.
+///
+/// A rename is in scope when either its original or destination path matches,
+/// mirroring how users reason about path-limited git diffs. Deleted paths are
+/// retained in the changed-file summary even though they cannot be emitted as
+/// context content.
+///
+/// Returns an empty list when the revision has changes that the scope excludes;
+/// that is a legitimate answer to a narrower question, not a failure. A revision
+/// with no changes at all still fails with [`CtxError::NoChanges`], because
+/// `get_changed_files` rejects it before the scope is applied -- so an empty
+/// list here always means the patterns excluded everything.
+pub fn get_changed_files_filtered(
+    revision: &str,
+    staged: bool,
+    filter: &FilePatternFilter,
+) -> Result<Vec<ChangedFile>> {
+    let mut files = get_changed_files(revision, staged)?;
+    files.retain(|file| {
+        filter.matches(&file.path)
+            || file
+                .original_path
+                .as_deref()
+                .is_some_and(|path| filter.matches(path))
+    });
+    Ok(files)
+}
+
 /// Parse git diff --name-status output.
 pub fn parse_diff_output(output: &str) -> Vec<ChangedFile> {
     let mut files = Vec::new();
@@ -439,8 +468,25 @@ pub fn diff_context(
     analytics: &Analytics,
     config: DiffConfig,
 ) -> Result<DiffContext> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let filter = FilePatternFilter::all(&root);
+    diff_context_filtered(revision, db, analytics, config, &filter)
+}
+
+/// Generate diff-aware context restricted to positional file patterns.
+///
+/// Changed files are filtered before symbol lookup. Directly changed rename
+/// destinations remain context when the original path matched; graph-expanded
+/// files must independently match the filter.
+pub fn diff_context_filtered(
+    revision: &str,
+    db: &Database,
+    analytics: &Analytics,
+    config: DiffConfig,
+    filter: &FilePatternFilter,
+) -> Result<DiffContext> {
     // 1. Get changed files
-    let changed_files = get_changed_files(revision, config.staged)?;
+    let changed_files = get_changed_files_filtered(revision, config.staged, filter)?;
 
     // 2. Find affected symbols
     let mut affected_symbols = Vec::new();
@@ -473,7 +519,7 @@ pub fn diff_context(
     // 4. Expand context using call graph (if not changes_only)
     if !config.changes_only {
         for symbol in &affected_symbols {
-            expand_context_for_symbol(&mut context_files, analytics, symbol, config.depth);
+            expand_context_for_symbol(&mut context_files, analytics, symbol, config.depth, filter);
         }
     }
 
@@ -519,10 +565,14 @@ fn expand_context_for_symbol(
     analytics: &Analytics,
     symbol: &AffectedSymbol,
     depth: i32,
+    filter: &FilePatternFilter,
 ) {
     // Find callers (impact analysis)
     if let Ok(callers) = analytics.impact_analysis(&symbol.name, depth) {
         for caller in callers {
+            if !filter.matches(&caller.file_path) {
+                continue;
+            }
             let priority = 0.8 / (caller.distance as f32).max(1.0);
             add_context_file(
                 context_files,
@@ -539,6 +589,9 @@ fn expand_context_for_symbol(
     // Find callees (call graph)
     if let Ok(callees) = analytics.call_graph(&symbol.name, depth) {
         for callee in callees {
+            if !filter.matches(&callee.file_path) {
+                continue;
+            }
             let priority = 0.6 / (callee.depth as f32).max(1.0);
             add_context_file(
                 context_files,

@@ -26,7 +26,10 @@ use std::path::Path;
 use ctx::analytics::Analytics;
 use ctx::db::{Database, Edge, EdgeKind, FileRecord, Symbol, SymbolKind, Visibility};
 use ctx::embeddings::Embedding;
-use ctx::smart::{smart_context_with_embedding, SmartConfig};
+use ctx::smart::{
+    smart_context_with_embedding, smart_context_with_embedding_filtered, SmartConfig,
+};
+use ctx::walker::FilePatternFilter;
 use tempfile::TempDir;
 
 /// One symbol to seed: its file path, symbol name, optional embedding vector
@@ -251,4 +254,66 @@ fn graph_only_path_match_is_promoted() {
         openai < modrs,
         "openai.rs (2 path hits) must outrank embeddings/mod.rs (1 path hit): {paths:?}"
     );
+}
+
+#[test]
+fn patterns_iteratively_overfetch_seeds_and_filter_graph_expansion() {
+    let outside_callee = Symbol::make_id("fixture/docs/outside.rs", "outside_callee", None);
+    let seeds = [
+        Seed {
+            path: "fixture/tests/high_score.rs",
+            name: "high_score",
+            embedding: Some([1.0, 0.0, 0.0, 0.0]),
+            calls: None,
+        },
+        Seed {
+            path: "fixture/tests/high_score_two.rs",
+            name: "high_score_two",
+            embedding: Some([0.99, 0.1, 0.0, 0.0]),
+            calls: None,
+        },
+        Seed {
+            path: "fixture/tests/high_score_three.rs",
+            name: "high_score_three",
+            embedding: Some([0.95, 0.2, 0.0, 0.0]),
+            calls: None,
+        },
+        Seed {
+            path: "fixture/src/in_scope.rs",
+            name: "in_scope",
+            embedding: Some([0.8, 0.6, 0.0, 0.0]),
+            calls: Some(outside_callee),
+        },
+        Seed {
+            path: "fixture/docs/outside.rs",
+            name: "outside_callee",
+            embedding: None,
+            calls: None,
+        },
+    ];
+    let temp = build_fixture(&seeds);
+    let db = Database::open(&temp.path().join(".ctx/codebase.sqlite")).unwrap();
+    let analytics = Analytics::open(temp.path()).unwrap();
+    let filter = FilePatternFilter::new(temp.path(), &["fixture/src".to_string()]).unwrap();
+    let config = SmartConfig {
+        top: 1,
+        ..SmartConfig::default()
+    };
+
+    let result = smart_context_with_embedding_filtered(
+        &db,
+        &analytics,
+        "find scoped code",
+        &Embedding::new(vec![1.0, 0.0, 0.0, 0.0]),
+        config,
+        &filter,
+    )
+    .unwrap();
+    let paths: Vec<_> = result
+        .selected_files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+
+    assert_eq!(paths, vec!["fixture/src/in_scope.rs"]);
 }

@@ -24,6 +24,7 @@ use crate::embeddings::{semantic_search, Embedding, EmbeddingProvider, SearchRes
 use crate::error::{CtxError, Result};
 use crate::tokens::{count_file_tokens, select_by_token_budget, Encoding, HasTokenCount};
 use crate::utils::lexical_tokens;
+use crate::walker::FilePatternFilter;
 
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
@@ -237,10 +238,27 @@ pub fn smart_context(
     task: &str,
     config: SmartConfig,
 ) -> Result<SmartContext> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let filter = FilePatternFilter::all(&root);
+    smart_context_filtered(db, analytics, provider, task, config, &filter)
+}
+
+/// Select files relevant to a task, restricted to positional file patterns.
+///
+/// Filtering happens before semantic seeds are limited and is also applied to
+/// every call-graph neighbor, so expansion cannot escape the requested scope.
+pub fn smart_context_filtered(
+    db: &Database,
+    analytics: &Analytics,
+    provider: &dyn EmbeddingProvider,
+    task: &str,
+    config: SmartConfig,
+    filter: &FilePatternFilter,
+) -> Result<SmartContext> {
     // 1. Embed the task description
     let task_embedding = provider.embed(task)?;
 
-    smart_context_with_embedding(db, analytics, task, &task_embedding, config)
+    smart_context_with_embedding_filtered(db, analytics, task, &task_embedding, config, filter)
 }
 
 /// Select files relevant to a task using a pre-computed embedding.
@@ -256,8 +274,22 @@ pub fn smart_context_with_embedding(
     task_embedding: &Embedding,
     config: SmartConfig,
 ) -> Result<SmartContext> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let filter = FilePatternFilter::all(&root);
+    smart_context_with_embedding_filtered(db, analytics, task, task_embedding, config, &filter)
+}
+
+/// Pre-computed-embedding variant of [`smart_context_filtered`].
+pub fn smart_context_with_embedding_filtered(
+    db: &Database,
+    analytics: &Analytics,
+    task: &str,
+    task_embedding: &Embedding,
+    config: SmartConfig,
+    filter: &FilePatternFilter,
+) -> Result<SmartContext> {
     // 2. Semantic search for matching symbols
-    let matches = semantic_search(db, task_embedding, config.top)?;
+    let matches = semantic_matches_in_scope(db, task_embedding, config.top, filter)?;
 
     if matches.is_empty() {
         return Err(CtxError::NoMatches);
@@ -278,7 +310,7 @@ pub fn smart_context_with_embedding(
         );
 
         // Expand call graph
-        expand_symbol(&mut files, analytics, result, config.depth)?;
+        expand_symbol(&mut files, analytics, result, config.depth, filter)?;
     }
 
     // 4. Convert to vector and count tokens
@@ -312,6 +344,40 @@ pub fn smart_context_with_embedding(
         truncated: omitted > 0,
         omitted_count: omitted,
     })
+}
+
+/// Fetch semantic matches in bounded batches until filtering yields `limit`
+/// results or the index is exhausted.
+fn semantic_matches_in_scope(
+    db: &Database,
+    task_embedding: &Embedding,
+    limit: usize,
+    filter: &FilePatternFilter,
+) -> Result<Vec<SearchResult>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut fetch = limit.saturating_mul(3).max(limit);
+    loop {
+        let raw = semantic_search(db, task_embedding, fetch)?;
+        let exhausted = raw.len() < fetch;
+        let matches: Vec<_> = raw
+            .into_iter()
+            .filter(|result| filter.matches(&result.file_path))
+            .take(limit)
+            .collect();
+
+        if matches.len() == limit || exhausted {
+            return Ok(matches);
+        }
+
+        let next = fetch.saturating_mul(2);
+        if next == fetch {
+            return Ok(matches);
+        }
+        fetch = next;
+    }
 }
 
 /// Apply the token budget while guaranteeing the top-ranked file is always
@@ -362,18 +428,23 @@ fn expand_symbol(
     analytics: &Analytics,
     result: &SearchResult,
     depth: i32,
+    filter: &FilePatternFilter,
 ) -> Result<()> {
     // Expand callers (who calls this symbol - impact analysis)
     if let Ok(callers) = analytics.impact_analysis(&result.symbol_id, depth) {
         for caller in callers {
-            add_file_from_impact(files, &caller, &result.name);
+            if filter.matches(&caller.file_path) {
+                add_file_from_impact(files, &caller, &result.name);
+            }
         }
     }
 
     // Expand callees (what does this symbol call - call graph)
     if let Ok(callees) = analytics.call_graph(&result.symbol_id, depth) {
         for callee in callees {
-            add_file_from_call_graph(files, &callee, &result.name);
+            if filter.matches(&callee.file_path) {
+                add_file_from_call_graph(files, &callee, &result.name);
+            }
         }
     }
 

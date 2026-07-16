@@ -11,7 +11,7 @@ Find existing functions similar to a description before writing new ones.
 ## Synopsis
 
 ```bash
-ctx similar "<query>" [OPTIONS]
+ctx similar "<query>" [PATTERNS]... [OPTIONS]
 ```
 
 ## Description
@@ -19,6 +19,10 @@ ctx similar "<query>" [OPTIONS]
 The `similar` command searches the index for functions that already do what you are about to write. Run it before adding a new function: reusing (or extending) an existing implementation is the cheapest way to avoid duplication that `ctx duplicates` and `ctx score` would flag later.
 
 By default the search is semantic (embedding-based, requires `ctx embed`); `--keyword` falls back to FTS5 keyword search over names, signatures, and doc comments.
+
+Optional positional patterns restrict candidates by file path. Literal files,
+directories, and globs are ORed together. With no patterns, `.` searches the
+whole indexed repository.
 
 ## Options
 
@@ -44,6 +48,9 @@ ctx similar "retry an operation with exponential backoff"
 
 # Keyword mode (no embeddings needed)
 ctx similar "parse config file" --keyword
+
+# Search only command sources and shared tests
+ctx similar "parse config file" src/commands/ "tests/**/*_cli.rs" --keyword
 
 # More candidates, OpenAI embeddings
 ctx similar "validate user input" --limit 20 --provider openai

@@ -97,5 +97,49 @@ class GitHubEnvironmentTests(unittest.TestCase):
         self.assertEqual(version.tag_from_environment(environment), "v0.3.4")
 
 
+class BreakingBumpTests(unittest.TestCase):
+    """Breaks land under Unreleased; the version they owe is due at release."""
+
+    BREAKING = (
+        "# Changelog\n\n## [Unreleased]\n\n### Fixed\n"
+        "- BREAKING: `ctx index` now exits 2 when a scope matches nothing.\n\n"
+        "## [0.3.5] - 2026-07-01\n"
+    )
+    COMPATIBLE = (
+        "# Changelog\n\n## [Unreleased]\n\n### Fixed\n"
+        "- Diff selection is now deterministic.\n\n"
+        "## [0.3.5] - 2026-07-01\n"
+    )
+
+    def check(self, text, old, new):
+        version.require_breaking_bump(
+            text, version.SemVer.parse(old), version.SemVer.parse(new)
+        )
+
+    def test_pre_1_0_break_requires_a_minor_bump(self):
+        with self.assertRaises(version.PolicyError) as caught:
+            self.check(self.BREAKING, "0.3.5", "0.3.6")
+        self.assertIn("BREAKING:", str(caught.exception))
+        self.assertIn("minor", str(caught.exception))
+
+    def test_pre_1_0_break_accepts_a_minor_bump(self):
+        self.check(self.BREAKING, "0.3.5", "0.4.0")
+
+    def test_post_1_0_break_requires_a_major_bump(self):
+        with self.assertRaises(version.PolicyError):
+            self.check(self.BREAKING, "1.2.3", "1.3.0")
+        self.check(self.BREAKING, "1.2.3", "2.0.0")
+
+    def test_compatible_release_is_unaffected_by_the_gate(self):
+        self.check(self.COMPATIBLE, "0.3.5", "0.3.6")
+
+    def test_only_the_unreleased_section_is_considered(self):
+        already_released = (
+            "# Changelog\n\n## [Unreleased]\n\n### Fixed\n- A compatible fix.\n\n"
+            "## [0.4.0] - 2026-07-01\n\n### Changed\n- BREAKING: an old break.\n"
+        )
+        self.check(already_released, "0.4.0", "0.4.1")
+
+
 if __name__ == "__main__":
     unittest.main()

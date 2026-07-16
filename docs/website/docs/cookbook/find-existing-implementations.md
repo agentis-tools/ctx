@@ -224,9 +224,12 @@ public merely to avoid a local adapter would require contract and SemVer review.
 configuration keys, and prose must be found through `query find`, `search`, or repository text
 search.
 
-The generic CLI help also displays positional file patterns for `similar`, but the current command
-does not apply them. An empirical query followed by `src/harness/` still returned functions from
-`src/rules.rs`, `src/update.rs`, and scripts. Filter the JSON results when necessary:
+The pinned ctx 0.3.5 run exposed a product limitation: generic CLI help displayed positional file
+patterns for `similar`, but that version did not apply them. The query followed by `src/harness/`
+still returned functions from `src/rules.rs`, `src/update.rs`, and scripts. This was fixed after
+0.3.5 in [issue #57](https://github.com/agentis-tools/ctx/issues/57): current builds apply literal
+files, directories, and globs before limiting semantic or keyword results. When reproducing the
+0.3.5 case, filter the JSON results explicitly:
 
 ```bash
 ctx similar \
@@ -236,7 +239,7 @@ ctx similar \
   jq '.data.results[] | select(.symbol.file | startswith("src/harness/"))'
 ```
 
-Do not assume a pattern narrowed the search unless the returned paths prove it.
+For any version, verify the returned paths before treating retrieval scope as evidence.
 
 ## What worked, and what did not
 

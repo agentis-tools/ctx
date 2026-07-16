@@ -11,7 +11,7 @@ Intelligently select files relevant to a task description using embeddings and c
 ## Synopsis
 
 ```bash
-ctx smart <TASK> [OPTIONS]
+ctx smart <TASK> [PATTERNS]... [OPTIONS]
 ```
 
 ## Description
@@ -21,6 +21,11 @@ The `smart` command analyzes your task description and automatically selects the
 - **Semantic search** - Finds symbols related to your task using embeddings
 - **Call graph expansion** - Includes callers and callees of matched symbols
 - **Token budgeting** - Fits selection within your token limit
+
+Optional positional patterns scope the entire selection pipeline. Literal
+files, directories, and globs are ORed together; semantic matches and
+call-graph expansion both stay within that scope. With no patterns, `.` selects
+the whole repository.
 
 ## Prerequisites
 
@@ -53,6 +58,9 @@ ctx smart "add user authentication"
 
 # Review files for fixing a bug
 ctx smart "fix the login timeout issue"
+
+# Search and expand only within Rust source and one contract file
+ctx smart "change request validation" "src/**/*.rs" tests/contracts.rs
 ```
 
 ### With Token Budget

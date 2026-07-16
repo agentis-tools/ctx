@@ -52,6 +52,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while keeping same-named symbols distinct by identity (#63). `line_start` and `line_end` were
   previously always `0` and `qualified_name` always `null`; both now carry real indexed values.
   Consumers that treated `0` as "no location" must read the value rather than the sentinel.
+- BREAKING: `ctx index` now honors positional file patterns and paths (`ctx index src`,
+  `ctx index src/**`), scoping the index exactly like `-p/--pattern` (AGE-13). Previously the
+  positional arguments were accepted but silently ignored, so the whole repository was
+  indexed at full cost. The indexing banner now echoes the effective scope
+  (`Indexing codebase (scoped to: src)...`) and file discovery warns when include
+  patterns match no files. `ctx index` now also refuses to update the index when an
+  explicit scope matches nothing: a mistyped `-p` pattern previously exited 0 and silently
+  emptied an existing index, and now exits non-zero leaving the index untouched. Scripts
+  that relied on an empty scope succeeding must handle the new failure.
+- Positional file, directory, and glob patterns now scope `ctx smart`, `ctx similar`, and `ctx diff`
+  as advertised, including semantic seeds, graph expansion, and renamed or deleted diff paths (#57).
+  A scope that matches no changed files reports an empty result and warns, rather than failing as an
+  operational error.
 - BREAKING: `ctx explain` now separates calls from other relationships for every language, not only
   Rust (#62). `Calls (N)` previously counted and listed every outgoing edge, so an import or a trait
   implementation was reported under a heading that said "Calls"; `extends`, `implements`, `imports`,
@@ -94,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Made the `breaking-change` policy gate reachable and enforced it by label.
+  `check-contracts.py pr-policy` required a `breaking-change` label for removed CLI
+  contracts, but no such label existed in the repository, so the requirement could
+  never be satisfied. The `BREAKING:` changelog requirement now fires on the label
+  itself rather than only on contract removal, since an exit-code or JSON-meaning
+  change removes nothing yet still breaks. The matching version increase moved from
+  the pull request to the release cut, where `governance/releasing.md` places it:
+  acknowledged breaks accumulate under Unreleased, and `version.py` refuses to
+  release them under an insufficient bump.
 - Made CI report its checks on every pull request so branch protection can require them. The
   workflow-level `paths-ignore` meant a docs-only pull request never ran CI, and a check that never
   runs never reports -- so any required check would have stayed pending forever and blocked the

@@ -7,7 +7,9 @@ use std::env;
 use crate::cli::OutputFormat;
 use crate::commands::format_token_count;
 use ctx::analytics;
-use ctx::diff::{self, diff_context, format_pr_header, format_summary, get_pr_info, DiffConfig};
+use ctx::diff::{
+    self, diff_context_filtered, format_pr_header, format_summary, get_pr_info, DiffConfig,
+};
 use ctx::error::{CtxError, Result};
 use ctx::index;
 use ctx::output;
@@ -26,8 +28,11 @@ pub fn run_diff(
     format: OutputFormat,
     show_sizes: bool,
     no_tree: bool,
+    patterns: &[String],
 ) -> Result<()> {
     let root = env::current_dir()?;
+    let filter = walker::FilePatternFilter::new(&root, patterns)
+        .map_err(|error| CtxError::Other(format!("Invalid file pattern: {error}")))?;
 
     // Check if index exists (for context expansion)
     let db = match index::open_database(&root) {
@@ -63,10 +68,12 @@ pub fn run_diff(
 
     // Run diff context analysis
     let result = match (&db, &analytics) {
-        (Some(db), Some(analytics)) => diff_context(revision, db, analytics, config),
+        (Some(db), Some(analytics)) => {
+            diff_context_filtered(revision, db, analytics, config, &filter)
+        }
         _ => {
             // Fallback: just get changed files without context expansion
-            let changed = diff::get_changed_files(revision, staged)?;
+            let changed = diff::get_changed_files_filtered(revision, staged, &filter)?;
             Ok(diff::DiffContext {
                 revision: revision.to_string(),
                 changed_files: changed.clone(),
@@ -104,6 +111,14 @@ pub fn run_diff(
         }
         Err(e) => return Err(e),
     };
+
+    // The revision had changes -- `get_changed_files` rejects one that did not --
+    // so an empty list here means the patterns excluded every one of them. That
+    // answers the narrower question rather than failing it, but warn, because in
+    // practice it usually means a mistyped pattern.
+    if result.changed_files.is_empty() {
+        eprintln!("Warning: no changed files match the requested scope.");
+    }
 
     // Show summary if requested
     if summary {
@@ -206,5 +221,6 @@ pub fn run_review(
         format,
         show_sizes,
         no_tree,
+        &[".".to_string()],
     )
 }

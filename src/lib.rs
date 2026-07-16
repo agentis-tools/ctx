@@ -215,12 +215,14 @@ pub use error::{CtxError, Result};
 pub mod prelude {
     pub use crate::analytics::Analytics;
     pub use crate::db::{Database, Edge, EdgeKind, FileRecord, ParseResult, Symbol, SymbolKind};
-    pub use crate::diff::{diff_context, DiffConfig, DiffContext};
+    pub use crate::diff::{diff_context, diff_context_filtered, DiffConfig, DiffContext};
     pub use crate::embeddings::{Embedding, EmbeddingProvider, LocalProvider};
     pub use crate::error::{CtxError, Result};
     pub use crate::index::{open_database, IndexResult, Indexer};
     pub use crate::parser::{CodeParser, Language};
-    pub use crate::smart::{smart_context, FileSelection, SmartConfig, SmartContext};
+    pub use crate::smart::{
+        smart_context, smart_context_filtered, FileSelection, SmartConfig, SmartContext,
+    };
     pub use crate::tokens::{count_tokens, Encoding, HasTokenCount, TokenCount};
-    pub use crate::walker::{discover_files, FileEntry, WalkerConfig};
+    pub use crate::walker::{discover_files, FileEntry, FilePatternFilter, WalkerConfig};
 }
