@@ -1,0 +1,94 @@
+# Architecture rules for the ctx repository itself, enforced by `ctx check`
+# (and surfaced as `check_violations` in `ctx score` and the PR analysis
+# comment). Hand-authored policy; ctx never regenerates this file.
+#
+# Layering model (low → high): db is the shared domain/storage foundation;
+# parser and the index/lsp pipeline sit above it; analytics above that;
+# mcp/harness are integration leaves; the bin crate (main/cli/shell/commands)
+# is the outermost shell. Files matching no layer (config.rs, walker.rs,
+# score.rs, error.rs, ...) are deliberately unconstrained.
+
+version = 1
+
+[layers]
+cli        = ["src/main.rs", "src/cli.rs", "src/shell.rs", "src/commands/**"]
+domain     = ["src/db/**"]
+extraction = ["src/parser/**"]
+indexing   = ["src/index/**", "src/lsp/**"]
+analytics  = ["src/analytics/**"]
+periphery  = ["src/mcp/**", "src/harness/**"]
+
+# ── Invariant 1: nothing depends on the CLI surface ─────────────────────
+# Compiler-redundant today (commands/cli/main/shell form the binary crate,
+# outside lib.rs) — this rule fires the day that boundary is dissolved.
+
+[[rules.allowed_dependents]]
+layer  = "cli"
+only   = []
+reason = "commands/cli/main/shell are the outermost shell; no library code may reach them"
+
+# ── Invariant 2: mcp and harness are leaves only the CLI touches ────────
+# HELD OUT pending the same-language successor to issue #61 (call-graph name
+# mis-resolution): plain `Iterator::find(...)` calls across parser/lsp/
+# analytics/db mis-resolve to the test helper `fn find` in
+# src/harness/doctor.rs (81 edges), and sha2 `Digest::finalize` mis-resolves
+# to src/harness/checksum.rs::finalize (1 edge) — all false positives, zero
+# real edges (verified against source 2026-07-16; no file outside
+# src/commands imports crate::harness or crate::mcp). Enable once the
+# resolver bug is fixed. Do not loosen this into a weaker rule to silence
+# the resolver.
+#
+# [[rules.allowed_dependents]]
+# layer  = "periphery"
+# only   = ["cli"]
+# reason = "mcp and harness are integration leaves; core modules must not import them"
+
+# ── Invariant 3: db depends on nothing above it ─────────────────────────
+# db doubles as the shared domain model (Symbol/Edge/ParseResult); its only
+# internal dependency is error.
+
+[[rules.forbidden]]
+from   = "domain"
+to     = "extraction"
+reason = "db is the foundation; it must not depend on parsers"
+
+[[rules.forbidden]]
+from   = "domain"
+to     = "indexing"
+reason = "db is the foundation; it must not depend on the indexing/LSP pipeline"
+
+[[rules.forbidden]]
+from   = "domain"
+to     = "analytics"
+reason = "db is the foundation; it must not depend on analytics"
+
+# ── Invariant 4: parsers stay pure ──────────────────────────────────────
+# Extraction consumes source text and produces domain types; it must not
+# call back into the pipeline that drives it.
+
+[[rules.forbidden]]
+from   = "extraction"
+to     = "indexing"
+reason = "parsers must not depend on the indexing/LSP pipeline that drives them"
+
+[[rules.forbidden]]
+from   = "extraction"
+to     = "analytics"
+reason = "parsers must not depend on analytics"
+
+# ── Invariant 5 (partial): analytics touches the domain layer only ──────
+# analytics -> indexing is DELIBERATELY NOT ENFORCED yet: the CTX_DIR and
+# DB_FILE path constants live in src/index/, so analytics/duckdb_impl.rs
+# legitimately imports them. Enable this rule once those constants move to
+# a neutral low module (tracked in Linear AGE-22). Same story for splitting
+# lsp/ and index/ into separate layers.
+
+[[rules.forbidden]]
+from   = "analytics"
+to     = "extraction"
+reason = "analytics reads the index database; it must not depend on parsers"
+
+# ── Limits ───────────────────────────────────────────────────────────────
+# [[rules.limit]] entries are deliberately omitted: a threshold calibrated
+# above today's worst offender is a gate that cannot fire. Limits will be
+# added once we have calibration data worth enforcing.
