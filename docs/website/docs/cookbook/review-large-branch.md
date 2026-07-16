@@ -59,20 +59,20 @@ to reproduce, especially when the branch is rebased during review.
 
 ## 1. Get the complete inventory before packing context
 
-On Unix, retain ctx's stderr summary while discarding the streamed file contents:
+Retain ctx's stderr summary while counting the selected files on stdout:
 
 ```bash
-ctx diff "$BASE" --summary --changes-only --no-tree >/dev/null
+ctx diff "$BASE" --summary --changes-only --no-tree --count-only
 ```
 
 The summary identified all 29 changed paths and the new Python symbols. Keep the independent git
 inventory beside it: ctx can add symbol information, while git remains the authority for the full
 changed-file set, including YAML, Markdown, lockfiles, and generated JSON.
 
-:::caution Summary and count options do not suppress diff content in ctx 0.3.5
-`--summary` adds diagnostics on stderr but still streams context on stdout. The inherited
-`--count-only` option is accepted after `ctx diff` but is not applied by the diff command. Redirect
-stdout when you want only the diagnostic preview.
+:::note Summary and count output use separate streams
+`--summary` adds diagnostics on stderr but does not suppress context by itself. Add `--count-only`
+to replace streamed context with the selected files' count summary on stdout. Add `--stats` when
+you also want count timing on stderr.
 :::
 
 ## 2. Treat the token budget as capacity, not priority

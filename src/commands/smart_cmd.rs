@@ -3,6 +3,7 @@
 //! Handles AI-powered intelligent file selection for context generation.
 
 use std::env;
+use std::time::Instant;
 
 use crate::cli::OutputFormat;
 use crate::commands::format_token_count;
@@ -12,7 +13,6 @@ use ctx::error::Result;
 use ctx::index;
 use ctx::output;
 use ctx::smart::{format_dry_run, format_explain, smart_context_filtered, SmartConfig};
-use ctx::tokens;
 use ctx::walker;
 
 /// Run smart context selection.
@@ -29,7 +29,12 @@ pub fn run_smart(
     show_sizes: bool,
     no_tree: bool,
     patterns: &[String],
+    count_only: bool,
+    encoding: &str,
+    stats: bool,
 ) -> Result<()> {
+    let start = Instant::now();
+    let encoding = super::context::parse_encoding(encoding)?;
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
     let filter = walker::FilePatternFilter::new(&root, patterns)
@@ -56,12 +61,16 @@ pub fn run_smart(
 
     // Configure and run smart context selection
     // For dry-run, don't limit tokens - show all relevant files
-    let effective_max_tokens = if dry_run { usize::MAX } else { max_tokens };
+    let effective_max_tokens = if dry_run && !count_only {
+        usize::MAX
+    } else {
+        max_tokens
+    };
     let config = SmartConfig {
         max_tokens: effective_max_tokens,
         depth,
         top,
-        encoding: tokens::Encoding::default(),
+        encoding,
     };
 
     eprintln!("Analyzing task: \"{}\"...", task);
@@ -71,17 +80,6 @@ pub fn run_smart(
     if result.selected_files.is_empty() {
         eprintln!("No relevant files found for: \"{}\"", task);
         std::process::exit(2);
-    }
-
-    // Handle dry-run mode
-    if dry_run {
-        println!("{}", format_dry_run(&result));
-        return Ok(());
-    }
-
-    // Handle explain mode (show reasoning then context)
-    if explain {
-        eprintln!("{}", format_explain(&result));
     }
 
     eprintln!(
@@ -124,6 +122,21 @@ pub fn run_smart(
             }
         })
         .collect();
+
+    if count_only {
+        return super::context::run_count_only(&root, &entries, encoding, stats, start);
+    }
+
+    // Handle dry-run mode
+    if dry_run {
+        println!("{}", format_dry_run(&result));
+        return Ok(());
+    }
+
+    // Handle explain mode (show reasoning then context)
+    if explain {
+        eprintln!("{}", format_explain(&result));
+    }
 
     // Generate context output
     let output_result = if entries.is_empty() {

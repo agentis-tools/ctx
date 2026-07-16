@@ -28,7 +28,10 @@ change summary. With no patterns, `.` includes all changed paths.
 | `REF` | Git reference to compare against | HEAD |
 | `--max-tokens <N>` | Maximum tokens in output | 8000 |
 | `--depth <N>` | Depth for finding related symbols | 2 |
-| `--summary` | Show only summary, not file contents | false |
+| `--summary` | Include a change summary on stderr | false |
+| `--count-only` | Count selected, budgeted files instead of streaming contents | false |
+| `--encoding <ENCODING>` | Tokenizer used for budgeting and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
+| `--stats` | Print count timing to stderr with `--count-only` | false |
 
 ## Examples
 
@@ -64,7 +67,13 @@ ctx diff HEAD~1
 ```bash
 # Limit output for smaller context windows
 ctx diff --max-tokens 4000
+
+# Count the files selected by that budget without streaming them
+ctx diff --max-tokens 4000 --count-only --encoding o200k_base
 ```
+
+With `--count-only`, the count summary is written to stdout. `--summary` and
+`--stats` remain diagnostics on stderr, so stdout can be piped independently.
 
 ### Summary Mode
 

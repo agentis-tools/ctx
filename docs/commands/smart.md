@@ -37,6 +37,9 @@ Before using `ctx smart`, you must:
 | `--top <N>` | Top semantic matches to consider | 10 |
 | `--explain` | Show why each file was selected | false |
 | `--dry-run` | Show selection without file contents | false |
+| `--count-only` | Count the selected, budgeted files without preview or context output | false |
+| `--encoding <ENCODING>` | Tokenizer used for selection and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
+| `--stats` | Print count timing to stderr with `--count-only` | false |
 
 ## Examples
 
@@ -58,7 +61,14 @@ ctx smart "change request validation" "src/**/*.rs" tests/contracts.rs
 ```bash
 # Limit to 4000 tokens for smaller context
 ctx smart "implement caching" --max-tokens 4000
+
+# Measure exactly that selected pack using the target model's tokenizer
+ctx smart "implement caching" --max-tokens 4000 --count-only --encoding o200k_base
 ```
+
+`--count-only` prints its count summary on stdout and diagnostics on stderr. It
+takes precedence over `--dry-run` and `--explain`, so those combinations do not
+emit a selection preview or formatted context.
 
 ### Explain Selection
 

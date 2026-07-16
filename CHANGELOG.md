@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
   files by repository-relative path before greedy packing (#60).
+- Global `--count-only`, `--encoding`, and `--stats` now apply to `ctx smart` and `ctx diff`;
+  counts cover only the files selected by the requested token budget, and summaries remain on stderr (#59).
 - BREAKING: Caller lookup now reports only resolved `calls` edges to the selected symbol, while
   preserving conservative same-language unresolved evidence in a separate section instead of mixing
   in cross-language or same-name false positives (#61). The documented `callers` JSON array narrows

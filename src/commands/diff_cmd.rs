@@ -3,6 +3,7 @@
 //! Handles git diff analysis and PR review context generation.
 
 use std::env;
+use std::time::Instant;
 
 use crate::cli::OutputFormat;
 use crate::commands::format_token_count;
@@ -29,7 +30,12 @@ pub fn run_diff(
     show_sizes: bool,
     no_tree: bool,
     patterns: &[String],
+    count_only: bool,
+    encoding: &str,
+    stats: bool,
 ) -> Result<()> {
+    let start = Instant::now();
+    let encoding = super::context::parse_encoding(encoding)?;
     let root = env::current_dir()?;
     let filter = walker::FilePatternFilter::new(&root, patterns)
         .map_err(|error| CtxError::Other(format!("Invalid file pattern: {error}")))?;
@@ -60,7 +66,7 @@ pub fn run_diff(
         changes_only: changes_only || analytics.is_none(),
         staged,
         summary,
-        encoding: tokens::Encoding::default(),
+        encoding,
     };
 
     let revision_display = if staged { "staged changes" } else { revision };
@@ -69,28 +75,44 @@ pub fn run_diff(
     // Run diff context analysis
     let result = match (&db, &analytics) {
         (Some(db), Some(analytics)) => {
-            diff_context_filtered(revision, db, analytics, config, &filter)
+            diff_context_filtered(revision, db, analytics, config.clone(), &filter)
         }
         _ => {
             // Fallback: just get changed files without context expansion
             let changed = diff::get_changed_files_filtered(revision, staged, &filter)?;
+            let context_files: Vec<_> = changed
+                .iter()
+                .filter(|f| f.change_type != diff::ChangeType::Deleted)
+                .map(|f| {
+                    let path = root.join(&f.path);
+                    let token_count = std::fs::read(&path)
+                        .ok()
+                        .and_then(|bytes| {
+                            tokens::count_tokens_with_encoding(
+                                &String::from_utf8_lossy(&bytes),
+                                encoding,
+                            )
+                            .ok()
+                        })
+                        .unwrap_or(0);
+                    diff::ContextFile {
+                        path: f.path.clone(),
+                        priority: 1.0,
+                        reason: diff::ContextReason::Changed(f.change_type),
+                        token_count,
+                    }
+                })
+                .collect();
+            let (context_files, total_tokens, omitted_count) =
+                tokens::select_by_token_budget(context_files, config.max_tokens);
             Ok(diff::DiffContext {
                 revision: revision.to_string(),
                 changed_files: changed.clone(),
                 affected_symbols: Vec::new(),
-                context_files: changed
-                    .iter()
-                    .filter(|f| f.change_type != diff::ChangeType::Deleted)
-                    .map(|f| diff::ContextFile {
-                        path: f.path.clone(),
-                        priority: 1.0,
-                        reason: diff::ContextReason::Changed(f.change_type),
-                        token_count: 0,
-                    })
-                    .collect(),
-                total_tokens: 0,
-                truncated: false,
-                omitted_count: 0,
+                context_files,
+                total_tokens,
+                truncated: omitted_count > 0,
+                omitted_count,
             })
         }
     };
@@ -154,6 +176,10 @@ pub fn run_diff(
             }
         })
         .collect();
+
+    if count_only {
+        return super::context::run_count_only(&root, &entries, encoding, stats, start);
+    }
 
     if entries.is_empty() {
         eprintln!("No files to include in context.");
@@ -222,5 +248,8 @@ pub fn run_review(
         show_sizes,
         no_tree,
         &[".".to_string()],
+        false,
+        "cl100k_base",
+        false,
     )
 }
