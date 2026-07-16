@@ -106,6 +106,10 @@ fn run(args: Args) -> Result<Outcome> {
             ignore_patterns,
             include_patterns,
         }) => {
+            // The global positional patterns (`ctx index src`) scope the
+            // index just like `-p`; a bare `.` is the unscoped default.
+            let include_patterns =
+                commands::merge_include_patterns(args.patterns, include_patterns);
             let config = commands::IndexConfig::new(
                 watch,
                 verbose,

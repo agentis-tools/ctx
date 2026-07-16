@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while keeping same-named symbols distinct by identity (#63). `line_start` and `line_end` were
   previously always `0` and `qualified_name` always `null`; both now carry real indexed values.
   Consumers that treated `0` as "no location" must read the value rather than the sentinel.
+- BREAKING: `ctx index` now honors positional file patterns and paths (`ctx index src`,
+  `ctx index src/**`), scoping the index exactly like `-p/--pattern` (AGE-13). Previously the
+  positional arguments were accepted but silently ignored, so the whole repository was
+  indexed at full cost. The indexing banner now echoes the effective scope
+  (`Indexing codebase (scoped to: src)...`) and file discovery warns when include
+  patterns match no files. `ctx index` now also refuses to update the index when an
+  explicit scope matches nothing: a mistyped `-p` pattern previously exited 0 and silently
+  emptied an existing index, and now exits non-zero leaving the index untouched. Scripts
+  that relied on an empty scope succeeding must handle the new failure.
 
 ### Documentation
 - Documented the pluggable LSP support: a `ctx lsp` command reference
