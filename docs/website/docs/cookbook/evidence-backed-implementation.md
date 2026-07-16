@@ -186,7 +186,7 @@ freshness; do not equate “zero processed” with “the edit was not indexed.�
 ## 7. Compare the actual change with the planned change
 
 ```bash
-ctx diff HEAD --summary --changes-only --no-tree >/dev/null
+ctx diff HEAD --summary --changes-only --no-tree --count-only
 ctx diff HEAD --summary --changes-only --no-tree --max-tokens 20000
 ctx score --against HEAD --json
 git diff --check
@@ -194,11 +194,10 @@ git diff --stat
 git diff
 ```
 
-The 8,000-token budget is only the `ctx diff` default, not a recommended ceiling. On Unix, redirect
-stdout to preview the summary and token count without retaining the streamed context, then set
-`--max-tokens` for the task and receiving model. In ctx 0.3.5, the global `--count-only` option is
-accepted after `ctx diff` but does not suppress its context output, and `--summary` adds a summary on
-stderr rather than replacing the content.
+The 8,000-token budget is only the `ctx diff` default, not a recommended ceiling. Use
+`--count-only` to measure the selected pack on stdout without retaining streamed context, then set
+`--max-tokens` for the task and receiving model. `--summary` remains on stderr, and `--encoding`
+controls both budget selection and the reported token count.
 
 In the trial, the default-budget run found eight changed files and seven affected symbols, but its
 context pack included only one documentation file and omitted the other seven. The summary was
@@ -271,7 +270,7 @@ to another agent or reviewer.
 | Compiled CLI examples | Proved target selection, JSON, help, and no-result behavior | Manual examples should become integration tests before shipping |
 | Canonical contract capture | Kept help output and the CLI snapshot synchronized | It could not detect the changelog entry in the wrong release section |
 | Re-index and query | Confirmed the new resolver and its direct dependency | “Zero files indexed” can mean an earlier command already refreshed it |
-| `ctx diff` | Summarized the candidate set before choosing a task-appropriate budget | The 8k default omitted seven of eight changed files; `--count-only` did not suppress diff content |
+| `ctx diff` | Summarized and counted the candidate set before choosing a task-appropriate budget | The 8k default omitted seven of eight changed files, so the first pack was incomplete |
 | `ctx score` | Quantified structural movement in changed code | Rising deltas required interpretation, not automatic rejection |
 | All/default-free compilation paths | Verified the feature boundary in both configurations | Focused tests are still narrower than complete CI |
 

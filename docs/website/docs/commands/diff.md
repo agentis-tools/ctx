@@ -40,6 +40,9 @@ change summary. With no patterns, `.` includes all changed paths.
 | `-f, --format <FORMAT>` | Output format (xml, markdown, md, plain, json) | xml |
 | `--show-sizes` | Show file sizes in the project tree | false |
 | `--no-tree` | Disable the project tree in output | false |
+| `--count-only` | Count selected, budgeted files instead of streaming contents | false |
+| `--encoding <ENCODING>` | Tokenizer used for budgeting and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
+| `--stats` | Print count timing to stderr with `--count-only` | false |
 
 ## Examples
 
@@ -80,21 +83,22 @@ ctx diff --staged
 ### Token-Limited Output
 
 ```bash
-# Limit output for smaller context windows
+# Limit output for smaller context windows, or measure that selected pack
 ctx diff --max-tokens 4000
+ctx diff --max-tokens 4000 --count-only --encoding o200k_base
 ```
 
 ### Summary Mode
 
 ```bash
-# On Unix, discard streamed contents while retaining the stderr summary
-ctx diff --summary --changes-only --no-tree >/dev/null
+# Count selected files on stdout while retaining the summary on stderr
+ctx diff --summary --changes-only --no-tree --count-only
 ```
 
-`--summary` adds the summary; it does not suppress context output. In ctx 0.3.5, the inherited
-`--count-only` option is accepted by `ctx diff` but is not applied, so use stdout redirection when
-you need only the diagnostic summary. The summary reports the selected token count and omissions;
-then choose a task-appropriate `--max-tokens` value for the content run.
+`--summary` adds diagnostics on stderr and does not itself suppress context.
+`--count-only` suppresses streamed contents and writes the count summary to
+stdout; `--stats` adds timing on stderr. The same `--encoding` drives both
+budget selection and the reported count.
 
 Output:
 ```

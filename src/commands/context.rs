@@ -13,6 +13,17 @@ use ctx::output::{generate_context, stream_context};
 use ctx::tokens;
 use ctx::walker::{self, discover_files, FileEntry, WalkerConfig};
 
+/// Parse a CLI tokenizer encoding with the canonical user-facing error.
+pub fn parse_encoding(value: &str) -> Result<tokens::Encoding> {
+    std::str::FromStr::from_str(value).ok().ok_or_else(|| {
+        format!(
+            "Invalid encoding '{}'. Valid options: cl100k_base, o200k_base, p50k_base",
+            value
+        )
+        .into()
+    })
+}
+
 /// Run the default context generation command.
 pub fn run_context(args: Args) -> Result<()> {
     let start = Instant::now();
@@ -37,14 +48,7 @@ pub fn run_context(args: Args) -> Result<()> {
     }
 
     // Parse encoding
-    let encoding: tokens::Encoding = std::str::FromStr::from_str(&args.encoding)
-        .ok()
-        .ok_or_else(|| {
-            format!(
-                "Invalid encoding '{}'. Valid options: cl100k_base, o200k_base, p50k_base",
-                args.encoding
-            )
-        })?;
+    let encoding = parse_encoding(&args.encoding)?;
 
     // Handle --count-only mode: just count tokens without output
     if args.count_only {

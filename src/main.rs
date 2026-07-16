@@ -85,6 +85,9 @@ fn run(args: Args) -> Result<Outcome> {
     // Global machine-readable output flag (see docs/json-output.md)
     let json = args.json;
     let patterns = args.patterns.clone();
+    let count_only = args.count_only;
+    let encoding = args.encoding.clone();
+    let stats = args.stats;
 
     // Custom --version handling: clap's auto flag is disabled (it would
     // exit before `--check` could run). `ctx --version` prints the same
@@ -265,7 +268,7 @@ fn run(args: Args) -> Result<Outcome> {
             let provider = resolve_embed_provider(provider, openai);
             commands::run_smart(
                 &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
-                no_tree, &patterns,
+                no_tree, &patterns, count_only, &encoding, stats,
             )
         }
         Some(Command::Diff {
@@ -289,6 +292,9 @@ fn run(args: Args) -> Result<Outcome> {
             show_sizes,
             no_tree,
             &patterns,
+            count_only,
+            &encoding,
+            stats,
         ),
         Some(Command::Review {
             pr,
