@@ -115,10 +115,15 @@ unrelated functions. Use deep impact as a list of hypotheses, not a transitive p
 a branch when its source does not contain the preceding call.
 :::
 
-In ctx 0.3.5, the `--depth` option accepted by `query callers` and `query deps` is not applied; both
-commands return direct relationships. Use `query impact` or `query graph` for recursive traversal,
-with the source-verification rule above. Current impact and graph JSON also report zero source-line
-positions for traversed nodes, so use the returned file and name to retrieve source.
+The ctx 0.3.5 limitation where `query callers` and `query deps` ignored `--depth` has been resolved.
+Both commands now traverse resolved symbol IDs breadth-first, report shortest numeric distances,
+and stop safely at cycles; unresolved relationships remain non-recursive evidence leaves. Root
+filters such as `--file` disambiguate the starting symbol only, so transitive results can cross file
+boundaries. Continue verifying every reported step against source: resolution precision, rather
+than traversal depth, remains the limiting factor. `query impact` and `query graph` remain useful
+alternative projections. Impact JSON now includes each indexed symbol's qualified name and source
+range, which makes source verification direct; graph JSON still reports zero source-line positions,
+so use its returned file and name to retrieve source.
 
 ## 4. Search exact references and persisted names
 
@@ -252,7 +257,7 @@ real blast radius.
 |---|---|---|
 | Disambiguated source and explain | Established the target's actual semantics | Does not reveal persisted or external contracts |
 | Direct callers and dependencies | Identified the main behavioral branches and helpers | Missed closure and several test references |
-| `impact --depth 1` | Produced a useful first-layer checklist | JSON line positions were zero |
+| `impact --depth 1` | Produced a useful first-layer checklist with source locations | Graph edges still require source verification |
 | Deep impact | Surfaced possible transitive paths quickly | Generic names caused rapid false-positive expansion |
 | Exact repository search | Found lock writes, generated markers, tests, and docs | Text matches still need classification by role |
 | Similar implementation search | Distinguished specialized ownership hashing from index hashing | Similar mechanics were not interchangeable |

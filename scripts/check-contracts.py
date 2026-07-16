@@ -215,22 +215,33 @@ def pr_policy(base_ref: str, labels: set[str]) -> None:
             "compatibility-sensitive changes require maintainer label contract-review: "
             + details
         )
-    if removed:
-        if "breaking-change" not in labels:
+    if removed and "breaking-change" not in labels:
+        raise ContractError(
+            "removed CLI contracts require maintainer label breaking-change: "
+            + ", ".join(removed)
+        )
+    # An acknowledged break must read as one in the changelog. Check the lines
+    # this PR adds, not the section as a whole: Unreleased accumulates entries
+    # from every merged break, so "the section mentions BREAKING:" would pass on
+    # somebody else's entry and wave this one through.
+    #
+    # The matching version increase is enforced when the release is cut
+    # (version.py), not here: breaks land under Unreleased and the release PR
+    # carries the bump, per governance/releasing.md.
+    if "breaking-change" in labels:
+        added = [
+            line
+            for line in git_output(
+                "diff", f"{base_ref}...HEAD", "--", "CHANGELOG.md"
+            ).splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+        # Match the entry convention ("- BREAKING: ..."), not a bare mention:
+        # prose that merely discusses the marker is not a declaration of a break.
+        if not any(re.match(r"\+\s*-\s*BREAKING:", line) for line in added):
             raise ContractError(
-                "removed CLI contracts require maintainer label breaking-change: "
-                + ", ".join(removed)
-            )
-        old, new = version_from_ref(base_ref), current_version()
-        compatible_bump = new[0] > old[0] if old[0] > 0 else (new[0] > old[0] or new[1] > old[1])
-        if not compatible_bump:
-            raise ContractError(
-                f"breaking CLI change requires a major bump (or pre-1.0 minor bump): {old} -> {new}"
-            )
-        if "BREAKING:" not in breaking_notes_section(old, new):
-            raise ContractError(
-                "breaking change needs a prominent BREAKING: entry in Unreleased "
-                "or the release-preparation version section"
+                "breaking-change requires this pull request to add a prominent "
+                "'- BREAKING:' changelog entry under Unreleased"
             )
     print("OK: compatibility-sensitive changes have the required review acknowledgement")
 

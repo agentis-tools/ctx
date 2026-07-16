@@ -134,6 +134,14 @@ pub fn run_diff(
         Err(e) => return Err(e),
     };
 
+    // The revision had changes -- `get_changed_files` rejects one that did not --
+    // so an empty list here means the patterns excluded every one of them. That
+    // answers the narrower question rather than failing it, but warn, because in
+    // practice it usually means a mistyped pattern.
+    if result.changed_files.is_empty() {
+        eprintln!("Warning: no changed files match the requested scope.");
+    }
+
     // Show summary if requested
     if summary {
         eprintln!("{}", format_summary(&result));

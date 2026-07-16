@@ -151,6 +151,12 @@ ctx query callers classify --file src/harness/mod.rs --depth 2
 ctx query find Ownership --json
 ```
 
+The worked evidence above was collected with ctx 0.3.5 and remains illustrative rather than a
+stable product contract. That release could mix unresolved same-name matches into ordinary caller
+results. Current output keeps `callers` identity-resolved and labels conservative same-language
+leads separately as `unresolved_callers`; inspect either kind against source before inferring a
+dependency.
+
 `classify` already performs the complete task:
 
 1. report a missing path as `Missing`;
@@ -244,7 +250,7 @@ For any version, verify the returned paths before treating retrieval scope as ev
 | Short keyword queries | Found checksum primitives without embeddings | Long queries were diluted by generic vocabulary |
 | `fan_in` in similar results | Identified functions with established consumers | Popularity does not prove semantic suitability |
 | Candidate source inspection | Revealed encoding, header, and fallback semantics | One helper did not show the higher-level policy |
-| Caller tracing | Found the composed ownership workflow | Static caller results still require source verification |
+| Caller tracing | Found the composed ownership workflow | Resolved and separately labeled unresolved evidence still require source verification |
 | Behavioral test inspection | Established overwrite and foreign-file policy | Tests can be missed if search stops at the first utility |
 
 The reliable loop is **describe behavior, vary retrieval mode, inspect candidates, trace their

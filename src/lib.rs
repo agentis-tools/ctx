@@ -110,6 +110,7 @@
 //! | [`index`] | Build and update the code intelligence index |
 //! | [`db`] | SQLite storage: symbols, edges, files, FTS and vector search |
 //! | [`parser`] | Tree-sitter based symbol/relationship extraction |
+//! | [`lsp`] | Language-server extraction backend (configured via `.ctx/config.toml`) |
 //! | [`embeddings`] | Embedding providers (local fastembed or OpenAI) |
 //! | [`analytics`] | Call graph queries: callers, dependencies, impact (DuckDB) |
 //! | [`smart`] | Task-driven file selection for LLM context |
@@ -137,6 +138,7 @@ pub mod exit;
 pub mod fingerprint;
 pub mod index;
 pub mod json;
+pub mod lsp;
 pub mod parser;
 pub mod rank;
 pub mod tokens;
@@ -153,6 +155,12 @@ pub mod tree;
 
 // Project configuration (.ctx/config.toml)
 pub mod config;
+
+// Format-preserving writes to .ctx/config.toml (toml_edit)
+pub mod config_edit;
+
+// Community LSP server registry client (groundwork for `ctx lsp`)
+pub mod lsp_registry;
 
 // Architecture rules (ctx check)
 pub mod check;

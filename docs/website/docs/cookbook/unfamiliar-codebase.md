@@ -103,10 +103,12 @@ Apply the same principle in other ecosystems: inspect `package.json`, `pyproject
 service manifests, deployment configuration, or framework registration before declaring a symbol
 to be an entry point.
 
-Read the entry-point source even when `explain` succeeds. In this repository, `ctx explain main
---file src/main.rs` listed thread-builder calls but did not connect `main` to `run_main`, because
-`run_main` is passed as a function value to `spawn` rather than called with ordinary call syntax.
-`ctx source` made that transition obvious.
+Read the entry-point source even when `explain` succeeds. Current ctx indexes record the direct
+Rust function item in `spawn(run_main)` as a `uses` relationship rather than claiming it is a call.
+That evidence appears in `ctx explain main --file src/main.rs` and `ctx query deps main --file
+src/main.rs`, while callers, impact, and call-graph results remain limited to actual `calls` edges.
+Indexes created before this parser capability need one `ctx index --force` rebuild. `ctx source`
+still establishes the thread boundary and execution semantics that the relationship alone cannot.
 
 ## 4. Trace one distinctive execution path
 
@@ -129,11 +131,12 @@ The source adds meaning that the edge list cannot: `main` creates a larger-stack
 `run_main` initializes the Rayon pool and parses arguments, and `run` dispatches subcommands while
 preserving exit-code behavior.
 
-Graph results are hypotheses to check, especially for generic names. Although `--file
-src/main.rs` selected the intended Rust `run` symbol, its reported callers included unrelated
-Python `subprocess.run` calls and test helpers also named `run`. Static indexing may also miss or
-approximate macros, callbacks, function pointers, reflection, dynamic dispatch, generated code,
-and runtime registration.
+Graph results are hypotheses to check, especially for generic names. Resolved callers are tied to
+the selected symbol identity, while unresolved same-language call evidence is reported separately
+and should be checked against source. Static indexing may also miss or approximate macros, closure
+variables, function pointers, reflection, dynamic dispatch, generated code, and runtime
+registration. Direct Rust free-function callbacks are resolved only when exactly one Rust function
+item matches; ambiguous names remain unresolved `uses` evidence.
 
 Use the call snippet and source location to accept or reject each important relationship. A result
 that merely shares a name is not evidence of a real call path.

@@ -151,3 +151,52 @@ fn diff_scopes_changes_deletions_and_both_sides_of_renames() {
         );
     }
 }
+
+/// An empty scope is a legitimate answer to a narrower question, so it reports
+/// nothing and warns rather than failing. A revision with no changes at all is
+/// still an operational error, as it was before patterns were honored.
+#[test]
+fn diff_scope_matching_no_changes_warns_and_succeeds() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = GitRepo::init(temp.path());
+    repo.commit_file("src/a.rs", "fn a() {}\n", "init");
+    repo.commit_file("docs/b.md", "docs\n", "add docs");
+    repo.commit_file("src/a.rs", "fn a() { let _ = 1; }\n", "change src only");
+    assert_success(&ctx(&repo.root, &["index"]));
+
+    // Scope that matches changed files: succeeds and reports them.
+    let hit = ctx(
+        &repo.root,
+        &["diff", "HEAD^", "--summary", "--no-tree", "src/"],
+    );
+    assert_success(&hit);
+
+    // Scope that matches nothing: exit 0, warns, and reports no changed file.
+    let miss = ctx(
+        &repo.root,
+        &["diff", "HEAD^", "--summary", "--no-tree", "docs/"],
+    );
+    assert_eq!(
+        miss.status.code(),
+        Some(0),
+        "an empty scope must not be an operational error: {}",
+        String::from_utf8_lossy(&miss.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&miss.stderr);
+    assert!(
+        stderr.contains("no changed files match the requested scope"),
+        "an empty scope must warn: {stderr}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&miss.stdout).contains("src/a.rs"),
+        "an empty scope must not fall back to the unscoped result"
+    );
+
+    // No changes at all remains an operational error (pre-existing contract).
+    let none = ctx(&repo.root, &["diff", "HEAD", "--summary", "--no-tree"]);
+    assert_eq!(
+        none.status.code(),
+        Some(2),
+        "a revision with no changes must stay an operational error"
+    );
+}

@@ -275,6 +275,12 @@ pub fn get_changed_files(revision: &str, staged: bool) -> Result<Vec<ChangedFile
 /// mirroring how users reason about path-limited git diffs. Deleted paths are
 /// retained in the changed-file summary even though they cannot be emitted as
 /// context content.
+///
+/// Returns an empty list when the revision has changes that the scope excludes;
+/// that is a legitimate answer to a narrower question, not a failure. A revision
+/// with no changes at all still fails with [`CtxError::NoChanges`], because
+/// `get_changed_files` rejects it before the scope is applied -- so an empty
+/// list here always means the patterns excluded everything.
 pub fn get_changed_files_filtered(
     revision: &str,
     staged: bool,
@@ -288,9 +294,6 @@ pub fn get_changed_files_filtered(
                 .as_deref()
                 .is_some_and(|path| filter.matches(path))
     });
-    if files.is_empty() {
-        return Err(CtxError::NoChanges);
-    }
     Ok(files)
 }
 
@@ -530,13 +533,9 @@ pub fn diff_context_filtered(
         }
     }
 
-    // 6. Sort by priority and select files within token limit
+    // 6. Sort by priority and path, then select files within token limit
     let mut files: Vec<ContextFile> = context_files.into_values().collect();
-    files.sort_by(|a, b| {
-        b.priority
-            .partial_cmp(&a.priority)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    sort_context_files(&mut files);
 
     let (selected, total_tokens, omitted) = select_by_token_budget(files, config.max_tokens);
 
@@ -549,6 +548,15 @@ pub fn diff_context_filtered(
         truncated: omitted > 0,
         omitted_count: omitted,
     })
+}
+
+/// Order context files deterministically before greedy token-budget selection.
+fn sort_context_files(files: &mut [ContextFile]) {
+    files.sort_by(|a, b| {
+        b.priority
+            .total_cmp(&a.priority)
+            .then_with(|| a.path.cmp(&b.path))
+    });
 }
 
 /// Expand context for a symbol using call graph analysis.
@@ -981,6 +989,61 @@ index abc123..def456 100644
         assert_eq!(selected.len(), 2);
         assert_eq!(total, 300);
         assert_eq!(omitted, 1);
+    }
+
+    #[test]
+    fn test_context_files_sort_by_priority_then_path() {
+        let mut files = vec![
+            context_file("low.rs", 0.6, 1),
+            context_file("z_high.rs", 1.0, 1),
+            context_file("middle.rs", 0.8, 1),
+            context_file("a_high.rs", 1.0, 1),
+        ];
+
+        sort_context_files(&mut files);
+
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["a_high.rs", "z_high.rs", "middle.rs", "low.rs"]);
+    }
+
+    #[test]
+    fn test_context_budget_selection_is_permutation_invariant() {
+        let files = [
+            context_file("a_large.rs", 1.0, 200),
+            context_file("b_small.rs", 1.0, 100),
+            context_file("c_small.rs", 1.0, 100),
+        ];
+        let permutations = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+
+        for permutation in permutations {
+            let mut permuted: Vec<ContextFile> = permutation
+                .into_iter()
+                .map(|index| files[index].clone())
+                .collect();
+            sort_context_files(&mut permuted);
+
+            let (selected, total, omitted) = select_by_token_budget(permuted, 200);
+            let paths: Vec<&str> = selected.iter().map(|file| file.path.as_str()).collect();
+            assert_eq!(paths, ["a_large.rs"]);
+            assert_eq!(total, 200);
+            assert_eq!(omitted, 2);
+        }
+    }
+
+    fn context_file(path: &str, priority: f32, token_count: usize) -> ContextFile {
+        ContextFile {
+            path: path.to_string(),
+            priority,
+            reason: ContextReason::Changed(ChangeType::Modified),
+            token_count,
+        }
     }
 
     #[test]

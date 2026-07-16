@@ -6,13 +6,14 @@
 //! - Module dependency analysis
 //! - Codebase statistics aggregations
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use duckdb::types::ValueRef;
 use duckdb::{params, Connection, InterruptHandle, Result};
 
-use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode};
+use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode, LocatedImpactNode};
 use crate::index::{CTX_DIR, DB_FILE};
 
 /// DuckDB analytics engine for code intelligence.
@@ -175,6 +176,32 @@ impl Analytics {
     /// - A qualified name like "LocalProvider::new"
     /// - A full ID like "src/embeddings/local.rs::LocalProvider::new@20"
     pub fn impact_analysis(&self, target_name: &str, max_depth: i32) -> Result<Vec<ImpactNode>> {
+        let mut seen = HashSet::new();
+        Ok(self
+            .impact_analysis_located(target_name, max_depth)?
+            .into_iter()
+            .filter(|node| {
+                seen.insert((node.name.clone(), node.file_path.clone(), node.kind.clone()))
+            })
+            .map(|node| ImpactNode {
+                name: node.name,
+                file_path: node.file_path,
+                kind: node.kind,
+                distance: node.distance,
+            })
+            .collect())
+    }
+
+    /// Impact analysis with stable symbol identities and indexed source locations.
+    ///
+    /// The `target_name` accepts the same ID, qualified-name, and simple-name forms
+    /// as [`Self::impact_analysis`]. Legacy indexes with missing line values report
+    /// `0` for the corresponding bound.
+    pub fn impact_analysis_located(
+        &self,
+        target_name: &str,
+        max_depth: i32,
+    ) -> Result<Vec<LocatedImpactNode>> {
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE target_symbol AS (
@@ -193,9 +220,13 @@ impl Analytics {
             impact AS (
                 -- Base case: find direct callers of the specific target symbol
                 SELECT 
+                    s.id,
                     s.name,
+                    s.qualified_name,
                     s.file_path,
                     s.kind,
+                    s.line_start,
+                    s.line_end,
                     1 as distance,
                     s.id as current_id
                 FROM code.edges e
@@ -209,9 +240,13 @@ impl Analytics {
                 
                 -- Recursive case: find callers of callers (reverse traversal)
                 SELECT 
+                    s.id,
                     s.name,
+                    s.qualified_name,
                     s.file_path,
                     s.kind,
+                    s.line_start,
+                    s.line_end,
                     i.distance + 1 as distance,
                     s.id as current_id
                 FROM impact i
@@ -222,10 +257,11 @@ impl Analytics {
                 WHERE i.distance < ?
                   AND e.kind = 'calls'
             )
-            SELECT DISTINCT name, file_path, kind, MIN(distance) as distance
+            SELECT current_id, name, qualified_name, file_path, kind,
+                   line_start, line_end, MIN(distance) as distance
             FROM impact
-            GROUP BY name, file_path, kind
-            ORDER BY distance, name
+            GROUP BY current_id, name, qualified_name, file_path, kind, line_start, line_end
+            ORDER BY distance, name, current_id
             "#,
         )?;
 
@@ -239,11 +275,15 @@ impl Analytics {
                 max_depth
             ],
             |row| {
-                Ok(ImpactNode {
-                    name: row.get(0)?,
-                    file_path: row.get(1)?,
-                    kind: row.get(2)?,
-                    distance: row.get(3)?,
+                Ok(LocatedImpactNode {
+                    symbol_id: row.get(0)?,
+                    name: row.get(1)?,
+                    qualified_name: row.get(2)?,
+                    file_path: row.get(3)?,
+                    kind: row.get(4)?,
+                    line_start: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    line_end: row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                    distance: row.get(7)?,
                 })
             },
         )?;
@@ -930,8 +970,8 @@ mod tests {
                 qualified_name TEXT,
                 kind TEXT NOT NULL,
                 file_path TEXT NOT NULL,
-                line_start INTEGER NOT NULL,
-                line_end INTEGER NOT NULL,
+                line_start INTEGER,
+                line_end INTEGER,
                 visibility TEXT
             );
             
@@ -995,6 +1035,98 @@ mod tests {
         // main calls run which calls helper (distance 2)
         assert!(nodes.iter().any(|n| n.name == "run" && n.distance == 1));
         assert!(nodes.iter().any(|n| n.name == "main" && n.distance == 2));
+    }
+
+    #[test]
+    fn test_located_impact_preserves_locations_and_deduplicates_by_symbol_id() {
+        let conn = setup_test_db().expect("Failed to setup test db");
+        conn.execute_batch(
+            r#"
+            INSERT INTO code.symbols VALUES
+                ('other.rs::run@40', 'run', 'Worker::run', 'function', 'other.rs', 40, 52, 'private'),
+                ('test.rs::run@40', 'run', 'Duplicate::run', 'function', 'test.rs', 40, 52, 'private');
+            INSERT INTO code.edges VALUES
+                ('other.rs::run@40', 'helper@21', 'helper', 'calls', NULL),
+                ('other.rs::run@40', 'helper@21', 'helper', 'calls', NULL),
+                ('test.rs::run@40', 'helper@21', 'helper', 'calls', NULL);
+            "#,
+        )
+        .unwrap();
+        let analytics = Analytics { conn };
+
+        let nodes = analytics.impact_analysis_located("helper", 1).unwrap();
+
+        assert_eq!(nodes.len(), 3);
+        let located = nodes
+            .iter()
+            .find(|node| node.symbol_id == "other.rs::run@40")
+            .unwrap();
+        assert_eq!(located.name, "run");
+        assert_eq!(located.qualified_name.as_deref(), Some("Worker::run"));
+        assert_eq!(located.file_path, "other.rs");
+        assert_eq!(located.line_start, 40);
+        assert_eq!(located.line_end, 52);
+        assert_eq!(located.distance, 1);
+
+        let legacy = analytics.impact_analysis("helper", 1).unwrap();
+        assert_eq!(legacy.len(), 2);
+        assert_eq!(
+            legacy
+                .iter()
+                .filter(|node| node.name == "run" && node.file_path == "test.rs")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_located_impact_depth_preserves_locations() {
+        let conn = setup_test_db().expect("Failed to setup test db");
+        let analytics = Analytics { conn };
+
+        let depth_one = analytics.impact_analysis_located("helper", 1).unwrap();
+        assert_eq!(depth_one.len(), 1);
+        assert_eq!(depth_one[0].symbol_id, "run@11");
+        assert_eq!((depth_one[0].line_start, depth_one[0].line_end), (11, 20));
+        assert_eq!(depth_one[0].distance, 1);
+
+        let depth_two = analytics.impact_analysis_located("helper", 2).unwrap();
+        assert_eq!(depth_two.len(), 2);
+        let run = depth_two
+            .iter()
+            .find(|node| node.symbol_id == "run@11")
+            .unwrap();
+        assert_eq!((run.line_start, run.line_end), (11, 20));
+        assert_eq!(run.distance, 1);
+        let main = depth_two
+            .iter()
+            .find(|node| node.symbol_id == "main@1")
+            .unwrap();
+        assert_eq!((main.line_start, main.line_end), (1, 10));
+        assert_eq!(main.distance, 2);
+    }
+
+    #[test]
+    fn test_located_impact_missing_legacy_lines_fall_back_to_zero() {
+        let conn = setup_test_db().expect("Failed to setup test db");
+        conn.execute_batch(
+            r#"
+            INSERT INTO code.symbols VALUES
+                ('legacy@31', 'legacy_caller', NULL, 'function', 'legacy.rs', NULL, NULL, 'private');
+            INSERT INTO code.edges VALUES
+                ('legacy@31', 'helper@21', 'helper', 'calls', NULL);
+            "#,
+        )
+        .unwrap();
+        let analytics = Analytics { conn };
+
+        let nodes = analytics.impact_analysis_located("helper", 1).unwrap();
+        let legacy = nodes
+            .iter()
+            .find(|node| node.symbol_id == "legacy@31")
+            .unwrap();
+        assert_eq!(legacy.line_start, 0);
+        assert_eq!(legacy.line_end, 0);
     }
 
     #[test]

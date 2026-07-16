@@ -59,6 +59,11 @@ ctx index  # Only processes modified files
 
 This makes re-indexing fast even for large codebases.
 
+After upgrading ctx to a version with changed parser semantics, run `ctx index
+--force` once. Content hashes cannot tell that unchanged source files need to
+be parsed again, so an older index will not contain newly recognized
+relationships such as Rust function-item `uses` edges.
+
 ### Force Full Reindex
 
 When you update `.contextignore` or want a clean slate:
@@ -323,6 +328,8 @@ Output:
 ```
 Functions that call 'authenticate':
 ------------------------------------------------------------
+
+Distance 1:
   handleLogin (src/auth/login.ts:45)
     > authenticate(username, password)
   validateSession (src/auth/session.ts:23)
@@ -330,6 +337,15 @@ Functions that call 'authenticate':
   protectedRoute (src/middleware/auth.ts:12)
     > if (!authenticate(req.token)) return 401
 ```
+
+Resolved callers are identity-based: ctx includes only `calls` edges resolved to the selected
+symbol ID, then follows resolved callers breadth-first up to `--depth`. Cycles and diamonds are
+deduplicated by symbol ID at the shortest distance, and the root is excluded. `--file` selects only
+the root; callers in other files remain eligible. Potentially useful same-language name matches
+that could not be resolved are shown under `Unresolved same-language call evidence` (and as
+`unresolved_callers` in JSON) at distance 1 only and are never traversed. Verify that evidence
+against source; cross-language matches, qualified calls without matching qualified context, and
+edges resolved to another same-named symbol are excluded. JSON entries include numeric `distance`.
 
 ### Dependencies (What Does This Call?)
 
@@ -344,11 +360,23 @@ Output:
 ```
 Dependencies of 'handleRequest':
 ------------------------------------------------------------
+
+Distance 1:
   calls validateInput (line 12)
   calls processData (line 18)
   calls sendResponse (line 25)
   imports Logger (line 3)
 ```
+
+Dependency traversal follows resolved targets breadth-first across all outgoing relationship kinds
+up to `--depth`. Direct edge kinds are preserved, unresolved references remain visible leaves, and
+resolved symbols are deduplicated at their shortest distance with the root excluded. `--file` and
+`--kind` select only the root. Human output groups results by distance; JSON entries include numeric
+`distance`. For Rust, a bare or module-qualified free function passed as a value (for example,
+`spawn(worker::run_main)` or `.map(transform)`) appears as `uses`, not `calls`, when exactly one
+Rust function item matches.
+Ambiguous matches remain unresolved evidence. These references appear in `query deps` and
+`explain`, but do not become callers or affect call graphs, impact analysis, fan-in, or fan-out.
 
 ### Call Graph
 

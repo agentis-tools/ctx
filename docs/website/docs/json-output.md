@@ -71,7 +71,11 @@ Wherever a symbol appears in a payload, it is a **SymbolRef object** (never a ba
 
 `qualified_name` is `null` when not known. Some commands attach extra fields alongside or inside a SymbolRef (e.g. `visibility` in `query.find`); additions are backwards-compatible, removals or renames are not.
 
-Note: `query.graph` and `query.impact` nodes come from graph traversal, which does not track line numbers; their SymbolRefs have `line_start`/`line_end` of `0` and `qualified_name` of `null`.
+Note: `query.graph` nodes come from graph traversal that does not carry source
+locations, so their SymbolRefs have `line_start`/`line_end` of `0` and
+`qualified_name` of `null`. `query.impact` nodes include the indexed qualified
+name and source range; legacy or malformed indexes can still report `0` for a
+missing bound.
 
 ## Commands
 
@@ -141,7 +145,7 @@ If no embeddings have been generated yet, `results` is empty and a hint is print
 
 ### `query.callers`
 
-`ctx query callers <FUNCTION> [--file F] --json`
+`ctx query callers <FUNCTION> [--depth N] [--file F] --json`
 
 ```json
 {
@@ -150,18 +154,37 @@ If no embeddings have been generated yet, `results` is empty and a hint is print
     {
       "symbol": { "name": "run_search", "qualified_name": null, "kind": "function", "file": "src/commands/search.rs", "line_start": 14, "line_end": 41 },
       "line": 16,
-      "context": "index::open_database(&root)?"
+      "context": "index::open_database(&root)?",
+      "distance": 1
+    }
+  ],
+  "unresolved_callers": [
+    {
+      "symbol": { "name": "retry_open", "qualified_name": null, "kind": "function", "file": "src/retry.rs", "line_start": 20, "line_end": 27 },
+      "line": 22,
+      "context": "open_database(path)?",
+      "distance": 1
     }
   ],
   "ambiguous": []
 }
 ```
 
-Disambiguation: when several symbols match the name and no `--file` filter is given, `target` is `null`, `callers` is empty, and `ambiguous` lists the candidate SymbolRefs. When the symbol is not found at all, all three are empty/`null`.
+`callers` traverses only resolved `calls` edges whose target ID matches the symbol at the preceding
+distance. Results are deduplicated by symbol ID at their shortest distance, exclude the root, and
+are ordered by distance, file, line, name, and ID. The `--file` filter disambiguates only the root;
+it does not hide callers in other files. `unresolved_callers` preserves conservative name-based
+evidence from the root at distance 1 only: the source must use the target's language, and qualified
+symbols require matching qualified call context. Unresolved evidence is never recursively
+traversed. Treat these entries as leads to verify in source, not as resolved relationships.
+
+Disambiguation: when several symbols match the name and no `--file` filter is given, `target` is
+`null`, `callers` and `unresolved_callers` are empty, and `ambiguous` lists the candidate
+SymbolRefs. When the symbol is not found at all, all three arrays are empty and `target` is `null`.
 
 ### `query.deps`
 
-`ctx query deps <SYMBOL> [--file F] [--kind K] --json`
+`ctx query deps <SYMBOL> [--depth N] [--file F] [--kind K] --json`
 
 ```json
 {
@@ -171,14 +194,19 @@ Disambiguation: when several symbols match the name and no `--file` filter is gi
       "kind": "calls",
       "target_name": "open_database",
       "line": 16,
-      "resolved": { "name": "open_database", "qualified_name": null, "kind": "function", "file": "src/index/mod.rs", "line_start": 637, "line_end": 652 }
+      "resolved": { "name": "open_database", "qualified_name": null, "kind": "function", "file": "src/index/mod.rs", "line_start": 637, "line_end": 652 },
+      "distance": 1
     }
   ],
   "ambiguous": []
 }
 ```
 
-`resolved` is `null` for unresolved (e.g. external) references. Ambiguity is reported like `query.callers`.
+Resolved targets are traversed breadth-first through every outgoing relationship kind. Results are
+deduplicated by symbol ID at their shortest distance, exclude the root, and retain the relationship
+kind that reached each target. `resolved` is `null` for unresolved (for example, external)
+references; those entries remain visible leaves and are never traversed. The `--file` and `--kind`
+filters disambiguate only the root. Ambiguity is reported like `query.callers`.
 
 ### `query.graph`
 
@@ -207,7 +235,7 @@ Disambiguation: when several symbols match the name and no `--file` filter is gi
   "depth": 5,
   "impacted": [
     {
-      "symbol": { "name": "run_search", "qualified_name": null, "kind": "function", "file": "src/commands/search.rs", "line_start": 0, "line_end": 0 },
+      "symbol": { "name": "run_search", "qualified_name": "commands::search::run_search", "kind": "function", "file": "src/commands/search.rs", "line_start": 14, "line_end": 41 },
       "distance": 1
     }
   ],
@@ -500,6 +528,105 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 ```
 
 `severity` is `error`, `warning`, or `info`; `hint` is omitted when there is none. `code` is a stable machine-readable identifier: `binary_version`, `harness_not_initialized`, `templates_stale`, `index_missing`, `index_schema`, `index_stale`, `rules_missing`, `rules_invalid`, `hooks_missing`, `hooks_modified`, `settings_not_wired`, `mcp_unavailable`, `mcp_not_wired`. Checks are independent (a missing index and an invalid rules file are both reported in one run). `healthy` is `true` when no check is an error or a warning; exit codes: 0 = healthy, 1 = problems, 2 = operational error.
+
+### `lsp.add`
+
+`ctx lsp add <LANGUAGE> [--server <NAME>] --yes --json`
+
+JSON mode never prompts, so `--yes` is required (exit 2 otherwise).
+
+```json
+{
+  "language": "python",
+  "server": "pyright",
+  "command": "pyright-langserver",
+  "args": ["--stdio"],
+  "backend": "hybrid",
+  "source": "registry",
+  "registry_url": "https://raw.githubusercontent.com/agentis-tools/ctx-lsp-registry/v1/registry/python.toml",
+  "install_hint": "npm install -g pyright",
+  "homepage": "https://github.com/microsoft/pyright",
+  "binary_found": true,
+  "status": "added"
+}
+```
+
+`install_hint` and `homepage` are `null` when the registry entry does not provide them. `binary_found` reports whether the server command already resolves to an executable (a `false` is accompanied by a stderr install warning). When the entry is already configured and matches the registry, `data` is just `{"language", "server", "status": "already_configured"}`.
+
+### `lsp.list`
+
+`ctx lsp list [--available] --json`
+
+```json
+{
+  "available": false,
+  "servers": [
+    {
+      "language": "python",
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "backend": "hybrid",
+      "source": "registry",
+      "source_server": "pyright"
+    }
+  ]
+}
+```
+
+`source` is `"registry"` for entries installed by `ctx lsp add`, `"manual"` otherwise. With `--available` the payload is instead `{"available": true, "registry": "<base url>", "languages": [{"language", "recommended", "servers", "configured"}]}` — one row per registry language, with `configured` marking languages already present in `.ctx/config.toml`.
+
+### `lsp.update`
+
+`ctx lsp update [LANGUAGE] --yes --json`
+
+```json
+{
+  "registry": "https://raw.githubusercontent.com/agentis-tools/ctx-lsp-registry/v1",
+  "languages": [
+    { "language": "go", "server": "gopls", "status": "up_to_date" },
+    {
+      "language": "python",
+      "server": "pyright",
+      "status": "updated",
+      "changes": {
+        "args": { "from": "[\"--stdio\", \"--verbose\"]", "to": "[\"--stdio\"]" }
+      }
+    }
+  ]
+}
+```
+
+`changes` is present only for `"status": "updated"`, keyed by config key with display-string `from`/`to` values. When nothing in the config is registry-managed the payload is `{"languages": []}`.
+
+### `lsp.doctor`
+
+`ctx lsp doctor --json`
+
+```json
+{
+  "healthy": true,
+  "summary": { "pass": 1, "warn": 0, "fail": 0 },
+  "servers": [
+    {
+      "language": "python",
+      "command": "pyright-langserver",
+      "backend": "hybrid",
+      "binary_found": true,
+      "binary_path": "/usr/local/bin/pyright-langserver",
+      "root_markers_found": ["pyproject.toml"],
+      "handshake_ok": true,
+      "server_name": "pyright",
+      "server_version": "1.1.400",
+      "negotiated_capabilities": ["documentSymbolProvider", "definitionProvider"],
+      "missing_capabilities": [],
+      "stderr": [],
+      "status": "pass"
+    }
+  ]
+}
+```
+
+`status` per server is `fail` (binary missing or handshake failed), `warn` (requested capabilities not advertised), or `pass`. `binary_path`, `server_name`, `server_version`, and `error` are omitted when unknown. `healthy` is `true` when no server fails; exit codes: 0 = no failures (warnings allowed), 1 = at least one failure, 2 = operational error.
 
 ### `self_update`
 

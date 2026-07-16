@@ -536,6 +536,16 @@ pub struct WalkerConfig {
     pub include_patterns: Vec<String>,
 }
 
+impl WalkerConfig {
+    /// Whether the include patterns actually narrow the walk. A lone `.`
+    /// (or `./`) is the CLI's "whole repository" default, not a scope.
+    pub fn has_scoping_includes(&self) -> bool {
+        self.include_patterns
+            .iter()
+            .any(|p| p.trim_end_matches('/') != ".")
+    }
+}
+
 impl Default for WalkerConfig {
     fn default() -> Self {
         Self {
@@ -763,6 +773,15 @@ pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<File
     // Remove duplicates (can happen with overlapping patterns)
     entries.dedup_by(|a, b| a.absolute_path == b.absolute_path);
 
+    // A scoped run that selects nothing is almost always a mistyped pattern;
+    // say so instead of silently producing an empty result.
+    if entries.is_empty() && config.has_scoping_includes() {
+        eprintln!(
+            "Warning: include patterns matched no files: {}",
+            config.include_patterns.join(", ")
+        );
+    }
+
     Ok(entries)
 }
 
@@ -958,6 +977,40 @@ mod tests {
         assert!(!should_include_file(
             root,
             Path::new("/project/tests/test.rs"),
+            &config
+        ));
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/build.rs"),
+            &config
+        ));
+    }
+
+    #[test]
+    fn test_should_include_file_literal_directory() {
+        // A bare directory path (no glob syntax) scopes like `<dir>/**`
+        let root = Path::new("/project");
+        let config = WalkerConfig {
+            use_gitignore: true,
+            use_default_ignores: true,
+            custom_ignores: vec![],
+            include_patterns: vec!["src".to_string()],
+        };
+
+        assert!(should_include_file(
+            root,
+            Path::new("/project/src/main.rs"),
+            &config
+        ));
+        assert!(should_include_file(
+            root,
+            Path::new("/project/src/db/mod.rs"),
+            &config
+        ));
+
+        assert!(!should_include_file(
+            root,
+            Path::new("/project/lib/util.rs"),
             &config
         ));
         assert!(!should_include_file(

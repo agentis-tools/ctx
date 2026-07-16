@@ -3,6 +3,8 @@
 //! An optional, committed TOML file that sets per-project defaults so teams
 //! don't have to pass the same flags/env vars on every invocation. Currently it
 //! configures the embedding backend; more sections can be added over time.
+//! (The `[lsp.*]` sections of the same file are loaded separately by
+//! [`crate::lsp::LspConfig`].)
 //!
 //! ```toml
 //! [embedding]

@@ -122,8 +122,12 @@ second file to be omitted when the running total was 100 and the budget was 300.
 one. That was useful confirmation, but recursive expansion added nothing. A small direct path is a
 reason to stop, not a reason to request a deeper graph.
 
-In ctx 0.3.5, `--depth` on `query deps` and `query callers` is accepted but does not expand beyond
-direct relationships. Use impact or graph when recursion is actually needed.
+The ctx 0.3.5 limitation where `--depth` did not expand `query deps` and `query callers` has been
+resolved. These commands now traverse resolved symbol IDs breadth-first and expose shortest
+distances, while unresolved references remain leaves. Keep the requested depth proportional to the
+hypothesis, and verify each transitive step in source; a working traversal does not make every
+resolved edge conclusive. Use impact or graph when their alternate projection better fits the
+investigation.
 :::
 
 ## 4. Compare neighboring behavior

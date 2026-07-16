@@ -66,7 +66,11 @@ pub fn content_checksum(bytes: &[u8]) -> String {
         }
         Err(_) => hasher.update(bytes),
     }
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Extract the checksum recorded in a file's `ctx:checksum` line, if any.
@@ -233,10 +237,12 @@ mod tests {
 
         let mut hasher = Sha256::new();
         hasher.update(json.as_bytes());
-        assert_eq!(
-            content_checksum(json.as_bytes()),
-            format!("{:x}", hasher.finalize())
-        );
+        let expected: String = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(content_checksum(json.as_bytes()), expected);
     }
 
     #[test]

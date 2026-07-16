@@ -37,38 +37,41 @@ globset = "0.4"
 # Code Intelligence (SQLite Foundation + sqlite-vec)
 rusqlite = { version = "0.32", features = ["bundled"] }
 sqlite-vec = "0.1.6"
-zerocopy = { version = "0.7", features = ["derive"] }
-sha2 = "0.10"
+zerocopy = { version = "0.8", features = ["derive"] }
+sha2 = "0.11"
 flate2 = "1.0"                    # For source compression
 
 # Tree-sitter for code parsing
 # Pin to 0.20.10 to ensure all language grammars use the same version
-tree-sitter = "~0.20.10"
-tree-sitter-rust = "0.20.4"
-tree-sitter-typescript = "0.20"
-tree-sitter-javascript = "0.20"
-tree-sitter-python = "0.20"
-tree-sitter-go = "0.20"
+tree-sitter = "0.26.11"
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
 # Solidity parsing (using solang-parser instead of tree-sitter due to version conflicts)
 solang-parser = "0.3.5"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.1"
+# Format-preserving edits to .ctx/config.toml (already in the dependency
+# graph transitively via toml)
+toml_edit = "0.25"
 
 # RFC3339 timestamps for JSON output envelopes
 time = { version = "0.3", features = ["formatting", "parsing"] }
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Version comparison for `ctx harness compat`
 semver = "1"
 
 # HTTP client with retry support (replaces hand-rolled native-tls)
 # `blocking` is used by `ctx self-update` and the passive update check
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 # Release archive extraction for `ctx self-update` (already in the
@@ -76,36 +79,40 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tar = "0.4"
 
 # Token counting for LLM context management
-tiktoken-rs = "0.9"
+tiktoken-rs = "0.12"
 
 # Parallel processing
 rayon = "1.10"
 
 # MCP server support
-rmcp = { version = "0.11.0", features = ["server", "transport-io"], optional = true }
+rmcp = { version = "2.2.0", features = ["server", "transport-io"], optional = true }
 schemars = { version = "1.0", optional = true }
 async-trait = { version = "0.1", optional = true }
 
 # Interactive shell
-rustyline = { version = "17", features = ["with-file-history"] }
+rustyline = { version = "18", features = ["with-file-history"] }
 
 # Local embeddings (fastembed)
 # fastembed 5.17+ pulls an ort build that no longer ships Intel macOS binaries.
 # Keep the release matrix compatible with the documented x86_64 macOS target.
-fastembed = "=5.4.0"
+fastembed = "=5.17.2"
 
 # Phase 2: DuckDB for analytical queries (optional, not available on Windows)
 duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
 
 # Phase 4: File watching for incremental updates
-notify = "6.1"
-notify-debouncer-mini = "0.4"
+notify = "8.2"
+notify-debouncer-mini = "0.7"
 dirs = "6.0.0"
+
+# Language Server Protocol types for the pluggable LSP extraction backend
+# (types only; the JSON-RPC stdio transport is hand-rolled in src/lsp/)
+lsp-types = "0.97"
 
 # Windows release artifacts are .zip (see .github/workflows/release.yml);
 # zip is already in the dependency graph transitively via libduckdb-sys
 [target.'cfg(windows)'.dependencies]
-zip = { version = "6", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [package.metadata.docs.rs]
 all-features = true

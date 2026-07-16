@@ -6,11 +6,13 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+  # No paths-ignore here: a workflow skipped by a path filter never reports its
+  # checks, so any of them that branch protection requires would stay pending
+  # forever and block the pull request. Docs-only runs are skipped per job via
+  # `needs.changes.outputs.code` instead -- a job skipped by `if:` does report,
+  # and counts as success.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
   # Nightly perf run (full suite) and manual triggers (e.g. baseline capture
   # runs). Schedule/dispatch events are unaffected by the paths-ignore above.
   schedule:
@@ -24,7 +26,36 @@ permissions:
   contents: read
 
 jobs:
+  # Replaces the workflow-level paths-ignore: report whether the pull request
+  # touches anything but docs, so the expensive jobs can skip a docs-only change
+  # while still reporting a status that branch protection accepts.
+  changes:
+    name: detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...HEAD" | grep -qvE '^docs/|\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -39,7 +70,7 @@ jobs:
             features: "--no-default-features"
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -69,9 +100,11 @@ jobs:
         run: cargo test --locked --verbose ${{ matrix.features }}
 
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -91,9 +124,11 @@ jobs:
         run: node --test .github/scripts/render-ctx-pr-comment.test.cjs
 
   plugins:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -123,9 +158,11 @@ jobs:
           codex plugin add ctx@ctx-local --json
 
   publish-dry-run:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -141,9 +178,11 @@ jobs:
         run: cargo publish --locked --dry-run --no-default-features
 
   packaging-metadata:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -163,9 +202,11 @@ jobs:
           python3 -m json.tool packaging/scoop/ctx.json >/dev/null
 
   perf:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # ctx score/check diff against git history; the harness also
           # records the commit SHA in its results.
@@ -225,7 +266,7 @@ jobs:
 
       - name: Upload perf results
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-results
           path: perf-results.json
