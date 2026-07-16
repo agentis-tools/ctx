@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit scope matches nothing: a mistyped `-p` pattern previously exited 0 and silently
   emptied an existing index, and now exits non-zero leaving the index untouched. Scripts
   that relied on an empty scope succeeding must handle the new failure.
+- Positional file, directory, and glob patterns now scope `ctx smart`, `ctx similar`, and `ctx diff`
+  as advertised, including semantic seeds, graph expansion, and renamed or deleted diff paths (#57).
+  A scope that matches no changed files reports an empty result and warns, rather than failing as an
+  operational error.
 
 ### Documentation
 - Documented the pluggable LSP support: a `ctx lsp` command reference
