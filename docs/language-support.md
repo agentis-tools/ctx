@@ -485,15 +485,17 @@ user.validate();  // We don't know user is User
 
 ### Indirect Calls
 
-Calls through variables, callbacks, or higher-order functions are not tracked:
+Calls through variables, closures, or arbitrary dynamic dispatch are not
+tracked as calls. Rust free-function items passed directly as callback values
+are recorded separately as `uses` when exactly one Rust function matches:
 
-```javascript
-// Not tracked
-const callback = processData;
+```rust
+// Dynamic invocation through a variable is not tracked
+let callback = process_data;
 callback(input);
 
-// Not tracked
-[1, 2, 3].map(transform);
+// A direct Rust function item is a `uses` edge, not a call
+[1, 2, 3].into_iter().map(transform);
 ```
 
 ## Adding Language Support

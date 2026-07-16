@@ -8,6 +8,10 @@ use crate::parser::{
     SymbolKindMapping,
 };
 
+/// Internal marker used to distinguish Rust function-item candidates from
+/// pre-existing `uses` relationships in other language parsers.
+const FUNCTION_ITEM_CONTEXT_PREFIX: &str = "rust-function-item:";
+
 /// Symbol kind mappings for Rust capture names.
 const RUST_SYMBOL_MAPPINGS: &[SymbolKindMapping] = &[
     SymbolKindMapping::new("func", SymbolKind::Function),
@@ -27,6 +31,7 @@ pub struct RustParser {
     parser: Parser,
     symbols_query: Query,
     calls_query: Query,
+    function_references_query: Query,
     impl_query: Query,
 }
 
@@ -165,10 +170,30 @@ impl RustParser {
         )
         .expect("Invalid calls query");
 
+        // Direct identifier arguments can denote function items passed as values,
+        // for example `spawn(run_main)` or `.map(transform)`. Resolution is
+        // deliberately deferred until the complete index is available.
+        let function_references_query = Query::new(
+            &language,
+            r#"
+            (arguments
+                (identifier) @reference.name
+            )
+
+            (arguments
+                (scoped_identifier
+                    name: (identifier) @qualified_reference.name
+                ) @qualified_reference.path
+            )
+            "#,
+        )
+        .expect("Invalid function references query");
+
         Self {
             parser,
             symbols_query,
             calls_query,
+            function_references_query,
             impl_query,
         }
     }
@@ -193,8 +218,9 @@ impl RustParser {
             &mut exports,
         );
 
-        // Extract edges (calls, uses)
+        // Extract call and function-value reference edges.
         self.extract_edges(&root, file_path, source, &symbols, &mut edges);
+        self.extract_function_reference_edges(&root, source, &symbols, &mut edges);
 
         // Extract trait implementation edges
         self.extract_impl_edges(&root, file_path, source, &symbols, &mut edges);
@@ -326,6 +352,77 @@ impl RustParser {
         );
     }
 
+    /// Extract bare or module-qualified function items passed as call arguments.
+    ///
+    /// The parser emits conservative `uses` candidates and leaves `target_id`
+    /// unset. Cross-file resolution later accepts only a globally unique Rust
+    /// free-function item. Bare identifiers bound by Rust patterns are local
+    /// values (including closure variables), so they are not function-item
+    /// evidence even if a function elsewhere happens to share their name.
+    fn extract_function_reference_edges(
+        &self,
+        root: &Node,
+        source: &str,
+        symbols: &[Symbol],
+        edges: &mut Vec<Edge>,
+    ) {
+        let func_ranges: Vec<_> = symbols
+            .iter()
+            .filter(|symbol| matches!(symbol.kind, SymbolKind::Function | SymbolKind::Method))
+            .map(|symbol| (symbol.line_start, symbol.line_end, symbol.id.clone()))
+            .collect();
+
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&self.function_references_query, *root, source.as_bytes());
+
+        while let Some(query_match) = matches.next() {
+            let mut name_node = None;
+            let mut path_node = None;
+            for capture in query_match.captures {
+                match self.function_references_query.capture_names()[capture.index as usize] {
+                    "reference.name" => {
+                        name_node = Some(capture.node);
+                        path_node = Some(capture.node);
+                    }
+                    "qualified_reference.name" => name_node = Some(capture.node),
+                    "qualified_reference.path" => path_node = Some(capture.node),
+                    _ => {}
+                }
+            }
+
+            let (Some(node), Some(path_node)) = (name_node, path_node) else {
+                continue;
+            };
+            let name = node.utf8_text(source.as_bytes()).unwrap_or("");
+            let reference_path = path_node.utf8_text(source.as_bytes()).unwrap_or(name);
+            if name.is_empty() || (reference_path == name && is_locally_bound(node, name, source)) {
+                continue;
+            }
+
+            let line = node.start_position().row as u32 + 1;
+            let Some(source_id) = func_ranges
+                .iter()
+                .find(|(start, end, _)| line >= *start && line <= *end)
+                .map(|(_, _, id)| id.clone())
+            else {
+                continue;
+            };
+
+            edges.push(Edge {
+                source_id,
+                target_id: None,
+                target_name: name.to_string(),
+                kind: EdgeKind::Uses,
+                line: Some(line),
+                col: Some(node.start_position().column as u32),
+                context: Some(format!(
+                    "{}{}",
+                    FUNCTION_ITEM_CONTEXT_PREFIX, reference_path
+                )),
+            });
+        }
+    }
+
     /// Extract trait implementation edges from the AST.
     fn extract_impl_edges(
         &self,
@@ -399,6 +496,59 @@ impl RustParser {
             }
         }
     }
+}
+
+/// Return whether `name` is pattern-bound in the containing function.
+///
+/// This intentionally errs on the side of not inventing a static function-item
+/// relationship for a locally bound value.
+fn is_locally_bound(node: Node<'_>, name: &str, source: &str) -> bool {
+    let mut ancestor = node.parent();
+    let function = loop {
+        let Some(current) = ancestor else {
+            return false;
+        };
+        if current.kind() == "function_item" {
+            break current;
+        }
+        ancestor = current.parent();
+    };
+
+    let mut stack = vec![function];
+    while let Some(current) = stack.pop() {
+        if current.kind() == "closure_parameters"
+            && descendant_identifier_matches(current, name, source)
+        {
+            return true;
+        }
+        if matches!(
+            current.kind(),
+            "parameter" | "let_declaration" | "for_expression" | "match_arm" | "let_condition"
+        ) {
+            if let Some(pattern) = current.child_by_field_name("pattern") {
+                if descendant_identifier_matches(pattern, name, source) {
+                    return true;
+                }
+            }
+        }
+
+        let mut cursor = current.walk();
+        stack.extend(current.children(&mut cursor));
+    }
+    false
+}
+
+fn descendant_identifier_matches(node: Node<'_>, name: &str, source: &str) -> bool {
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
+        if current.kind() == "identifier" && current.utf8_text(source.as_bytes()).ok() == Some(name)
+        {
+            return true;
+        }
+        let mut cursor = current.walk();
+        stack.extend(current.children(&mut cursor));
+    }
+    false
 }
 
 /// Extract visibility from a node.
@@ -669,6 +819,94 @@ fn baz() {}
         assert_eq!(calls.len(), 2);
         assert!(calls.iter().any(|e| e.target_name == "bar"));
         assert!(calls.iter().any(|e| e.target_name == "baz"));
+    }
+
+    #[test]
+    fn test_extract_function_items_passed_as_values() {
+        let mut parser = RustParser::new();
+        let source = r#"
+fn run_main() {}
+fn transform(value: i32) -> i32 { value + 1 }
+
+fn main() {
+    spawn(run_main);
+    values.into_iter().map(transform);
+    spawn(worker::run_main);
+}
+
+fn shadowed() {
+    let run_main = || {};
+    spawn(worker::run_main);
+}
+"#;
+
+        let result = parser.parse("test.rs", source).unwrap();
+        let uses: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Uses)
+            .collect();
+
+        assert_eq!(uses.len(), 4);
+        assert!(uses.iter().any(|edge| {
+            edge.source_id.contains("main")
+                && edge.target_name == "run_main"
+                && edge.target_id.is_none()
+                && edge.context.as_deref() == Some("rust-function-item:run_main")
+        }));
+        assert!(uses.iter().any(|edge| {
+            edge.source_id.contains("main")
+                && edge.target_name == "transform"
+                && edge.target_id.is_none()
+        }));
+        assert!(uses.iter().any(|edge| {
+            edge.target_name == "run_main"
+                && edge.context.as_deref() == Some("rust-function-item:worker::run_main")
+        }));
+        assert!(uses.iter().any(|edge| {
+            edge.source_id.contains("shadowed")
+                && edge.context.as_deref() == Some("rust-function-item:worker::run_main")
+        }));
+    }
+
+    #[test]
+    fn test_function_value_candidates_exclude_calls_closures_and_local_bindings() {
+        let mut parser = RustParser::new();
+        let source = r#"
+fn transform(value: i32) -> i32 { value + 1 }
+
+fn apply(parameter_callback: fn(i32) -> i32) {
+    let closure_callback = |value| value + 1;
+    consume(transform(1));
+    consume(|value| transform(value));
+    consume(parameter_callback);
+    consume(closure_callback);
+    for transform in callbacks {
+        consume(transform);
+    }
+    if let Some(transform) = optional_callback {
+        consume(transform);
+    }
+    while let Some(transform) = callback_queue.pop() {
+        consume(transform);
+    }
+    match callback_result {
+        Ok(transform) => consume(transform),
+        Err(_) => {}
+    }
+}
+"#;
+
+        let result = parser.parse("test.rs", source).unwrap();
+        assert!(
+            result.edges.iter().all(|edge| edge.kind != EdgeKind::Uses),
+            "unexpected uses edges: {:?}",
+            result.edges
+        );
+        assert!(result
+            .edges
+            .iter()
+            .any(|edge| { edge.kind == EdgeKind::Calls && edge.target_name == "transform" }));
     }
 
     #[test]

@@ -53,6 +53,11 @@ ctx index  # Only processes modified files
 
 This makes re-indexing fast even for large codebases.
 
+After upgrading ctx to a version with changed parser semantics, run `ctx index
+--force` once. Content hashes cannot tell that unchanged source files need to
+be parsed again, so an older index will not contain newly recognized
+relationships such as Rust function-item `uses` edges.
+
 ### Force Full Reindex
 
 When you update `.contextignore` or want a clean slate:
@@ -108,6 +113,9 @@ ctx index -i "tests/" -i "*.generated.ts"
 
 # Only index specific patterns
 ctx index -p "src/**/*.rs" -p "lib/"
+
+# Positional paths scope the same way (a bare directory means everything under it)
+ctx index src
 
 # Disable gitignore (index gitignored files)
 ctx index --no-gitignore
@@ -345,7 +353,11 @@ Dependency traversal follows resolved targets breadth-first across all outgoing 
 up to `--depth`. Direct edge kinds are preserved, unresolved references remain visible leaves, and
 resolved symbols are deduplicated at their shortest distance with the root excluded. `--file` and
 `--kind` select only the root. Human output groups results by distance; JSON entries include numeric
-`distance`.
+`distance`. For Rust, a bare or module-qualified free function passed as a value (for example,
+`spawn(worker::run_main)` or `.map(transform)`) appears as `uses`, not `calls`, when exactly one
+Rust function item matches.
+Ambiguous matches remain unresolved evidence. These references appear in `query deps` and
+`explain`, but do not become callers or affect call graphs, impact analysis, fan-in, or fan-out.
 
 ### Call Graph
 

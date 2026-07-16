@@ -35,7 +35,7 @@ pub use embed::{run_embed, run_embed_watch, run_semantic};
 pub use graph::run_graph;
 pub use harness::run_harness;
 pub use hotspots::run_hotspots;
-pub use index::{run_index, IndexConfig};
+pub use index::{merge_include_patterns, run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
 pub use interactive::run_shell;

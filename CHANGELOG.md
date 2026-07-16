@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   startup, cross-file reference resolution via `textDocument/definition`, a
   `.ctx/lsp_status.json` run sidecar, and graceful fallback to tree-sitter —
   server failures never fail an indexing run.
+- Rust indexing now records statically resolvable bare or module-qualified free functions passed as
+  callback values (such as `spawn(worker::run_main)` and `.map(transform)`) as `uses` relationships
+  without treating them as calls (#62). A reference resolves only when exactly one Rust free
+  function matches; references that stay unresolved are discarded rather than kept as unverified
+  evidence, because nothing in the syntax distinguishes a function value from a constant or unit
+  variant in the same position.
 
 ### Fixed
 - Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
@@ -46,6 +52,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while keeping same-named symbols distinct by identity (#63). `line_start` and `line_end` were
   previously always `0` and `qualified_name` always `null`; both now carry real indexed values.
   Consumers that treated `0` as "no location" must read the value rather than the sentinel.
+- BREAKING: `ctx index` now honors positional file patterns and paths (`ctx index src`,
+  `ctx index src/**`), scoping the index exactly like `-p/--pattern` (AGE-13). Previously the
+  positional arguments were accepted but silently ignored, so the whole repository was
+  indexed at full cost. The indexing banner now echoes the effective scope
+  (`Indexing codebase (scoped to: src)...`) and file discovery warns when include
+  patterns match no files. `ctx index` now also refuses to update the index when an
+  explicit scope matches nothing: a mistyped `-p` pattern previously exited 0 and silently
+  emptied an existing index, and now exits non-zero leaving the index untouched. Scripts
+  that relied on an empty scope succeeding must handle the new failure.
+- Positional file, directory, and glob patterns now scope `ctx smart`, `ctx similar`, and `ctx diff`
+  as advertised, including semantic seeds, graph expansion, and renamed or deleted diff paths (#57).
+  A scope that matches no changed files reports an empty result and warns, rather than failing as an
+  operational error.
+- BREAKING: `ctx explain` now separates calls from other relationships for every language, not only
+  Rust (#62). `Calls (N)` previously counted and listed every outgoing edge, so an import or a trait
+  implementation was reported under a heading that said "Calls"; `extends`, `implements`, `imports`,
+  and `uses` edges now appear under a new `Relationships (N)` section and `Calls (N)` counts calls
+  alone. The documented `callers_count` JSON field narrows in the same way as `ctx query callers`
+  (#61): it now counts only callers resolved by symbol identity, not bare name matches.
+- BREAKING: The index schema version is now 3 (#62). No table changed, but the Rust parser emits
+  `uses` edges an older index does not contain, and content hashing would otherwise let unchanged
+  files keep a stale edge set indefinitely. Existing indexes report the usual schema mismatch and
+  are rebuilt with `ctx index --force`.
 
 ### Documentation
 - Documented the pluggable LSP support: a `ctx lsp` command reference

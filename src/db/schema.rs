@@ -23,7 +23,12 @@ use super::models::*;
 /// History:
 /// - v1: initial versioned schema
 /// - v2: adds `symbol_fingerprints` (MinHash near-duplicate detection)
-pub const SCHEMA_VERSION: i64 = 2;
+/// - v3: Rust function-value arguments recorded as `uses` edges. The tables are
+///   unchanged, but the parser now emits edges an older index does not contain,
+///   and content hashes would otherwise let unchanged files keep their stale
+///   edge set forever. The bump turns that silent staleness into the existing
+///   rebuild prompt.
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Default embedding dimension for vector search.
 /// This matches OpenAI text-embedding-ada-002 (1536) and text-embedding-3-small (1536).
@@ -1619,7 +1624,9 @@ impl Database {
     /// Resolve target_id for edges that only have target_name.
     ///
     /// This performs cross-file symbol resolution by matching target_name to symbols
-    /// in the database. Resolution priority:
+    /// in the database. Rust `uses` edges for function-value arguments resolve
+    /// only when exactly one Rust free-function item matches. Other relationship
+    /// kinds use the existing resolution priority:
     /// 0. Qualified match: the edge `context` equals a symbol's `qualified_name`
     ///    exactly (e.g., "ChessPureLib.isKingInCheck"), disambiguating a bare name
     ///    shared across files/languages.
@@ -1632,6 +1639,90 @@ impl Database {
     ///
     /// Returns the number of edges that were resolved.
     pub fn resolve_edge_targets(&self) -> Result<usize> {
+        let rust_function_references = {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT edges.id, edges.target_name, edges.context
+                FROM edges
+                JOIN symbols source ON source.id = edges.source_id
+                JOIN files source_file ON source_file.path = source.file_path
+                WHERE edges.target_id IS NULL
+                  AND edges.kind = 'uses'
+                  AND edges.context LIKE 'rust-function-item:%'
+                  AND source_file.language = 'rust'
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let rust_functions = {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT symbols.id, symbols.name, symbols.file_path
+                FROM symbols
+                JOIN files ON files.path = symbols.file_path
+                WHERE symbols.kind = 'function'
+                  AND files.language = 'rust'
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+
+        let mut rust_function_references_resolved = 0;
+        for (edge_id, target_name, context) in rust_function_references {
+            let reference_path = context
+                .strip_prefix("rust-function-item:")
+                .unwrap_or(target_name.as_str());
+            let matches: Vec<_> = rust_functions
+                .iter()
+                .filter(|(_, name, file_path)| {
+                    name == &target_name
+                        && rust_function_item_path_matches(file_path, name, reference_path)
+                })
+                .collect();
+            // The capture takes every bare identifier in argument position,
+            // because nothing in the syntax separates `spawn(run_main)` from
+            // `retry(MAX_RETRIES)`; constants, statics, and unit variants all
+            // arrive here too. Candidate count is what tells them apart:
+            //
+            // - exactly one match: resolve it.
+            // - several matches: leave unresolved. The identifier does name a
+            //   function, we just cannot say which one, and that is real
+            //   evidence worth keeping as a leaf.
+            // - no match at all: the identifier names no function in the index,
+            //   so the edge asserts precisely what we failed to establish. Drop
+            //   it rather than leave a reference to a constant sitting in the
+            //   graph as an unresolved dependency.
+            match matches.as_slice() {
+                [target] => {
+                    rust_function_references_resolved += self.conn.execute(
+                        "UPDATE edges SET target_id = ?1 WHERE id = ?2 AND target_id IS NULL",
+                        params![target.0, edge_id],
+                    )?;
+                }
+                [] => {
+                    self.conn.execute(
+                        "DELETE FROM edges WHERE id = ?1 AND target_id IS NULL",
+                        params![edge_id],
+                    )?;
+                }
+                _ => {}
+            }
+        }
+
         // Step 0: Resolve edges whose `context` holds a fully qualified name by an
         // EXACT match on a symbol's `qualified_name` (e.g. Solidity qualified calls
         // like `ChessPureLib.isKingInCheck`). This must run BEFORE the substring
@@ -1648,6 +1739,11 @@ impl Database {
                 LIMIT 1
             )
             WHERE target_id IS NULL
+              AND (
+                edges.kind != 'uses'
+                OR edges.context IS NULL
+                OR edges.context NOT LIKE 'rust-function-item:%'
+              )
               AND context IS NOT NULL
               AND (
                 SELECT COUNT(*) FROM symbols
@@ -1673,6 +1769,11 @@ impl Database {
                   AND edges.context LIKE '%' || t.qualified_name || '%'
             )
             WHERE target_id IS NULL
+              AND (
+                edges.kind != 'uses'
+                OR edges.context IS NULL
+                OR edges.context NOT LIKE 'rust-function-item:%'
+              )
               AND context IS NOT NULL
               AND (
                 SELECT COUNT(*)
@@ -1696,6 +1797,11 @@ impl Database {
                   AND kind IN ('function', 'method')
             )
             WHERE target_id IS NULL
+              AND (
+                edges.kind != 'uses'
+                OR edges.context IS NULL
+                OR edges.context NOT LIKE 'rust-function-item:%'
+              )
               AND (
                 SELECT COUNT(*) FROM symbols
                 WHERE name = edges.target_name
@@ -1723,6 +1829,11 @@ impl Database {
                   AND t.kind IN ('function', 'method')
             )
             WHERE target_id IS NULL
+              AND (
+                edges.kind != 'uses'
+                OR edges.context IS NULL
+                OR edges.context NOT LIKE 'rust-function-item:%'
+              )
               AND (
                 SELECT COUNT(*)
                 FROM symbols t
@@ -1754,7 +1865,11 @@ impl Database {
             [],
         )?;
 
-        Ok(qualified_resolved + context_resolved + unique_resolved + same_file_unique)
+        Ok(rust_function_references_resolved
+            + qualified_resolved
+            + context_resolved
+            + unique_resolved
+            + same_file_unique)
     }
 
     /// Unresolved edges that carry a call-site location, joined to the file
@@ -1977,6 +2092,31 @@ fn preprocess_search_query(query: &str) -> Vec<String> {
             format!("{}*", s)
         })
         .collect()
+}
+
+/// Match a parsed Rust function-item path against the defining file.
+///
+/// Bare names deliberately match every Rust free function with that name, so
+/// the caller resolves only a globally unique item. Qualified paths use the
+/// module-like file suffix (`worker::run` -> `worker.rs` or `worker/mod.rs`) to
+/// disambiguate without guessing about imports or dynamic values.
+fn rust_function_item_path_matches(file_path: &str, name: &str, reference_path: &str) -> bool {
+    if !reference_path.contains("::") {
+        return reference_path == name;
+    }
+
+    let reference_path = reference_path
+        .strip_prefix("crate::")
+        .or_else(|| reference_path.strip_prefix("self::"))
+        .unwrap_or(reference_path);
+    let module_path = file_path
+        .strip_suffix("/mod.rs")
+        .or_else(|| file_path.strip_suffix(".rs"))
+        .unwrap_or(file_path)
+        .replace(['/', '\\'], "::");
+    let defined_path = format!("{}::{}", module_path, name);
+
+    defined_path == reference_path || defined_path.ends_with(&format!("::{}", reference_path))
 }
 
 /// Helper to convert a row to a Symbol.
@@ -2316,6 +2456,54 @@ mod tests {
             parent_id: None,
             source: None,
         }
+    }
+
+    #[test]
+    fn solidity_uses_edges_keep_existing_target_resolution() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/example.sol".to_string(),
+                content_hash: "solidity".to_string(),
+                size_bytes: 100,
+                language: Some("solidity".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&make_fn_symbol(
+            "src/example.sol::source",
+            "source",
+            "src/example.sol",
+            1,
+        ))
+        .unwrap();
+        db.insert_symbol(&make_fn_symbol(
+            "src/example.sol::target",
+            "target",
+            "src/example.sol",
+            10,
+        ))
+        .unwrap();
+        db.insert_edge(&Edge {
+            source_id: "src/example.sol::source".to_string(),
+            target_id: None,
+            target_name: "target".to_string(),
+            kind: EdgeKind::Uses,
+            line: Some(2),
+            col: None,
+            context: None,
+        })
+        .unwrap();
+
+        assert_eq!(db.resolve_edge_targets().unwrap(), 1);
+        let edge = db
+            .get_outgoing_edges("src/example.sol::source")
+            .unwrap()
+            .pop()
+            .expect("uses edge");
+        assert_eq!(edge.target_id.as_deref(), Some("src/example.sol::target"));
     }
 
     /// Build a 'calls' edge for metrics tests.
