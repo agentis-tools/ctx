@@ -228,7 +228,15 @@ def pr_policy(base_ref: str, labels: set[str]) -> None:
     # The matching version increase is enforced when the release is cut
     # (version.py), not here: breaks land under Unreleased and the release PR
     # carries the bump, per governance/releasing.md.
-    if "breaking-change" in labels:
+    #
+    # Release-preparation PRs are exempt: they carry breaking-change because the
+    # release *contains* breaks, but they introduce none -- version.py bump
+    # relocates the already-acknowledged BREAKING entries from Unreleased into
+    # the dated section, so they appear as moved context, not additions, and this
+    # PR adds no new "- BREAKING:" line. The release side is enforced by
+    # version.py's require_breaking_bump (BREAKING under the dated section => a
+    # sufficient version increase), not by this add-under-Unreleased check.
+    if "breaking-change" in labels and "release-preparation" not in labels:
         added = [
             line
             for line in git_output(

@@ -131,6 +131,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pull request to the release cut, where `governance/releasing.md` places it:
   acknowledged breaks accumulate under Unreleased, and `version.py` refuses to
   release them under an insufficient bump.
+- Exempted `release-preparation` pull requests from that gate's "add a `- BREAKING:`
+  entry" requirement. A release relocates already-acknowledged BREAKING entries from
+  Unreleased into the dated section rather than introducing new ones, so it adds no new
+  marker line; the release side stays enforced by `version.py`'s bump check. Without this,
+  every release carrying accumulated breaks failed its own contract gate.
 - Made CI report its checks on every pull request so branch protection can require them. The
   workflow-level `paths-ignore` meant a docs-only pull request never ran CI, and a check that never
   runs never reports -- so any required check would have stayed pending forever and blocked the

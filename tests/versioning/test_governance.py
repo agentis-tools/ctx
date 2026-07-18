@@ -83,6 +83,62 @@ class ContractPolicyTests(unittest.TestCase):
         self.assertIn("command ctx map", removed)
         self.assertIn("option contract ctx --json", changed)
 
+    def _run_pr_policy(self, labels, changelog_diff):
+        """Exercise pr_policy against a simulated release diff.
+
+        No contract change and CHANGELOG.md is the only touched file (not a
+        SENSITIVE_PATH), so the only gate that can fire is the breaking-change
+        acknowledgement. Module I/O is stubbed so no real git repo is needed.
+        """
+        contract = {"schema": 1, "commands": {"ctx": {"options": {}, "subcommands": []}}}
+
+        def fake_git_output(*args):
+            if "--name-only" in args:
+                return "CHANGELOG.md\n"
+            if args and args[-1] == "CHANGELOG.md":
+                return changelog_diff
+            return ""
+
+        saved = (contracts.load_contract, contracts.contract_from_ref, contracts.git_output)
+        contracts.load_contract = lambda *a, **k: contract
+        contracts.contract_from_ref = lambda ref: contract
+        contracts.git_output = fake_git_output
+        try:
+            contracts.pr_policy("main", set(labels))
+        finally:
+            (contracts.load_contract, contracts.contract_from_ref, contracts.git_output) = saved
+
+    def test_release_preparation_exempts_breaking_change_relocation(self):
+        # A release PR relocates already-acknowledged BREAKING entries into the
+        # dated section: the entry line is unchanged context, only the version
+        # header is added -- no new "+- BREAKING:" line. version.py enforces the
+        # release side, so release-preparation is exempt here.
+        relocation_diff = "\n".join(
+            [
+                " ## [Unreleased]",
+                "+## [0.4.0] - 2026-07-18",
+                " ### Fixed",
+                " - BREAKING: caller lookup narrowed (#61)",
+            ]
+        )
+        # release PR: exempt -> passes
+        self._run_pr_policy(
+            {"breaking-change", "release-preparation", "contract-review"}, relocation_diff
+        )
+        # same diff on a feature PR (no release-preparation): still enforced
+        with self.assertRaises(contracts.ContractError):
+            self._run_pr_policy({"breaking-change", "contract-review"}, relocation_diff)
+
+    def test_feature_pr_adding_breaking_entry_passes(self):
+        # A feature PR that genuinely adds a "- BREAKING:" entry satisfies the gate.
+        added_diff = "\n".join(
+            [
+                " ### Fixed",
+                "+- BREAKING: new incompatible behavior (#99)",
+            ]
+        )
+        self._run_pr_policy({"breaking-change", "contract-review"}, added_diff)
+
 
 if __name__ == "__main__":
     unittest.main()
