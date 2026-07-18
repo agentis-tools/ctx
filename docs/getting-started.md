@@ -53,7 +53,7 @@ Package-manager installations must be upgraded through the package manager that 
 
 ```bash
 ctx --version
-# ctx 0.3.5
+# ctx 0.4.0
 ```
 
 ## Part 1: Context Generation
