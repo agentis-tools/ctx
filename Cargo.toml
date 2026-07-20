@@ -35,7 +35,7 @@ ignore = "0.4"
 globset = "0.4"
 
 # Code Intelligence (SQLite Foundation + sqlite-vec)
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 sqlite-vec = "0.1.6"
 zerocopy = { version = "0.8", features = ["derive"] }
 sha2 = "0.11"
@@ -98,7 +98,7 @@ rustyline = { version = "18", features = ["with-file-history"] }
 # Local embeddings (fastembed)
 # fastembed 5.17+ pulls an ort build that no longer ships Intel macOS binaries.
 # Keep the release matrix compatible with the documented x86_64 macOS target.
-fastembed = "=5.17.2"
+fastembed = "=5.17.3"
 
 # Phase 2: DuckDB for analytical queries (optional, not available on Windows)
 duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
