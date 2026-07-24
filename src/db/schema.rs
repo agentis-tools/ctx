@@ -1307,6 +1307,8 @@ impl Database {
     ) -> Result<()> {
         let vector_json = serde_json::to_string(vector)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let dimension = i64::try_from(vector.len())
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
         // Store in JSON embeddings table
         self.conn.execute(
@@ -1314,7 +1316,7 @@ impl Database {
             INSERT OR REPLACE INTO embeddings (symbol_id, provider, model, dimension, vector)
             VALUES (?, ?, ?, ?, ?)
             "#,
-            params![symbol_id, provider, model, vector.len(), vector_json],
+            params![symbol_id, provider, model, dimension, vector_json],
         )?;
 
         // Also store in vector table for fast KNN search (if available and dimension matches)

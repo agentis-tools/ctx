@@ -120,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Refreshed the root and performance-harness dependency locks together, including
+  the bundled SQLite runtime, so both independently locked Cargo packages resolve
+  the same reviewed dependency set.
 - Made the `breaking-change` policy gate reachable and enforced it by label.
   `check-contracts.py pr-policy` required a `breaking-change` label for removed CLI
   contracts, but no such label existed in the repository, so the requirement could
