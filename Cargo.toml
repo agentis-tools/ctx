@@ -96,9 +96,19 @@ async-trait = { version = "0.1", optional = true }
 rustyline = { version = "18", features = ["with-file-history"] }
 
 # Local embeddings (fastembed)
-# fastembed 5.17+ pulls an ort build that no longer ships Intel macOS binaries.
-# Keep the release matrix compatible with the documented x86_64 macOS target.
-fastembed = "=5.17.3"
+#
+# DO NOT BUMP THIS PIN WITHOUT RE-CHECKING THE RELEASE MATRIX. fastembed 5.17+
+# pulls ort-sys 2.0.0-rc.12, whose prebuilt ONNX Runtime breaks two release
+# targets: it publishes no x86_64-apple-darwin binaries at all, and its Linux
+# binaries reference glibc >= 2.38 symbols (__isoc23_strtol*) that the pinned
+# ubuntu-22.04 builder (glibc 2.35) cannot link. 5.4.0 resolves to ort-sys
+# 2.0.0-rc.10, which builds on every target we ship.
+#
+# `--no-default-features` does not help here: fastembed is a required
+# dependency, so ort is in the graph for every feature set.
+#
+# Dependabot is configured to leave this crate alone (.github/dependabot.yml).
+fastembed = "=5.4.0"
 
 # Phase 2: DuckDB for analytical queries (optional, not available on Windows)
 duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }

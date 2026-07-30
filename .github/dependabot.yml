@@ -10,6 +10,14 @@ updates:
         dependency-type: production
       rust-development:
         dependency-type: development
+    ignore:
+      # fastembed selects the ort/ONNX Runtime build, and newer releases pull
+      # prebuilts that do not link on two of our release targets (see the pin
+      # comment in Cargo.toml). Bumping it is a manual decision that has to be
+      # validated against the full release matrix, not an automated one.
+      - dependency-name: fastembed
+      - dependency-name: ort
+      - dependency-name: ort-sys
 
   - package-ecosystem: cargo
     directory: "/perf"
