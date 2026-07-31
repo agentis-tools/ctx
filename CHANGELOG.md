@@ -149,7 +149,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands. Internal only: no CLI surface, config contract, or documented behavior
   changes yet.
 - Made the local CI and canonical plugin lockstep checks honor Cargo's configured target directory while validating the standalone downloadable ctx skill against its harness template.
-- Constrained fastembed to the last ONNX Runtime dependency line that still publishes Intel macOS binaries.
+- Constrained fastembed to the last ONNX Runtime dependency line that still publishes Intel macOS
+  binaries, and told Dependabot to leave it alone. The exact pin was there to hold ort-sys at
+  2.0.0-rc.10, but a grouped dependency update rewrote the pin itself to fastembed 5.17.3, pulling
+  ort-sys 2.0.0-rc.12 and breaking two release targets: no prebuilt ONNX Runtime exists for
+  x86_64-apple-darwin, and the Linux prebuilt needs glibc >= 2.38 symbols the pinned ubuntu-22.04
+  builder cannot link. `--no-default-features` does not avoid this, because fastembed is a required
+  dependency.
 - Supplied the Debian source stanza required for release-package dependency discovery.
 
 ## [0.3.5] - 2026-07-13
