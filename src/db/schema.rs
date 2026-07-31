@@ -1768,7 +1768,19 @@ impl Database {
                 WHERE t.name = edges.target_name
                   AND t.kind IN ('function', 'method')
                   AND t.qualified_name IS NOT NULL
-                  AND edges.context LIKE '%' || t.qualified_name || '%'
+                  -- The qualified name must appear at an identifier boundary,
+                  -- not as a bare substring: `BTreeMap::new()` contains the
+                  -- text `Map::new`, and matching that binds a std call to an
+                  -- unrelated local `Map::new` in another file (or crate).
+                  AND INSTR(edges.context, t.qualified_name) > 0
+                  AND (
+                    INSTR(edges.context, t.qualified_name) = 1
+                    OR SUBSTR(
+                         edges.context,
+                         INSTR(edges.context, t.qualified_name) - 1,
+                         1
+                       ) NOT GLOB '[A-Za-z0-9_:]'
+                  )
             )
             WHERE target_id IS NULL
               AND (
@@ -1783,13 +1795,38 @@ impl Database {
                 WHERE t.name = edges.target_name
                   AND t.kind IN ('function', 'method')
                   AND t.qualified_name IS NOT NULL
-                  AND edges.context LIKE '%' || t.qualified_name || '%'
+                  -- The qualified name must appear at an identifier boundary,
+                  -- not as a bare substring: `BTreeMap::new()` contains the
+                  -- text `Map::new`, and matching that binds a std call to an
+                  -- unrelated local `Map::new` in another file (or crate).
+                  AND INSTR(edges.context, t.qualified_name) > 0
+                  AND (
+                    INSTR(edges.context, t.qualified_name) = 1
+                    OR SUBSTR(
+                         edges.context,
+                         INSTR(edges.context, t.qualified_name) - 1,
+                         1
+                       ) NOT GLOB '[A-Za-z0-9_:]'
+                  )
               ) = 1
             "#,
             [],
         )?;
 
-        // Step 2: Resolve edges where target name is unique across the codebase
+        // Step 2: Resolve edges where target name is unique across the codebase.
+        //
+        // Global name uniqueness is only evidence for a *bare* call like
+        // `helper()`. A receiver or path qualifier means the target is selected
+        // by a type we have not resolved -- `out.push(v)` on a `Vec`, or
+        // `Type::from(x)` -- and the sole indexed symbol with that bare name is
+        // very often an unrelated one. Binding those produces edges between
+        // files (and, in a Cargo workspace, between crates) that have no
+        // dependency relationship at all, which `ctx check` then reports as
+        // architecture violations.
+        //
+        // This is the same guard Step 3 applies for the same-file case; the
+        // trailing clause still admits a qualified call whose qualifier matches
+        // the candidate's own qualified name.
         let unique_resolved = self.conn.execute(
             r#"
             UPDATE edges
@@ -1809,6 +1846,59 @@ impl Database {
                 WHERE name = edges.target_name
                   AND kind IN ('function', 'method')
               ) = 1
+              AND (
+                context IS NULL
+                OR (
+                    context NOT LIKE '%::' || target_name || '(%'
+                    AND context NOT LIKE '%.' || target_name || '(%'
+                    AND context NOT LIKE '%->' || target_name || '(%'
+                )
+                -- Anchored, for the same reason as Step 1: `BTreeMap::new(`
+                -- must not be rescued by a candidate qualified `Map::new`.
+                OR (
+                    INSTR(context, (
+                        SELECT t.qualified_name
+                        FROM symbols t
+                        WHERE t.name = edges.target_name
+                          AND t.kind IN ('function', 'method')
+                        LIMIT 1
+                    ) || '(') > 0
+                    AND (
+                      INSTR(context, (
+                          SELECT t.qualified_name
+                          FROM symbols t
+                          WHERE t.name = edges.target_name
+                            AND t.kind IN ('function', 'method')
+                          LIMIT 1
+                      ) || '(') = 1
+                      OR SUBSTR(context, INSTR(context, (
+                          SELECT t.qualified_name
+                          FROM symbols t
+                          WHERE t.name = edges.target_name
+                            AND t.kind IN ('function', 'method')
+                          LIMIT 1
+                      ) || '(') - 1, 1) NOT GLOB '[A-Za-z0-9_:]'
+                    )
+                )
+              )
+              -- A call that reads as bare (`helper()`) cannot reach an `impl`
+              -- method: methods need a receiver or a path. When the context
+              -- shows no qualifier the sole candidate must be a free function.
+              -- This also covers a long call chain whose context was truncated
+              -- before its `.method(` ever became visible.
+              AND (
+                context IS NULL
+                OR context LIKE '%::' || target_name || '(%'
+                OR context LIKE '%.' || target_name || '(%'
+                OR context LIKE '%->' || target_name || '(%'
+                OR (
+                    SELECT t.kind
+                    FROM symbols t
+                    WHERE t.name = edges.target_name
+                      AND t.kind IN ('function', 'method')
+                    LIMIT 1
+                  ) = 'function'
+              )
             "#,
             [],
         )?;
@@ -2506,6 +2596,219 @@ mod tests {
             .pop()
             .expect("uses edge");
         assert_eq!(edge.target_id.as_deref(), Some("src/example.sol::target"));
+    }
+
+    /// Symbol with an explicit qualified name and kind, for resolution tests.
+    fn make_qualified_symbol(
+        id: &str,
+        name: &str,
+        qualified: &str,
+        file: &str,
+        kind: SymbolKind,
+    ) -> Symbol {
+        let mut s = make_fn_symbol(id, name, file, 1);
+        s.qualified_name = Some(qualified.to_string());
+        s.kind = kind;
+        s
+    }
+
+    fn rust_file(db: &Database, path: &str) {
+        db.upsert_file(
+            &FileRecord {
+                path: path.to_string(),
+                content_hash: path.to_string(),
+                size_bytes: 100,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+    }
+
+    fn call_edge_with_context(source_id: &str, target_name: &str, context: &str) -> Edge {
+        Edge {
+            source_id: source_id.to_string(),
+            target_id: None,
+            target_name: target_name.to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(2),
+            col: None,
+            context: Some(context.to_string()),
+        }
+    }
+
+    /// A qualified name must match at an identifier boundary, not as a bare
+    /// substring. `BTreeMap::new()` and `serde_json::Map::new()` both contain
+    /// the text `Map::new`; binding either to a local `Map::new` invents a
+    /// dependency on whatever file (or crate) happens to define it.
+    #[test]
+    fn qualified_name_match_requires_an_identifier_boundary() {
+        let db = Database::open_in_memory().unwrap();
+        rust_file(&db, "src/caller.rs");
+        rust_file(&db, "src/map.rs");
+        db.insert_symbol(&make_fn_symbol("src/caller.rs::c", "c", "src/caller.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "src/map.rs::new",
+            "new",
+            "Map::new",
+            "src/map.rs",
+            SymbolKind::Method,
+        ))
+        .unwrap();
+
+        for context in ["BTreeMap::new()", "serde_json::Map::new()"] {
+            db.insert_edge(&call_edge_with_context("src/caller.rs::c", "new", context))
+                .unwrap();
+        }
+        db.resolve_edge_targets().unwrap();
+
+        for edge in db.get_outgoing_edges("src/caller.rs::c").unwrap() {
+            assert_eq!(
+                edge.target_id, None,
+                "{:?} must not bind to Map::new",
+                edge.context
+            );
+        }
+    }
+
+    /// A genuine `Map::new()` call still resolves: anchoring rejects only the
+    /// cases where the qualified name is a suffix of a longer path.
+    #[test]
+    fn qualified_name_match_still_resolves_a_real_call() {
+        let db = Database::open_in_memory().unwrap();
+        rust_file(&db, "src/caller.rs");
+        rust_file(&db, "src/map.rs");
+        db.insert_symbol(&make_fn_symbol("src/caller.rs::c", "c", "src/caller.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "src/map.rs::new",
+            "new",
+            "Map::new",
+            "src/map.rs",
+            SymbolKind::Method,
+        ))
+        .unwrap();
+        db.insert_edge(&call_edge_with_context(
+            "src/caller.rs::c",
+            "new",
+            "let m = Map::new();",
+        ))
+        .unwrap();
+
+        db.resolve_edge_targets().unwrap();
+        let edge = db
+            .get_outgoing_edges("src/caller.rs::c")
+            .unwrap()
+            .pop()
+            .expect("call edge");
+        assert_eq!(edge.target_id.as_deref(), Some("src/map.rs::new"));
+    }
+
+    /// Global name uniqueness is only evidence for a bare call. A receiver
+    /// means the target is chosen by an unresolved type, so the sole indexed
+    /// symbol with that name must not be bound.
+    #[test]
+    fn receiver_calls_do_not_bind_to_a_globally_unique_name() {
+        let db = Database::open_in_memory().unwrap();
+        rust_file(&db, "src/caller.rs");
+        rust_file(&db, "src/widget.rs");
+        db.insert_symbol(&make_fn_symbol("src/caller.rs::c", "c", "src/caller.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "src/widget.rs::push",
+            "push",
+            "Widget::push",
+            "src/widget.rs",
+            SymbolKind::Method,
+        ))
+        .unwrap();
+        db.insert_edge(&call_edge_with_context(
+            "src/caller.rs::c",
+            "push",
+            "out.push(value)",
+        ))
+        .unwrap();
+
+        db.resolve_edge_targets().unwrap();
+        let edge = db
+            .get_outgoing_edges("src/caller.rs::c")
+            .unwrap()
+            .pop()
+            .expect("call edge");
+        assert_eq!(edge.target_id, None, "Vec::push must not bind Widget::push");
+    }
+
+    /// A bare call cannot reach an `impl` method: methods need a receiver or a
+    /// path. This also covers a chain whose context was truncated before its
+    /// `.method(` became visible.
+    #[test]
+    fn bare_calls_do_not_bind_to_a_method() {
+        let db = Database::open_in_memory().unwrap();
+        rust_file(&db, "src/caller.rs");
+        rust_file(&db, "src/report.rs");
+        db.insert_symbol(&make_fn_symbol("src/caller.rs::c", "c", "src/caller.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "src/report.rs::push",
+            "push",
+            "Report::push",
+            "src/report.rs",
+            SymbolKind::Method,
+        ))
+        .unwrap();
+        // Truncated chain: the `.push(` never appears in the stored context.
+        db.insert_edge(&call_edge_with_context(
+            "src/caller.rs::c",
+            "push",
+            "self.information.entry(object.information_id).or_default()",
+        ))
+        .unwrap();
+
+        db.resolve_edge_targets().unwrap();
+        let edge = db
+            .get_outgoing_edges("src/caller.rs::c")
+            .unwrap()
+            .pop()
+            .expect("call edge");
+        assert_eq!(edge.target_id, None, "bare call must not bind a method");
+    }
+
+    /// The complement: a bare call to a globally unique free *function* still
+    /// resolves, which is what Step 2 exists to do.
+    #[test]
+    fn bare_calls_still_bind_a_unique_free_function() {
+        let db = Database::open_in_memory().unwrap();
+        rust_file(&db, "src/caller.rs");
+        rust_file(&db, "src/helpers.rs");
+        db.insert_symbol(&make_fn_symbol("src/caller.rs::c", "c", "src/caller.rs", 1))
+            .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "src/helpers.rs::generate_province",
+            "generate_province",
+            "generate_province",
+            "src/helpers.rs",
+            SymbolKind::Function,
+        ))
+        .unwrap();
+        db.insert_edge(&call_edge_with_context(
+            "src/caller.rs::c",
+            "generate_province",
+            "generate_province(budget)",
+        ))
+        .unwrap();
+
+        db.resolve_edge_targets().unwrap();
+        let edge = db
+            .get_outgoing_edges("src/caller.rs::c")
+            .unwrap()
+            .pop()
+            .expect("call edge");
+        assert_eq!(
+            edge.target_id.as_deref(),
+            Some("src/helpers.rs::generate_province")
+        );
     }
 
     /// Build a 'calls' edge for metrics tests.

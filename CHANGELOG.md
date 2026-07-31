@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ctx check` no longer reports `forbidden` dependency violations between crates
+  that have no dependency relationship, which made `[[rules.forbidden]]`
+  unusable in a Cargo workspace (#92). Three independent resolution defects
+  produced the false edges:
+  - `use crate::…` in a workspace member resolved against the repository root's
+    `src/`, so every member importing from its own crate root was recorded as
+    importing from the root package's `src/lib.rs`. `crate::` now resolves
+    against the importing file's own crate root.
+  - A candidate's `qualified_name` was matched as a bare substring of the call
+    context, so `BTreeMap::new()` and `serde_json::Map::new()` both bound to a
+    local `Map::new`. The match is now anchored at an identifier boundary.
+  - Global name uniqueness was accepted as evidence for calls that carry a
+    receiver or path qualifier (`out.push(v)`, `Type::from(x)`), and for bare
+    calls whose only candidate is an `impl` method. Uniqueness now applies only
+    to bare calls resolving to a free function, matching the guard the
+    same-file resolution step already used.
+
+  A bare call shadowed by a local closure binding can still resolve to an
+  unrelated same-named free function; that case needs the Cargo dependency
+  graph or closure-scope awareness and is not addressed here.
+
+  Re-running `ctx index` on an existing index is not sufficient to clear
+  previously stored false edges, because resolution only fills targets that are
+  still unset. Delete `.ctx/codebase.sqlite` and reindex to pick up the fix.
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

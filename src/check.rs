@@ -299,14 +299,16 @@ fn resolve_c_include(
     matches.next().is_none().then_some(only)
 }
 
-/// Rust `use` path resolution: `crate::` from `src/`, `self::`/`super::`
-/// relative to the importing file's module, bare paths are external crates.
+/// Rust `use` path resolution: `crate::` from the importing file's own crate
+/// root, `self::`/`super::` relative to the importing file's module, bare paths
+/// are external crates.
 fn resolve_rust(indexed: &HashSet<String>, importing_file: &str, from: &str) -> Option<String> {
     let segs: Vec<&str> = from.split("::").filter(|s| !s.is_empty()).collect();
     let first = *segs.first()?;
 
+    let crate_src = rust_crate_src_root(importing_file);
     let (base, rest): (String, &[&str]) = match first {
-        "crate" => ("src".to_string(), &segs[1..]),
+        "crate" => (crate_src.clone(), &segs[1..]),
         "self" => (rust_self_dir(importing_file), &segs[1..]),
         "super" => {
             let mut dir = rust_self_dir(importing_file);
@@ -342,8 +344,11 @@ fn resolve_rust(indexed: &HashSet<String>, importing_file: &str, from: &str) -> 
                 return Some(candidate);
             }
         }
-        if base == "src" {
-            for candidate in ["src/lib.rs".to_string(), "src/main.rs".to_string()] {
+        if base == crate_src {
+            for candidate in [
+                format!("{}/lib.rs", crate_src),
+                format!("{}/main.rs", crate_src),
+            ] {
                 if indexed.contains(&candidate) {
                     return Some(candidate);
                 }
@@ -351,6 +356,26 @@ fn resolve_rust(indexed: &HashSet<String>, importing_file: &str, from: &str) -> 
         }
     }
     None
+}
+
+/// The `src` directory of the crate that owns `importing_file`.
+///
+/// `crate::` resolves against the enclosing crate root, not the repository
+/// root. In a Cargo workspace `child/src/lib.rs` belongs to the `child` member,
+/// so `use crate::inner::Thing` there must resolve under `child/src`, never
+/// under the workspace root's `src`. Resolving it to the root package's
+/// `src/lib.rs` invents a dependency between crates that may not even be
+/// allowed to depend on each other.
+///
+/// The nearest enclosing `src/` directory is the crate root under the standard
+/// Cargo layout. Files outside any `src/` directory keep the previous
+/// repository-root behaviour.
+fn rust_crate_src_root(importing_file: &str) -> String {
+    match importing_file.rfind("/src/") {
+        // Keep the `/src` itself, drop the trailing slash and remainder.
+        Some(i) => importing_file[..i + "/src".len()].to_string(),
+        None => "src".to_string(),
+    }
 }
 
 /// The directory that holds child modules of the importing Rust file:
@@ -550,6 +575,75 @@ mod tests {
             // external crates
             ("src/main.rs", "std::collections::HashMap", None),
             ("src/main.rs", "serde::Serialize", None),
+        ];
+        for (file, from, expected) in cases {
+            assert_eq!(
+                resolve_import(&idx, file, from).as_deref(),
+                expected,
+                "{} imports {:?}",
+                file,
+                from
+            );
+        }
+    }
+
+    /// `crate::` is relative to the importing file's own crate root, not the
+    /// workspace root. A member crate resolving `crate::` into the root
+    /// package's `src/lib.rs` fabricates a dependency between crates that may
+    /// have no dependency relationship at all (and could not have one, when the
+    /// root package already depends on the member).
+    #[test]
+    fn test_resolve_import_rust_crate_is_relative_to_workspace_member() {
+        let idx = indexed(&[
+            "src/lib.rs",
+            "src/engine_thing.rs",
+            "child/src/lib.rs",
+            "child/src/inner.rs",
+            "child/src/deep/mod.rs",
+            "nested/member/src/lib.rs",
+            "nested/member/src/thing.rs",
+        ]);
+        let cases = [
+            // `crate::` inside a member stays inside that member.
+            (
+                "child/src/lib.rs",
+                "crate::inner::ChildConfig",
+                Some("child/src/inner.rs"),
+            ),
+            (
+                "child/src/inner.rs",
+                "crate::deep",
+                Some("child/src/deep/mod.rs"),
+            ),
+            // Bare `crate` item resolves to the member's own lib.rs.
+            ("child/src/inner.rs", "crate", Some("child/src/lib.rs")),
+            (
+                "child/src/inner.rs",
+                "crate::ChildEntry",
+                Some("child/src/lib.rs"),
+            ),
+            // Deeply nested members resolve against their own root.
+            (
+                "nested/member/src/lib.rs",
+                "crate::thing",
+                Some("nested/member/src/thing.rs"),
+            ),
+            // The root package is unaffected: it must not reach into a member.
+            (
+                "src/lib.rs",
+                "crate::engine_thing",
+                Some("src/engine_thing.rs"),
+            ),
+            // A module name that exists only in the root package must never
+            // resolve across the crate boundary. `engine_thing` is not a module
+            // of `child`, so this falls back to the member's own crate root as
+            // a possibly re-exported item -- the point is that it stays inside
+            // `child/` and never reaches `src/engine_thing.rs`.
+            (
+                "child/src/lib.rs",
+                "crate::engine_thing",
+                Some("child/src/lib.rs"),
+            ),
         ];
         for (file, from, expected) in cases {
             assert_eq!(
