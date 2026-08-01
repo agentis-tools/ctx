@@ -31,7 +31,7 @@ fn run_score_in(
         None => Vec::new(),
     };
 
-    let report = score::compute_score(root, against)?;
+    let (report, baseline) = score::compute_score_with_baseline(root, against)?;
     eprintln!(
         "note: index refreshed ({} files reindexed)",
         report.files_reindexed
@@ -66,9 +66,9 @@ fn run_score_in(
     }
 
     if json_mode {
-        ctx::json::emit("score", score_data(&report, &failed))?;
+        ctx::json::emit("score", score_data(&report, &baseline, &failed))?;
     } else {
-        print_human(&report, &failed);
+        print_human(&report, &baseline, &failed);
     }
 
     if failed.is_empty() {
@@ -105,7 +105,7 @@ fn metrics_value(m: &Metrics) -> serde_json::Value {
 }
 
 /// The `data` payload for `--json` mode (see docs/json-output.md, `score`).
-fn score_data(report: &ScoreReport, failed: &[FailCondition]) -> serde_json::Value {
+fn score_data(report: &ScoreReport, baseline: &str, failed: &[FailCondition]) -> serde_json::Value {
     let m = &report.metrics;
     let per_file: Vec<serde_json::Value> = report
         .per_file
@@ -125,6 +125,7 @@ fn score_data(report: &ScoreReport, failed: &[FailCondition]) -> serde_json::Val
 
     serde_json::json!({
         "against": report.against,
+        "baseline": baseline,
         "files_changed": m.files_changed,
         "metrics": metrics_value(m),
         "check_violations_note": report.check_violations_note,
@@ -143,12 +144,13 @@ fn marker(delta: i64) -> &'static str {
     }
 }
 
-fn print_human(report: &ScoreReport, failed: &[FailCondition]) {
+fn print_human(report: &ScoreReport, baseline: &str, failed: &[FailCondition]) {
     let m = &report.metrics;
 
     println!(
-        "Score vs {} ({} file{} changed)",
+        "Score vs {} (baseline {}) ({} file{} changed)",
         report.against,
+        baseline,
         m.files_changed,
         if m.files_changed == 1 { "" } else { "s" }
     );
@@ -312,12 +314,14 @@ pub fn sum_invoices(entries: &[i64]) -> i64 {
             "src/a.rs",
             "pub fn a() -> i64 { b() }\npub fn b() -> i64 { 2 }\n",
         );
-        let report = ctx::score::compute_score(&repo.root, "HEAD").unwrap();
+        let (report, baseline) =
+            ctx::score::compute_score_with_baseline(&repo.root, "HEAD").unwrap();
         let conditions = ctx::score::parse_fail_on("symbols_added>0").unwrap();
         let failed = ctx::score::failed_conditions(&conditions, &report.metrics);
-        let data = score_data(&report, &failed);
+        let data = score_data(&report, &baseline, &failed);
 
         assert_eq!(data["against"], "HEAD");
+        assert_eq!(data["baseline"], baseline);
         assert_eq!(data["files_changed"], 1);
 
         // Flat metrics object with exactly the seven documented keys.
