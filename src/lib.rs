@@ -123,9 +123,10 @@
 //! # Feature Flags
 //!
 //! - `duckdb` *(enabled by default)* - DuckDB-backed analytics (call graphs,
-//!   impact analysis, complexity). When disabled, [`analytics`] falls back to
-//!   a stub that compiles everywhere (use this on Windows MSVC): add the
-//!   dependency with `default-features = false`.
+//!   impact analysis, complexity). When disabled, [`analytics`] retains a
+//!   compile-compatible API but returns an actionable feature error at runtime
+//!   (use this on Windows MSVC): add the dependency with `default-features =
+//!   false`.
 //! - `mcp` - Model Context Protocol server support for editor/agent
 //!   integrations (see the `mcp` module).
 

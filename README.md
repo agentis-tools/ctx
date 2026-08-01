@@ -357,6 +357,7 @@ Indexing respects `.gitignore`, an optional `.contextignore`, and 170+ built-in 
 | `FASTEMBED_CACHE_DIR` | Directory for staged fastembed model files used by the local provider |
 | `CTX_DUCKDB_OFFLINE` | Set to `1` to disable DuckDB extension installation and require staged analytics extensions |
 | `CTX_DUCKDB_EXTENSION_DIRECTORY` | DuckDB extension directory used with `CTX_DUCKDB_OFFLINE=1` |
+| `CTX_OFFLINE` | Set to `1` to suppress passive update checks during air-gapped operation |
 | `GITHUB_TOKEN` | Optional for `review` (uses `gh` CLI auth by default) |
 | `CTX_NO_UPDATE_CHECK` | Silence the passive "new release available" notice |
 
