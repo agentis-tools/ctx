@@ -392,8 +392,8 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long, value_name = "REF")]
         against: Option<String>,
 
-        /// Maximum number of pairs to retain and print. Results are marked
-        /// truncated when the search reaches this bound.
+        /// Maximum number of pairs to retain and print (1-10000). Results are
+        /// marked truncated when the search reaches this bound.
         #[arg(long, default_value_t = 1000)]
         limit: usize,
 

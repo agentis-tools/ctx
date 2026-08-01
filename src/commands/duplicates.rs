@@ -9,7 +9,9 @@ use std::env;
 
 use ctx::error::Result;
 use ctx::exit::Outcome;
-use ctx::fingerprint::{find_near_duplicates_limited, DuplicatePair, MIN_THRESHOLD, SHINGLE_K};
+use ctx::fingerprint::{
+    find_near_duplicates_limited, DuplicatePair, MAX_RESULT_LIMIT, MIN_THRESHOLD, SHINGLE_K,
+};
 use ctx::gitutil;
 use ctx::index;
 use ctx::json::{emit, SymbolRef};
@@ -27,6 +29,16 @@ pub fn run_duplicates(
         return Err(format!(
             "--threshold must be a Jaccard similarity between 0.0 and 1.0 (got {})",
             threshold
+        )
+        .into());
+    }
+    if limit == 0 {
+        return Err("--limit must be greater than zero".into());
+    }
+    if limit > MAX_RESULT_LIMIT {
+        return Err(format!(
+            "--limit {} exceeds the maximum of {}",
+            limit, MAX_RESULT_LIMIT
         )
         .into());
     }
@@ -85,13 +97,14 @@ pub fn run_duplicates(
         print_human(&pairs, threshold, min_tokens, against, limit, truncated);
     }
 
-    Ok(outcome(fail_on_found, pairs.len()))
+    Ok(outcome(fail_on_found, pairs.len(), truncated))
 }
 
-/// Map the pair count to the exit outcome: `--fail-on-found` turns any
-/// reported pair into exit code 1; otherwise the command is informational.
-fn outcome(fail_on_found: bool, pair_count: usize) -> Outcome {
-    if fail_on_found && pair_count > 0 {
+/// Map the search result to the exit outcome. A blocking gate fails closed
+/// when the bounded search is incomplete, even if the retained subset is
+/// empty.
+fn outcome(fail_on_found: bool, pair_count: usize, truncated: bool) -> Outcome {
+    if fail_on_found && (pair_count > 0 || truncated) {
         Outcome::Findings
     } else {
         Outcome::Clean
@@ -157,10 +170,12 @@ mod tests {
     #[test]
     fn test_fail_on_found_outcome_mapping() {
         // --fail-on-found: Findings only when pairs exist.
-        assert_eq!(outcome(true, 3), Outcome::Findings);
-        assert_eq!(outcome(true, 0), Outcome::Clean);
+        assert_eq!(outcome(true, 3, false), Outcome::Findings);
+        assert_eq!(outcome(true, 0, false), Outcome::Clean);
+        // An incomplete bounded search must also fail closed.
+        assert_eq!(outcome(true, 0, true), Outcome::Findings);
         // Default mode is informational regardless of pairs.
-        assert_eq!(outcome(false, 3), Outcome::Clean);
-        assert_eq!(outcome(false, 0), Outcome::Clean);
+        assert_eq!(outcome(false, 3, false), Outcome::Clean);
+        assert_eq!(outcome(false, 0, true), Outcome::Clean);
     }
 }
