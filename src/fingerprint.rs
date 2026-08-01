@@ -55,6 +55,11 @@ pub const LSH_ROWS: usize = 8;
 /// misses too many candidate pairs to be trustworthy, so callers clamp to it.
 pub const MIN_THRESHOLD: f64 = 0.5;
 
+/// Default maximum number of duplicate pairs retained by a search.
+pub const DEFAULT_RESULT_LIMIT: usize = 1000;
+
+const CANDIDATE_LIMIT_MULTIPLIER: usize = 16;
+
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -427,6 +432,14 @@ pub struct DuplicatePair {
     pub token_count_b: i64,
 }
 
+/// Bounded duplicate search results.
+#[derive(Debug)]
+pub struct DuplicateSearch {
+    pub pairs: Vec<DuplicatePair>,
+    /// True when candidate or result truncation prevented a complete search.
+    pub truncated: bool,
+}
+
 /// Find near-duplicate function pairs in the index.
 ///
 /// Loads all fingerprints with at least `min_tokens` tokens, buckets them
@@ -442,7 +455,37 @@ pub fn find_near_duplicates(
     min_tokens: i64,
     changed_files: Option<&HashSet<String>>,
 ) -> Result<Vec<DuplicatePair>> {
+    Ok(find_near_duplicates_limited(
+        db,
+        threshold,
+        min_tokens,
+        changed_files,
+        DEFAULT_RESULT_LIMIT,
+    )?
+    .pairs)
+}
+
+/// Find near-duplicate pairs while bounding candidate and result memory.
+///
+/// `limit` is the maximum number of pairs retained. Candidate generation is
+/// also capped at a fixed multiple of that limit, so a pathological LSH
+/// bucket cannot materialize an unbounded candidate set. The result is marked
+/// `truncated` when either cap is reached.
+pub fn find_near_duplicates_limited(
+    db: &Database,
+    threshold: f64,
+    min_tokens: i64,
+    changed_files: Option<&HashSet<String>>,
+    limit: usize,
+) -> Result<DuplicateSearch> {
     let fingerprints = db.get_fingerprints(min_tokens)?;
+
+    if limit == 0 {
+        return Ok(DuplicateSearch {
+            pairs: Vec::new(),
+            truncated: false,
+        });
+    }
 
     // Decode signatures once (fingerprints are ordered by symbol_id, so
     // index order is id order and (i, j) with i < j is the canonical pair).
@@ -460,8 +503,12 @@ pub fn find_near_duplicates(
         }
     }
 
+    let candidate_limit = limit.saturating_mul(CANDIDATE_LIMIT_MULTIPLIER).max(limit);
     let mut candidates: HashSet<(usize, usize)> = HashSet::new();
-    for members in buckets.values() {
+    let mut truncated = false;
+    let mut bucket_entries: Vec<_> = buckets.into_iter().collect();
+    bucket_entries.sort_unstable_by_key(|(key, _)| *key);
+    'bucket: for (_key, members) in bucket_entries {
         if members.len() < 2 {
             continue;
         }
@@ -469,18 +516,21 @@ pub fn find_near_duplicates(
             for &j in &members[n + 1..] {
                 let pair = if i < j { (i, j) } else { (j, i) };
                 if pair.0 != pair.1 {
+                    if let Some(changed) = changed_files {
+                        if !changed.contains(&fingerprints[pair.0].file_path)
+                            && !changed.contains(&fingerprints[pair.1].file_path)
+                        {
+                            continue;
+                        }
+                    }
+                    if candidates.len() >= candidate_limit && !candidates.contains(&pair) {
+                        truncated = true;
+                        break 'bucket;
+                    }
                     candidates.insert(pair);
                 }
             }
         }
-    }
-
-    // --against filter: at least one endpoint must be in a changed file.
-    if let Some(changed) = changed_files {
-        candidates.retain(|&(i, j)| {
-            changed.contains(&fingerprints[i].file_path)
-                || changed.contains(&fingerprints[j].file_path)
-        });
     }
 
     // Verify candidates with exact Jaccard over re-derived shingle sets.
@@ -520,17 +570,24 @@ pub fn find_near_duplicates(
             token_count_a: fingerprints[i].token_count,
             token_count_b: fingerprints[j].token_count,
         });
+        if pairs.len() > limit {
+            pairs.sort_by(compare_pairs);
+            pairs.pop();
+            truncated = true;
+        }
     }
 
-    pairs.sort_by(|x, y| {
-        y.similarity
-            .partial_cmp(&x.similarity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| x.a.id.cmp(&y.a.id))
-            .then_with(|| x.b.id.cmp(&y.b.id))
-    });
+    pairs.sort_by(compare_pairs);
 
-    Ok(pairs)
+    Ok(DuplicateSearch { pairs, truncated })
+}
+
+fn compare_pairs(x: &DuplicatePair, y: &DuplicatePair) -> std::cmp::Ordering {
+    y.similarity
+        .partial_cmp(&x.similarity)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| x.a.id.cmp(&y.a.id))
+        .then_with(|| x.b.id.cmp(&y.b.id))
 }
 
 /// Rebuild a symbol's shingle set from its stored source snippet.
