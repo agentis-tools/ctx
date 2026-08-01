@@ -255,6 +255,7 @@ fn run(args: Args) -> Result<Outcome> {
         Some(Command::Smart {
             task,
             max_tokens,
+            include_oversized_top,
             depth,
             top,
             explain,
@@ -267,8 +268,21 @@ fn run(args: Args) -> Result<Outcome> {
         }) => {
             let provider = resolve_embed_provider(provider, openai);
             commands::run_smart(
-                &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
-                no_tree, &patterns, count_only, &encoding, stats,
+                &task,
+                max_tokens,
+                include_oversized_top,
+                depth,
+                top,
+                explain,
+                dry_run,
+                provider,
+                format,
+                show_sizes,
+                no_tree,
+                &patterns,
+                count_only,
+                &encoding,
+                stats,
             )
         }
         Some(Command::Diff {

@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection, source retrieval, and normalized duplicate detection.
 
 ### Fixed
+- `ctx smart --max-tokens` now enforces a hard limit on the complete rendered context, including tree and format wrappers; the previous oversized-top behavior is explicit via `--include-oversized-top` (#102).
 - Made `ctx diff` and `ctx review` token-budget selection deterministic by ordering equally ranked
   files by repository-relative path before greedy packing (#60).
 - Global `--count-only`, `--encoding`, and `--stats` now apply to `ctx smart` and `ctx diff`;

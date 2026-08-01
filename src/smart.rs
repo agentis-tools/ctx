@@ -29,8 +29,10 @@ use crate::walker::FilePatternFilter;
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
 pub struct SmartConfig {
-    /// Maximum tokens in output
+    /// Maximum tokens in selected file content.
     pub max_tokens: usize,
+    /// Permit the top-ranked file to exceed `max_tokens`.
+    pub include_oversized_top: bool,
     /// Call graph expansion depth
     pub depth: i32,
     /// Number of initial semantic matches to find
@@ -43,6 +45,7 @@ impl Default for SmartConfig {
     fn default() -> Self {
         Self {
             max_tokens: 8000,
+            include_oversized_top: false,
             depth: 2,
             top: 10,
             encoding: Encoding::default(),
@@ -333,9 +336,13 @@ pub fn smart_context_with_embedding_filtered(
     // 5. Rank files by relevance
     rank_files(&mut selections);
 
-    // 6. Apply token limit, but never silently drop the single most-relevant file.
-    let (selected, total_tokens, omitted) =
-        select_with_guaranteed_top(selections, config.max_tokens);
+    // 6. Apply the content budget. The legacy oversized-top behavior is now
+    // explicit because the command's rendered-output budget is hard by default.
+    let (selected, total_tokens, omitted) = if config.include_oversized_top {
+        select_with_guaranteed_top(selections, config.max_tokens)
+    } else {
+        select_by_token_budget(selections, config.max_tokens)
+    };
 
     Ok(SmartContext {
         task: task.to_string(),

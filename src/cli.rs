@@ -450,6 +450,10 @@ internal and unstable. Access is read-only and engine-hardened.
         #[arg(long, default_value = "8000")]
         max_tokens: usize,
 
+        /// Allow the most relevant file to exceed the hard rendered-output budget
+        #[arg(long)]
+        include_oversized_top: bool,
+
         /// Call graph expansion depth
         #[arg(long, default_value = "2")]
         depth: i32,

@@ -194,6 +194,7 @@ pub async fn smart_context(
     // Configure smart context
     let config = SmartConfig {
         max_tokens: params.max_tokens.unwrap_or(8000),
+        include_oversized_top: false,
         depth: params.depth.unwrap_or(2),
         top: params.top.unwrap_or(10),
         encoding: Encoding::default(),
