@@ -42,9 +42,13 @@ pub fn run_embed(
 
     // Optionally clear existing embeddings
     if force {
-        let deleted = db.delete_embeddings(provider.name(), None)?;
+        let deleted = db.delete_all_embeddings()?;
         if verbose {
-            println!("Deleted {} existing embeddings", deleted);
+            println!(
+                "Deleted {} existing embeddings before rebuilding the {} corpus",
+                deleted,
+                provider.name()
+            );
         }
     }
 
@@ -252,8 +256,8 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, provider: Provider)
     let provider =
         embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
 
-    // Warn if the query provider/dimension differs from the index.
-    embeddings::warn_index_mismatch(&db, provider.as_ref());
+    // Do not query an embedding corpus from another provider or dimension.
+    embeddings::ensure_index_compatible(&db, provider.as_ref())?;
 
     // Embed the query
     let query_embedding = provider.embed(query)?;

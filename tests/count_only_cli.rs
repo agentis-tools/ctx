@@ -106,6 +106,36 @@ fn smart_and_diff_reject_invalid_encoding_with_exit_two() {
     }
 }
 
+#[test]
+fn smart_missing_embeddings_is_an_operational_error_in_text_and_json() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("main.rs"), "fn main() {}\n").unwrap();
+    assert_success(&ctx(temp.path(), &["index"]));
+
+    let text = ctx(temp.path(), &["smart", "change main"]);
+    assert_eq!(text.status.code(), Some(2));
+    assert!(
+        text.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&text.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&text.stderr).contains("No embeddings found"),
+        "{}",
+        String::from_utf8_lossy(&text.stderr)
+    );
+
+    let json = ctx(temp.path(), &["--json", "smart", "change main"]);
+    assert_eq!(json.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(value["command"], "smart");
+    assert!(value["data"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("No embeddings found"));
+    assert!(String::from_utf8_lossy(&json.stderr).contains("No embeddings found"));
+}
+
 #[cfg(feature = "duckdb")]
 #[test]
 fn smart_count_only_suppresses_dry_run_and_explain_output() {

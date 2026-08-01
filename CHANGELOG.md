@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ctx smart` now exits with operational-error code 2 when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider (#98, #106).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

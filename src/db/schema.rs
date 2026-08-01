@@ -1612,15 +1612,56 @@ impl Database {
 
     /// Delete embeddings for a specific provider/model.
     pub fn delete_embeddings(&self, provider: &str, model: Option<&str>) -> Result<usize> {
-        if let Some(model) = model {
+        let ids: Vec<String> = if let Some(model) = model {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT symbol_id FROM embeddings WHERE provider = ? AND model = ?")?;
+            let rows = stmt.query_map(params![provider, model], |row| row.get(0))?;
+            rows.collect::<Result<Vec<String>>>()?
+        } else {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT symbol_id FROM embeddings WHERE provider = ?")?;
+            let rows = stmt.query_map([provider], |row| row.get(0))?;
+            rows.collect::<Result<Vec<String>>>()?
+        };
+
+        if self.has_vector_search() {
+            for symbol_id in &ids {
+                self.conn.execute(
+                    "DELETE FROM symbol_vectors WHERE symbol_id = ?",
+                    [symbol_id],
+                )?;
+            }
+        }
+
+        let deleted = if let Some(model) = model {
             self.conn.execute(
                 "DELETE FROM embeddings WHERE provider = ? AND model = ?",
                 params![provider, model],
-            )
+            )?
         } else {
             self.conn
-                .execute("DELETE FROM embeddings WHERE provider = ?", [provider])
+                .execute("DELETE FROM embeddings WHERE provider = ?", [provider])?
+        };
+        Ok(deleted)
+    }
+
+    /// Delete the complete embedding corpus, including the optional vector
+    /// search cache. The on-disk schema stores one vector per symbol, so a
+    /// provider switch must clear every existing row before re-embedding.
+    pub fn delete_all_embeddings(&self) -> Result<usize> {
+        let deleted = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| {
+                row.get::<_, i64>(0)
+            })? as usize;
+
+        if self.has_vector_search() {
+            self.conn.execute("DELETE FROM symbol_vectors", [])?;
         }
+        self.conn.execute("DELETE FROM embeddings", [])?;
+        Ok(deleted)
     }
 
     /// Resolve target_id for edges that only have target_name.

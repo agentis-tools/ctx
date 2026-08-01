@@ -250,6 +250,11 @@ ctx embed --batch-size 100  # Process in batches of 100
 ctx embed --watch           # Watch for index changes and auto-embed
 ```
 
+`--force` clears the existing embedding corpus (and the optional vector-search
+cache) before rebuilding it. Use it when switching providers or Ollama models;
+the semantic commands fail with exit code 2 rather than mixing incompatible
+vectors if the corpus does not match the selected provider.
+
 ### Watch Mode for Embeddings
 
 Keep embeddings in sync with the index:

@@ -43,8 +43,11 @@ pub fn run_smart(
     // Check if we have embeddings
     let embedding_count = db.count_embeddings()?;
     if embedding_count == 0 {
-        eprintln!("No embeddings found. Run 'ctx embed' first to generate embeddings.");
-        return Ok(());
+        let message = "No embeddings found. Run 'ctx embed' first to generate embeddings.";
+        if format == OutputFormat::Json {
+            ctx::json::emit("smart", serde_json::json!({ "error": message }))?;
+        }
+        return Err(ctx::error::CtxError::embedding(message));
     }
 
     if provider == Provider::Local {
@@ -53,8 +56,8 @@ pub fn run_smart(
     let provider =
         embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
 
-    // Warn if the query provider/dimension differs from the index.
-    embeddings::warn_index_mismatch(&db, provider.as_ref());
+    // Do not query an embedding corpus from another provider or dimension.
+    embeddings::ensure_index_compatible(&db, provider.as_ref())?;
 
     // Open analytics for call graph expansion
     let analytics = analytics::Analytics::open(&root)?;
