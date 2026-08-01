@@ -244,11 +244,21 @@ jobs:
           CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
         run: cargo run --locked --release --manifest-path perf/Cargo.toml -- --smoke
 
-      # Advisory period: continue-on-error until the ubuntu-latest baseline
-      # lands in perf/baselines/ and run-to-run spread is confirmed <20%.
-      # Flip this to required (remove continue-on-error) at that point.
+      # The original advisory condition ("until the ubuntu-latest baseline
+      # lands in perf/baselines/ and run-to-run spread is confirmed <20%") has
+      # been met since 2026-07-10: the baseline is committed and spread is a
+      # few percent. It is no longer why this is advisory.
+      #
+      # Pull requests stay advisory so the pre-existing indexing regression
+      # (#96) does not block unrelated work. Scheduled, dispatched, and
+      # push-to-main runs fail hard, so a regression turns main red and
+      # notifies instead of hiding as a failed step inside a green job --
+      # which is exactly how #96 went unnoticed from 2026-07-11 to 07-31.
+      #
+      # Remove this expression entirely (making perf required everywhere)
+      # once #96 is fixed and the suite is green.
       - name: Run perf harness
-        continue-on-error: true
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         env:
           CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
           CTX_PERF_BUDGET_SCALE: "1.5"
@@ -263,6 +273,39 @@ jobs:
             --suite "$SUITE" \
             --baseline perf/baselines/ubuntu-latest.json \
             --json-out perf-results.json
+
+      # Without this, a perf failure is only legible by downloading the
+      # artifact and reading JSON, so nobody reads it.
+      - name: Summarize perf results
+        if: always()
+        run: |
+          test -f perf-results.json || exit 0
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          data = json.load(open("perf-results.json"))
+          scenarios = data.get("scenarios", {})
+          meta = data.get("meta", {})
+          suite = meta.get("suite", "?")
+          bad = {k: v for k, v in scenarios.items() if v.get("status") != "pass"}
+          print("### Perf (%s suite)\n" % suite)
+          if not bad:
+              print(f"All {len(scenarios)} scenarios within budget and baseline.")
+          else:
+              print(f"**{len(bad)} of {len(scenarios)} scenarios failed.**\n")
+              print("| scenario | median | budget | baseline | vs budget | vs baseline |")
+              print("| --- | ---: | ---: | ---: | ---: | ---: |")
+              for name, s in sorted(bad.items()):
+                  median = s.get("median_ms") or 0
+                  budget = s.get("budget_ms")
+                  base = s.get("baseline_median_ms")
+                  vs_budget = f"{median / budget:.1f}x" if budget else "-"
+                  vs_base = f"{median / base:.1f}x" if base else "-"
+                  print(
+                      f"| `{name}` | {median:.0f} ms | {budget or '-'} | {base or '-'} "
+                      f"| {vs_budget} | {vs_base} |"
+                  )
+          PY
 
       - name: Upload perf results
         if: always()
