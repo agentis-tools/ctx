@@ -159,7 +159,7 @@
         "--batch-size": "--batch-size <BATCH_SIZE> Batch size for embedding generation [default: 50]",
         "--count-only": "--count-only Only count tokens, don't output file contents",
         "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
-        "--force": "--force Force re-embedding of all symbols",
+        "--force": "--force Force re-embedding of all symbols (also applies to watch startup)",
         "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
         "--help": "-h, --help Print help (see a summary with '-h')",
         "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",

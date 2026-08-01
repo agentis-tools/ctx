@@ -327,6 +327,10 @@ impl EmbeddingProvider for OllamaProvider {
         self.dimension
     }
 
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     fn embed(&self, text: &str) -> Result<Embedding> {
         self.request(&[text])?
             .pop()
