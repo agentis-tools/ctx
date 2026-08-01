@@ -1642,9 +1642,9 @@ impl Database {
     ///
     /// Returns the number of edges that were resolved.
     pub fn resolve_edge_targets(&self) -> Result<usize> {
-        // The resolver runs after every indexing pass, including no-op
-        // refreshes. Avoid rebuilding all candidate sets when the graph is
-        // already fully resolved.
+        // Indexing skips this method for no-op refreshes. Keep this cheap guard
+        // for direct callers and for passes that did change the graph but have
+        // no unresolved edges left to consider.
         let unresolved: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM edges WHERE target_id IS NULL",
             [],

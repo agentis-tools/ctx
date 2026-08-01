@@ -375,25 +375,23 @@ impl Indexer {
             result.edges_extracted += parse_result.edges.len();
         }
 
-        // Clean up deleted files
-        if let Err(e) = self.cleanup_deleted_files(&seen_files) {
-            if self.verbose {
-                eprintln!("Warning: cleanup failed: {}", e);
-            }
-        }
-
-        // Resolve cross-file edge targets
-        match self.db.resolve_edge_targets() {
-            Ok(resolved) => {
-                if self.verbose && resolved > 0 {
-                    eprintln!("Resolved {} cross-file edge targets", resolved);
-                }
-            }
+        // Resolve cross-file edge targets only when indexing or cleanup changed
+        // the graph. A no-op refresh must not scan a potentially large legacy
+        // set of unresolved edges just to discover that nothing changed.
+        let mut graph_changed = result.files_indexed > 0;
+        match self.cleanup_deleted_files(&seen_files) {
+            Ok(deleted_files) => graph_changed |= deleted_files,
             Err(e) => {
                 if self.verbose {
-                    eprintln!("Warning: edge resolution failed: {}", e);
+                    eprintln!("Warning: cleanup failed: {}", e);
                 }
+                // Cleanup may have deleted some files before returning the
+                // error, so keep the conservative resolution behavior.
+                graph_changed = true;
             }
+        }
+        if graph_changed {
+            self.resolve_edge_targets();
         }
 
         // Stage B: LSP-assisted resolution for what the SQL passes left
@@ -609,25 +607,23 @@ impl Indexer {
             }
         }
 
-        // Clean up deleted files
-        if let Err(e) = self.cleanup_deleted_files(&seen_files) {
-            if self.verbose {
-                eprintln!("Warning: cleanup failed: {}", e);
-            }
-        }
-
-        // Resolve cross-file edge targets
-        match self.db.resolve_edge_targets() {
-            Ok(resolved) => {
-                if self.verbose && resolved > 0 {
-                    eprintln!("Resolved {} cross-file edge targets", resolved);
-                }
-            }
+        // Resolve cross-file edge targets only when indexing or cleanup changed
+        // the graph. A no-op refresh must not scan a potentially large legacy
+        // set of unresolved edges just to discover that nothing changed.
+        let mut graph_changed = result.files_indexed > 0;
+        match self.cleanup_deleted_files(&seen_files) {
+            Ok(deleted_files) => graph_changed |= deleted_files,
             Err(e) => {
                 if self.verbose {
-                    eprintln!("Warning: edge resolution failed: {}", e);
+                    eprintln!("Warning: cleanup failed: {}", e);
                 }
+                // Cleanup may have deleted some files before returning the
+                // error, so keep the conservative resolution behavior.
+                graph_changed = true;
             }
+        }
+        if graph_changed {
+            self.resolve_edge_targets();
         }
 
         // Stage B: LSP-assisted resolution for what the SQL passes left
@@ -857,7 +853,7 @@ impl Indexer {
     }
 
     /// Remove files from database that no longer exist.
-    fn cleanup_deleted_files(&self, seen_files: &[String]) -> io::Result<()> {
+    fn cleanup_deleted_files(&self, seen_files: &[String]) -> io::Result<bool> {
         let indexed_files = self
             .db
             .get_indexed_files()
@@ -882,7 +878,24 @@ impl Indexer {
             self.db.clear_symbol_rank().map_err(db_error)?;
         }
 
-        Ok(())
+        Ok(deleted_any)
+    }
+
+    /// Resolve cross-file edge targets and retain the existing warning-only
+    /// error behavior used by indexing.
+    fn resolve_edge_targets(&self) {
+        match self.db.resolve_edge_targets() {
+            Ok(resolved) => {
+                if self.verbose && resolved > 0 {
+                    eprintln!("Resolved {} cross-file edge targets", resolved);
+                }
+            }
+            Err(e) => {
+                if self.verbose {
+                    eprintln!("Warning: edge resolution failed: {}", e);
+                }
+            }
+        }
     }
 
     /// Get a reference to the database.
@@ -1144,6 +1157,65 @@ fn helper() -> i32 {
         let stats = indexer.database().get_stats().unwrap();
         assert_eq!(stats.files, 1);
         assert!(stats.symbols >= 2);
+    }
+
+    #[test]
+    fn no_op_index_preserves_unresolved_edges_without_scanning_them() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("main.rs"), "fn caller() {}\n").unwrap();
+
+        let mut indexer = Indexer::new_in_memory(root).unwrap();
+        let initial = indexer.index().unwrap();
+        assert_eq!(initial.files_indexed, 1);
+
+        let source = indexer
+            .database()
+            .get_file_symbols("src/main.rs")
+            .unwrap()
+            .into_iter()
+            .find(|symbol| symbol.name == "caller")
+            .expect("caller symbol");
+        indexer
+            .database()
+            .insert_edge(&crate::db::Edge {
+                source_id: source.id.clone(),
+                target_id: None,
+                target_name: "missing_function".to_string(),
+                kind: crate::db::EdgeKind::Uses,
+                line: Some(1),
+                col: None,
+                context: Some("rust-function-item:missing_function".to_string()),
+            })
+            .unwrap();
+
+        let serial = indexer.index().unwrap();
+        assert_eq!(serial.files_indexed, 0);
+        assert_eq!(serial.files_skipped, 1);
+        assert_eq!(
+            indexer
+                .database()
+                .get_outgoing_edges(&source.id)
+                .unwrap()
+                .len(),
+            1,
+            "a no-op serial index must not resolve legacy unresolved edges"
+        );
+
+        let parallel = indexer.index_parallel().unwrap();
+        assert_eq!(parallel.files_indexed, 0);
+        assert_eq!(parallel.files_skipped, 1);
+        assert_eq!(
+            indexer
+                .database()
+                .get_outgoing_edges(&source.id)
+                .unwrap()
+                .len(),
+            1,
+            "a no-op parallel index must not resolve legacy unresolved edges"
+        );
     }
 
     #[test]
