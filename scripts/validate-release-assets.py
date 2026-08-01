@@ -4,6 +4,8 @@
 import argparse
 import hashlib
 from pathlib import Path
+import posixpath
+import re
 import tarfile
 import zipfile
 
@@ -13,6 +15,53 @@ TARGETS = {
     "aarch64-apple-darwin": ".tar.gz",
     "x86_64-pc-windows-msvc": ".zip",
 }
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"ERROR: {message}")
+
+
+def normalized_manifest_name(name: str) -> str:
+    return posixpath.normpath(name.lstrip("* ").strip())
+
+
+def read_checksums(path: Path) -> dict[str, str]:
+    listed: dict[str, str] = {}
+    for number, raw in enumerate(path.read_text().splitlines(), 1):
+        if not raw.strip():
+            continue
+        fields = raw.split(maxsplit=1)
+        if len(fields) != 2:
+            fail(f"invalid checksum line {number}: {raw!r}")
+        digest, name = fields
+        name = normalized_manifest_name(name)
+        if name == "SHA256SUMS" or Path(name).name == "SHA256SUMS":
+            fail(f"SHA256SUMS must not list itself (line {number})")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+            fail(f"invalid SHA256 digest on line {number}: {digest!r}")
+        if name in listed:
+            fail(f"duplicate checksum entry for {name!r}")
+        listed[name] = digest.lower()
+    return listed
+
+
+def validate_checksums(directory: Path, sums: Path) -> None:
+    listed = read_checksums(sums)
+    artifacts = {
+        path.name: path
+        for path in directory.iterdir()
+        if path.is_file() and path.name != "SHA256SUMS"
+    }
+    missing = sorted(set(artifacts) - set(listed))
+    extra = sorted(set(listed) - set(artifacts))
+    if missing:
+        fail(f"SHA256SUMS is missing entries: {', '.join(missing)}")
+    if extra:
+        fail(f"SHA256SUMS lists unknown files: {', '.join(extra)}")
+    for name, path in artifacts.items():
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if listed[name] != actual:
+            fail(f"missing or incorrect checksum for {name}")
 
 
 def main() -> None:
@@ -32,19 +81,15 @@ def main() -> None:
         parser.error("no release archives found")
 
     sums = args.directory / "SHA256SUMS"
+    if args.complete and not sums.exists():
+        fail(f"missing aggregate checksum manifest: {sums}")
     if sums.exists():
-        listed = {}
-        for line in sums.read_text().splitlines():
-            digest, name = line.split(maxsplit=1)
-            listed[name.lstrip("* ")] = digest
-        artifacts = [p for p in args.directory.iterdir() if p.is_file() and p.name != "SHA256SUMS"]
-        for path in artifacts:
-            actual = hashlib.sha256(path.read_bytes()).hexdigest()
-            assert listed.get(path.name) == actual, f"missing or incorrect checksum for {path.name}"
+        validate_checksums(args.directory, sums)
 
 
 def validate_archive(path: Path, target: str) -> None:
-    assert path.is_file(), f"missing release archive: {path}"
+    if not path.is_file():
+        fail(f"missing release archive: {path}")
     root = path.name.removesuffix(".zip").removesuffix(".tar.gz")
     binary = "ctx.exe" if target.endswith("windows-msvc") else "ctx"
     required = {f"{root}/{name}" for name in (binary, "README.md", "LICENSE-MIT", "LICENSE-APACHE")}
@@ -54,7 +99,8 @@ def validate_archive(path: Path, target: str) -> None:
     else:
         with tarfile.open(path, "r:gz") as archive:
             names = set(archive.getnames())
-    assert required <= names, f"{path.name} missing {sorted(required - names)}"
+    if required > names:
+        fail(f"{path.name} missing {sorted(required - names)}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Release checksum generation no longer includes `SHA256SUMS` in its own
+  manifest, and release validation rejects self-referential entries (#103).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
