@@ -77,14 +77,15 @@ pub fn run_doctor_checks(root: &Path) -> Vec<Finding> {
 }
 
 /// Return generated or local stop hooks that still include duplication in a
-/// score gate. The caller decides whether blocking mode is enabled.
+/// blocking gate. The caller decides whether blocking mode is enabled.
 pub fn blocking_duplication_hooks(root: &Path) -> Vec<String> {
     STOP_HOOKS
         .iter()
         .filter_map(|rel| {
             let content = fs::read_to_string(root.join(rel)).ok()?;
-            (content.contains("--fail-on") && content.contains("new_duplication"))
-                .then(|| (*rel).to_string())
+            let score_gate = content.contains("--fail-on") && content.contains("new_duplication");
+            let duplicate_gate = content.contains("--fail-on-found");
+            (score_gate || duplicate_gate).then(|| (*rel).to_string())
         })
         .collect()
 }
@@ -380,12 +381,12 @@ fn check_blocking_duplication_gate_with(root: &Path, findings: &mut Vec<Finding>
         Severity::Warning,
         "blocking_duplication_gate",
         format!(
-            "blocking mode is enabled and {} stop hook{} still gate on new_duplication: {}",
+            "blocking mode is enabled and {} stop hook{} still gate on duplication findings: {}",
             hooks.len(),
             if hooks.len() == 1 { "" } else { "s" },
             hooks.join(", ")
         ),
-        Some("remove new_duplication from the blocking --fail-on expression, or disable CTX_GATE_BLOCKING while calibrating the heuristic"),
+        Some("remove duplication findings from the blocking hook, or disable CTX_GATE_BLOCKING while calibrating the heuristic"),
     ));
 }
 
@@ -541,10 +542,16 @@ mod tests {
 
         let mut findings = Vec::new();
         check_blocking_duplication_gate_with(temp.path(), &mut findings, true);
-        let finding = find(&findings, "blocking_duplication_gate");
-        assert_eq!(finding.severity, Severity::Warning);
-        assert!(finding.message.contains(".claude/hooks/ctx/stop.sh"));
-    }
+    let finding = find(&findings, "blocking_duplication_gate");
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(finding.message.contains(".claude/hooks/ctx/stop.sh"));
+
+    std::fs::write(&stop, "ctx duplicates --fail-on-found\n").unwrap();
+    let mut findings = Vec::new();
+    check_blocking_duplication_gate_with(temp.path(), &mut findings, true);
+    let finding = find(&findings, "blocking_duplication_gate");
+    assert_eq!(finding.severity, Severity::Warning);
+}
 
     #[test]
     fn test_index_missing_and_rules_invalid_are_reported_simultaneously() {
