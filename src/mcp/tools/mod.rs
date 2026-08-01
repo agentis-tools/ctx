@@ -123,7 +123,8 @@ pub struct CallGraphParams {
 pub struct SmartContextParams {
     /// Natural language description of the task.
     pub task: String,
-    /// Maximum tokens in output (default: 8000).
+    /// Hard maximum for the complete response, measured with the default
+    /// tokenizer (default: 8000).
     #[serde(default = "default_max_tokens")]
     pub max_tokens: Option<usize>,
     /// Call graph expansion depth (default: 2).

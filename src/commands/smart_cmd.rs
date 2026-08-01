@@ -12,7 +12,9 @@ use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
 use ctx::output;
-use ctx::smart::{format_dry_run, format_explain, smart_context_filtered, SmartConfig};
+use ctx::smart::{
+    format_dry_run, format_explain, smart_context_filtered_with_options, SmartConfig,
+};
 use ctx::walker;
 
 /// Run smart context selection.
@@ -34,6 +36,12 @@ pub fn run_smart(
     encoding: &str,
     stats: bool,
 ) -> Result<()> {
+    if max_tokens == 0 {
+        return Err(ctx::error::CtxError::Other(
+            "--max-tokens must be greater than zero".to_string(),
+        ));
+    }
+
     let start = Instant::now();
     let encoding = super::context::parse_encoding(encoding)?;
     let root = env::current_dir()?;
@@ -69,7 +77,6 @@ pub fn run_smart(
     };
     let config = SmartConfig {
         max_tokens: effective_max_tokens,
-        include_oversized_top,
         depth,
         top,
         encoding,
@@ -77,9 +84,26 @@ pub fn run_smart(
 
     eprintln!("Analyzing task: \"{}\"...", task);
 
-    let result = smart_context_filtered(&db, &analytics, provider.as_ref(), task, config, &filter)?;
+    // Count-only has always retained the highest-ranked file even when it is
+    // larger than the requested content budget. Keep that compatibility while
+    // normal smart output defaults to a strict budget.
+    let result = smart_context_filtered_with_options(
+        &db,
+        &analytics,
+        provider.as_ref(),
+        task,
+        config,
+        &filter,
+        include_oversized_top || count_only,
+    )?;
 
     if result.selected_files.is_empty() {
+        if result.truncated {
+            return Err(ctx::error::CtxError::Other(format!(
+                "no selected file fits within --max-tokens {}; raise the budget or use --include-oversized-top",
+                max_tokens
+            )));
+        }
         eprintln!("No relevant files found for: \"{}\"", task);
         std::process::exit(2);
     }
@@ -179,7 +203,8 @@ fn fit_rendered_budget(
     include_oversized_top: bool,
 ) -> Result<(ctx::output::ContextResult, usize)> {
     if include_oversized_top {
-        let rendered = output::generate_context(root, entries, format, include_tree, show_sizes)?;
+        let rendered =
+            output::render_stream_context(root, entries, format, include_tree, show_sizes)?;
         return Ok((rendered, 0));
     }
 
@@ -189,7 +214,7 @@ fn fit_rendered_budget(
         let mut candidate = selected.clone();
         candidate.push(entry.clone());
         let rendered =
-            output::generate_context(root, &candidate, format, include_tree, show_sizes)?;
+            output::render_stream_context(root, &candidate, format, include_tree, show_sizes)?;
         let tokens = ctx::tokens::count_tokens_with_encoding(&rendered.content, encoding)
             .map_err(ctx::error::CtxError::token_count)?;
         if tokens <= max_tokens {
@@ -206,7 +231,8 @@ fn fit_rendered_budget(
         )));
     }
 
-    let rendered = output::generate_context(root, &selected, format, include_tree, show_sizes)?;
+    let rendered =
+        output::render_stream_context(root, &selected, format, include_tree, show_sizes)?;
     Ok((rendered, omitted))
 }
 
@@ -231,7 +257,7 @@ mod tests {
         std::fs::write(temp.path().join("a.rs"), "fn a() { let value = 1; }\n").unwrap();
         std::fs::write(temp.path().join("b.rs"), "fn b() { let value = 2; }\n").unwrap();
         let entries = vec![entry(temp.path(), "a.rs"), entry(temp.path(), "b.rs")];
-        let one = output::generate_context(
+        let one = output::render_stream_context(
             temp.path(),
             &entries[..1],
             ctx::formatter::OutputFormat::Plain,
@@ -242,7 +268,7 @@ mod tests {
         let one_tokens =
             ctx::tokens::count_tokens_with_encoding(&one.content, ctx::tokens::Encoding::default())
                 .unwrap();
-        let all = output::generate_context(
+        let all = output::render_stream_context(
             temp.path(),
             &entries,
             ctx::formatter::OutputFormat::Plain,

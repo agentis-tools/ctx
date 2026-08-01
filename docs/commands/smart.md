@@ -78,6 +78,10 @@ that fits by itself if adding its wrapper would exceed the limit. Use
 important than a hard context-window guard; that opt-in restores the previous
 oversized-top behavior.
 
+A zero budget is rejected. `--dry-run` intentionally previews all relevant
+files because it does not emit a context document; use `--count-only` to
+inspect the budgeted selection.
+
 ### Explain Selection
 
 ```bash
