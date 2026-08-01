@@ -83,7 +83,8 @@ jobs:
           package: agentis-ctx
           baseline-rev: ${{ github.event.pull_request.base.sha }}
           feature-group: all-features
-          rust-toolchain: "1.91"
+          # SemVer checks require the current rustdoc; the MSRV job covers Rust 1.91.
+          rust-toolchain: stable
 
   supply-chain:
     name: dependency, license, and source policy
