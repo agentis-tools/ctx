@@ -20,6 +20,11 @@ use super::templates::CTX_VERSION;
 use super::{read_lock, HOOK_NAMES, LOCAL_HOOKS_DIR, RULES_PATH};
 
 const CODEX_LOCAL_HOOKS_DIR: &str = ".codex/hooks/ctx";
+const STOP_HOOKS: &[&str] = &[
+    ".claude/hooks/ctx/stop.sh",
+    ".codex/hooks/ctx/stop.sh",
+    "hooks/stop.sh",
+];
 use crate::db::SCHEMA_VERSION;
 use crate::walker::{discover_files, WalkerConfig};
 
@@ -64,10 +69,24 @@ pub fn run_doctor_checks(root: &Path) -> Vec<Finding> {
     check_index(root, &mut findings);
     check_rules(root, &mut findings);
     check_hooks(root, &mut findings);
+    check_blocking_duplication_gate(root, &mut findings);
     check_settings_wiring(root, &mut findings);
     check_mcp(root, &mut findings);
 
     findings
+}
+
+/// Return generated or local stop hooks that still include duplication in a
+/// score gate. The caller decides whether blocking mode is enabled.
+pub fn blocking_duplication_hooks(root: &Path) -> Vec<String> {
+    STOP_HOOKS
+        .iter()
+        .filter_map(|rel| {
+            let content = fs::read_to_string(root.join(rel)).ok()?;
+            (content.contains("--fail-on") && content.contains("new_duplication"))
+                .then(|| (*rel).to_string())
+        })
+        .collect()
 }
 
 /// True when no finding is an error or a warning.
@@ -344,6 +363,32 @@ fn check_hooks(root: &Path, findings: &mut Vec<Finding>) {
     }
 }
 
+fn check_blocking_duplication_gate(root: &Path, findings: &mut Vec<Finding>) {
+    let enabled = std::env::var("CTX_GATE_BLOCKING").ok().as_deref() == Some("1");
+    check_blocking_duplication_gate_with(root, findings, enabled);
+}
+
+fn check_blocking_duplication_gate_with(root: &Path, findings: &mut Vec<Finding>, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let hooks = blocking_duplication_hooks(root);
+    if hooks.is_empty() {
+        return;
+    }
+    findings.push(Finding::new(
+        Severity::Warning,
+        "blocking_duplication_gate",
+        format!(
+            "blocking mode is enabled and {} stop hook{} still gate on new_duplication: {}",
+            hooks.len(),
+            if hooks.len() == 1 { "" } else { "s" },
+            hooks.join(", ")
+        ),
+        Some("remove new_duplication from the blocking --fail-on expression, or disable CTX_GATE_BLOCKING while calibrating the heuristic"),
+    ));
+}
+
 fn check_settings_wiring(root: &Path, findings: &mut Vec<Finding>) {
     check_codex_wiring(root, findings);
     if !local_scaffold(root) {
@@ -481,6 +526,24 @@ mod tests {
             find(&findings, "codex_hooks_not_wired").severity,
             Severity::Warning
         );
+    }
+
+    #[test]
+    fn test_blocking_duplication_gate_is_warned() {
+        let temp = TempDir::new().unwrap();
+        let stop = temp.path().join(".claude/hooks/ctx/stop.sh");
+        std::fs::create_dir_all(stop.parent().unwrap()).unwrap();
+        std::fs::write(
+            &stop,
+            "ctx score --fail-on 'check_violations>0,new_duplication>0'\n",
+        )
+        .unwrap();
+
+        let mut findings = Vec::new();
+        check_blocking_duplication_gate_with(temp.path(), &mut findings, true);
+        let finding = find(&findings, "blocking_duplication_gate");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(finding.message.contains(".claude/hooks/ctx/stop.sh"));
     }
 
     #[test]
