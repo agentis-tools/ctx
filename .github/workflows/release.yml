@@ -267,12 +267,18 @@ jobs:
             "ctx-${version}-1.x86_64.rpm"
           )
           while IFS= read -r checksum; do
-            (cd "$(dirname "$checksum")" && sha256sum -c "$(basename "$checksum")")
+            (cd "$(dirname "$checksum")" && sha256sum --strict --check "$(basename "$checksum")")
           done < <(find downloaded -type f -name '*.sha256' | LC_ALL=C sort)
-          (cd downloaded/ctx-agent-plugins && sha256sum -c plugin-SHA256SUMS)
+          test -f downloaded/ctx-agent-plugins/plugin-SHA256SUMS
+          (cd downloaded/ctx-agent-plugins && sha256sum --strict --check plugin-SHA256SUMS)
           for artifact in "${expected[@]}"; do
             mapfile -t matches < <(find downloaded -type f -name "$artifact")
             test "${#matches[@]}" -eq 1
+            if [[ "$artifact" != ctx-claude-plugin-*.zip && "$artifact" != ctx-codex-plugin-*.zip ]]; then
+              sidecar="${matches[0]}.sha256"
+              test -f "$sidecar"
+              (cd "$(dirname "$sidecar")" && sha256sum --strict --check "$(basename "$sidecar")")
+            fi
             cp "${matches[0]}" "dist/$artifact"
           done
           find downloaded -type f -name '*.sha256' -exec cp {} dist/ \;
