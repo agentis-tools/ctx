@@ -49,15 +49,15 @@ function ProofBand(): ReactNode {
       <div className="container">
         <div className={styles.stats}>
           <div className={styles.stat}>
-            <div className={styles.statNum}>~27&times;</div>
+            <div className={styles.statNum}>budgeted</div>
             <div className={styles.statLabel}>
-              smaller context &mdash; 233k &rarr; ~8.7k tokens for a task with <code>ctx smart</code>
+              whole-file task context with <code>ctx smart</code>
             </div>
           </div>
           <div className={styles.stat}>
-            <div className={styles.statNum}>0.36s</div>
+            <div className={styles.statNum}>2,701</div>
             <div className={styles.statLabel}>
-              to index 870 symbols and 5,463 call edges (measured on this repo)
+              symbols indexed on the v0.4.0 tag (18,730 extracted edges)
             </div>
           </div>
           <div className={styles.stat}>

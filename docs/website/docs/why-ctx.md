@@ -25,9 +25,10 @@ Agents now write and change real code — but dropped into a repo, they operate 
 and nothing verifies what they produce. Two failure modes follow:
 
 - **They read too much.** To "be safe," an agent dumps whole directories into the prompt. That burns
-  tokens, fills the context window with noise, and makes the model slower and less accurate. This
-  repo alone is **502,856 tokens** as one dump — past most context windows, and mostly irrelevant to
-  any single task. *(A grounding failure.)*
+  tokens, fills the context window with noise, and makes the model slower and less accurate. Run
+  `ctx --count-only --encoding cl100k_base` to measure the file-content baseline for the current
+  checkout; formatter wrappers and the optional tree block are not part of that count. *(A
+  grounding failure.)*
 - **They read too little, and nothing checks the change.** An agent greps a couple of files, edits,
   and misses the caller three hops away that it just broke — and no guardrail flagged the blast
   radius before the change shipped. *(A grounding **and** a governance failure.)*
@@ -43,10 +44,9 @@ before it lands. There's no model of the world the agent edits — and no guardr
 ### Ground — the right context, in
 
 - **Smart context** — `ctx smart "<task>"` combines semantic search with call-graph expansion to
-  pull the files a task touches, fit to a token budget. On this repo, a task-scoped request returns
-  **~8,700 tokens instead of 502,856 — about 58× smaller.**
-- **Token control** — `--count-only`, `--max-tokens`, and `--encoding` measure and cap context to
-  any model's window, so you never overpay for tokens you didn't need.
+  pull the files a task touches and fit whole files to a token budget.
+- **Token control** — `--count-only`, `--max-tokens`, and `--encoding` measure selected file content
+  for any model's window; rendered wrappers and the optional tree block add output tokens.
 
 ### Govern — guardrails, on what changes
 
@@ -58,8 +58,10 @@ before it lands. There's no model of the world the agent edits — and no guardr
 ### Delivered where the agent lives
 
 `ctx serve --mcp` exposes the whole world model as MCP tools to Claude Desktop and other agents, and
-every command speaks `--output json`. It's Rust-fast and fully local: it indexes 870 symbols and
-5,463 call edges in **0.36s**, runs offline, and your code never leaves your machine.
+every command speaks `--output json`. It is local by default: the v0.4.0 tag
+(`1425cfc5a5ba96802a7adf7a9271bd1f1c3c1dda`) indexed
+2,701 symbols and 18,730 extracted edges from this repository; configured LSP and embedding
+providers can add their own local or network dependencies.
 
 ## Who it's for
 
