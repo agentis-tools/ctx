@@ -108,19 +108,25 @@ pub fn changed_files_against_in(dir: &Path, reference: &str) -> Result<HashSet<S
 
     // Committed changes since the merge base with the reference.
     let range = format!("{}...HEAD", reference);
-    let output = run_git(dir, &["diff", "--name-only", &range])?;
+    let output = run_git(dir, &["diff", "--name-only", "-z", &range])?;
     let committed = stdout_or_err(output, Some(reference))?;
     collect_paths(&committed, &prefix, &mut files);
 
     // Uncommitted (staged + unstaged) changes.
-    let output = run_git(dir, &["diff", "--name-only", "HEAD"])?;
+    let output = run_git(dir, &["diff", "--name-only", "-z", "HEAD"])?;
     let uncommitted = stdout_or_err(output, None)?;
     collect_paths(&uncommitted, &prefix, &mut files);
 
     // Untracked files (--full-name makes paths repo-root-relative like diff).
     let output = run_git(
         dir,
-        &["ls-files", "--others", "--exclude-standard", "--full-name"],
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z",
+        ],
     )?;
     let untracked = stdout_or_err(output, None)?;
     collect_paths(&untracked, &prefix, &mut files);
@@ -328,12 +334,11 @@ fn strip_repo_prefix(path: &str, prefix: &str) -> Option<String> {
 
 /// Add each non-blank, prefix-local path in `raw` to `files`.
 fn collect_paths(raw: &str, prefix: &str, files: &mut HashSet<String>) {
-    for line in raw.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.trim().is_empty() {
+    for path in raw.split('\0') {
+        if path.is_empty() {
             continue;
         }
-        if let Some(local) = strip_repo_prefix(line, prefix) {
+        if let Some(local) = strip_repo_prefix(path, prefix) {
             files.insert(local);
         }
     }
@@ -371,6 +376,14 @@ mod tests {
             Some("src/a.rs".to_string())
         );
         assert_eq!(strip_repo_prefix("other/a.rs", "sub/"), None);
+    }
+
+    #[test]
+    fn test_collect_paths_preserves_special_filenames() {
+        let mut files = HashSet::new();
+        collect_paths("src/plain.rs\0src/line\nbreak.rs\0", "", &mut files);
+        assert!(files.contains("src/plain.rs"));
+        assert!(files.contains("src/line\nbreak.rs"));
     }
 
     #[test]
