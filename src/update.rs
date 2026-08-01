@@ -663,6 +663,7 @@ pub fn record_check(stamp_file: &Path, now: u64) -> std::io::Result<()> {
 /// - `--json` is active (stdout is a machine-readable document),
 /// - stderr is not a terminal (covers CI, pipes, and test harnesses),
 /// - `CTX_NO_UPDATE_CHECK` is set (non-empty),
+/// - offline mode is enabled (`CTX_OFFLINE=1` or `CTX_DUCKDB_OFFLINE=1`),
 /// - a Claude Code hook/session environment is detected (`CLAUDECODE`,
 ///   `CLAUDE_PROJECT_DIR`, or `CLAUDE_PLUGIN_ROOT`).
 ///
@@ -675,6 +676,11 @@ where
         return false;
     }
     if env("CTX_NO_UPDATE_CHECK").is_some_and(|v| !v.is_empty()) {
+        return false;
+    }
+    if env("CTX_OFFLINE").as_deref() == Some("1")
+        || env("CTX_DUCKDB_OFFLINE").as_deref() == Some("1")
+    {
         return false;
     }
     // Inside a Claude Code hook or session: never interfere.
@@ -945,6 +951,17 @@ mod tests {
             .then(String::new)));
         // Claude Code hook environment: suppressed, any of the three vars.
         for var in ["CLAUDECODE", "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT"] {
+            assert!(
+                !passive_check_allowed(false, true, env_with(var)),
+                "{var} must suppress the passive check"
+            );
+        }
+
+        // Air-gapped operation must not perform the passive GitHub request
+        // after an otherwise local command. CTX_DUCKDB_OFFLINE is included
+        // because it is the supported offline switch for DuckDB-backed
+        // commands and those commands still pass through main's common gate.
+        for var in ["CTX_OFFLINE", "CTX_DUCKDB_OFFLINE"] {
             assert!(
                 !passive_check_allowed(false, true, env_with(var)),
                 "{var} must suppress the passive check"

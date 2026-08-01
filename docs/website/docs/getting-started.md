@@ -50,11 +50,15 @@ cargo install --path .
 ```
 
 On Windows without the MSVC C++ build tools, disable the default DuckDB analytics
-feature (call graphs, impact analysis, and complexity then return empty results):
+feature (call graphs, impact analysis, and complexity then exit with an actionable
+"DuckDB analytics are unavailable" error):
 
 ```bash
 cargo install agentis-ctx --no-default-features
 ```
+
+For air-gapped machines, stage the local embedding model and the optional DuckDB
+extension before disconnecting; see [Offline operation](offline.md).
 
 ### From Source
 
