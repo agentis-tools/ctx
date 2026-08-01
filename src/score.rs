@@ -108,6 +108,8 @@ pub struct FileScore {
 pub struct ScoreReport {
     /// The git reference the working tree was compared against.
     pub against: String,
+    /// The commit used as the baseline for every score dimension.
+    pub baseline: String,
     /// How many files the internal incremental index refresh reindexed.
     pub files_reindexed: usize,
     /// Summed baseline complexity over changed files.
@@ -139,6 +141,12 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
         return Err(CtxError::NotGitRepo);
     }
 
+    // Resolve the merge base once. Every score input must use this same
+    // commit; using the reference tip for file contents while changed paths
+    // are merge-base-scoped makes branch scores depend on unrelated target
+    // branch changes.
+    let baseline = gitutil::merge_base_in(root, reference)?;
+
     // Incremental index refresh: only changed files are re-parsed; the
     // existing database is never cleared.
     let mut indexer = Indexer::with_config(root, false, WalkerConfig::default())?;
@@ -166,20 +174,20 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
             root,
             &db,
             &mut parser,
-            reference,
+            &baseline,
             path,
             &indexed,
         )?);
     }
 
     // Newly introduced near-duplicate pairs.
-    let new_duplication = new_duplication(root, &db, &mut parser, reference, &changed_set)?;
+    let new_duplication = new_duplication(root, &db, &mut parser, &baseline, &changed_set)?;
 
     // Architecture rules, scoped to the same reference.
     let rules_path = root.join(rules::DEFAULT_RULES_PATH);
     let (check_violations, check_violations_note) = if rules_path.exists() {
         let context = check::load_context(root, None)?;
-        let violations = check::collect_violations(root, &context, Some(reference))?;
+        let violations = check::collect_violations(root, &context, Some(&baseline))?;
         (violations.len() as i64, None)
     } else {
         (0, Some(NO_RULES_NOTE.to_string()))
@@ -213,6 +221,7 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
 
     Ok(ScoreReport {
         against: reference.to_string(),
+        baseline,
         files_reindexed: index_result.files_indexed,
         complexity_baseline,
         complexity_current,

@@ -125,6 +125,7 @@ fn score_data(report: &ScoreReport, failed: &[FailCondition]) -> serde_json::Val
 
     serde_json::json!({
         "against": report.against,
+        "baseline": report.baseline,
         "files_changed": m.files_changed,
         "metrics": metrics_value(m),
         "check_violations_note": report.check_violations_note,
@@ -147,8 +148,9 @@ fn print_human(report: &ScoreReport, failed: &[FailCondition]) {
     let m = &report.metrics;
 
     println!(
-        "Score vs {} ({} file{} changed)",
+        "Score vs {} (baseline {}) ({} file{} changed)",
         report.against,
+        report.baseline,
         m.files_changed,
         if m.files_changed == 1 { "" } else { "s" }
     );
