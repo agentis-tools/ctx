@@ -187,7 +187,7 @@ pub async fn smart_context(
     let has_analytics = server.with_analytics(|_| ()).is_some();
     if !has_analytics {
         return Err(internal_error(
-            "Analytics not available. Run 'ctx index' first.",
+            "DuckDB analytics are unavailable. Use a default-feature ctx build and, for offline runs, stage the sqlite_scanner extension before starting the server.",
         ));
     }
 

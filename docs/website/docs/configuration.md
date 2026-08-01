@@ -471,6 +471,11 @@ ctx uses minimal environment variables:
 | `OLLAMA_HOST` | Ollama server URL (default `http://localhost:11434`) | Only for the Ollama provider |
 | `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) | Only for the Ollama provider |
 | `OLLAMA_API_KEY` | Optional bearer token for a remote/authenticated Ollama host | No |
+| `FASTEMBED_CACHE_DIR` | Staged fastembed model cache for the local provider | No |
+| `CTX_DUCKDB_OFFLINE` | Disable DuckDB extension installation and require a staged `sqlite_scanner` extension | For offline DuckDB |
+| `CTX_DUCKDB_EXTENSION_DIRECTORY` | Directory containing the staged DuckDB extension | With `CTX_DUCKDB_OFFLINE=1` |
+| `CTX_OFFLINE` | Suppress passive update checks during air-gapped operation | For fully offline runs |
+| `CTX_NO_UPDATE_CHECK` | Suppress the passive update notice | No |
 | `CTX_LSP_REGISTRY_BASE_URL` | Alternate base URL for the `ctx lsp` community registry (mirrors/testing) | No |
 
 ### Project config (`.ctx/config.toml`)
