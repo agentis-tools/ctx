@@ -29,14 +29,13 @@
 //!   short functions.
 
 use std::cell::RefCell;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use tree_sitter::Parser;
 
 use crate::db::{Database, Fingerprint, Symbol, SymbolKind};
-use crate::error::Result;
+use crate::error::{CtxError, Result};
 use crate::parser::Language;
 
 /// Number of MinHash permutations (signature length in u64 words).
@@ -54,6 +53,24 @@ pub const LSH_ROWS: usize = 8;
 /// Minimum usable similarity threshold. Below this the 16x8 LSH banding
 /// misses too many candidate pairs to be trustworthy, so callers clamp to it.
 pub const MIN_THRESHOLD: f64 = 0.5;
+
+/// Default maximum number of duplicate pairs retained by a search.
+pub const DEFAULT_RESULT_LIMIT: usize = 1000;
+
+/// Hard upper bound for a caller-supplied result limit. Keeping this finite
+/// prevents a command-line value from turning the bounded search back into an
+/// effectively unbounded result collector.
+pub const MAX_RESULT_LIMIT: usize = 10_000;
+
+/// Maximum source bytes retained across duplicate results. DuplicatePair
+/// carries symbols for the score baseline, so a pair-count cap alone is not a
+/// memory bound when functions contain very large source snippets.
+pub const MAX_RESULT_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Maximum source bytes retained for one duplicate pair.
+const MAX_PAIR_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+
+const CANDIDATE_LIMIT_MULTIPLIER: usize = 16;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -427,6 +444,14 @@ pub struct DuplicatePair {
     pub token_count_b: i64,
 }
 
+/// Bounded duplicate search results.
+#[derive(Debug)]
+pub struct DuplicateSearch {
+    pub pairs: Vec<DuplicatePair>,
+    /// True when candidate or result truncation prevented a complete search.
+    pub truncated: bool,
+}
+
 /// Find near-duplicate function pairs in the index.
 ///
 /// Loads all fingerprints with at least `min_tokens` tokens, buckets them
@@ -442,6 +467,41 @@ pub fn find_near_duplicates(
     min_tokens: i64,
     changed_files: Option<&HashSet<String>>,
 ) -> Result<Vec<DuplicatePair>> {
+    Ok(find_near_duplicates_limited(
+        db,
+        threshold,
+        min_tokens,
+        changed_files,
+        DEFAULT_RESULT_LIMIT,
+    )?
+    .pairs)
+}
+
+/// Find near-duplicate pairs while bounding candidate and result memory.
+///
+/// `limit` is the maximum number of pairs retained. Candidate generation is
+/// also capped at a fixed multiple of that limit, so a pathological LSH
+/// bucket cannot materialize an unbounded candidate set. The result is marked
+/// `truncated` when either cap is reached.
+pub fn find_near_duplicates_limited(
+    db: &Database,
+    threshold: f64,
+    min_tokens: i64,
+    changed_files: Option<&HashSet<String>>,
+    limit: usize,
+) -> Result<DuplicateSearch> {
+    if limit == 0 {
+        return Err(CtxError::Other(
+            "duplicate result limit must be greater than zero".to_string(),
+        ));
+    }
+    if limit > MAX_RESULT_LIMIT {
+        return Err(CtxError::Other(format!(
+            "duplicate result limit {} exceeds the maximum of {}",
+            limit, MAX_RESULT_LIMIT
+        )));
+    }
+
     let fingerprints = db.get_fingerprints(min_tokens)?;
 
     // Decode signatures once (fingerprints are ordered by symbol_id, so
@@ -460,8 +520,12 @@ pub fn find_near_duplicates(
         }
     }
 
+    let candidate_limit = limit.saturating_mul(CANDIDATE_LIMIT_MULTIPLIER).max(limit);
     let mut candidates: HashSet<(usize, usize)> = HashSet::new();
-    for members in buckets.values() {
+    let mut truncated = false;
+    let mut bucket_entries: Vec<_> = buckets.into_iter().collect();
+    bucket_entries.sort_unstable_by_key(|(key, _)| *key);
+    'bucket: for (_key, members) in bucket_entries {
         if members.len() < 2 {
             continue;
         }
@@ -469,68 +533,102 @@ pub fn find_near_duplicates(
             for &j in &members[n + 1..] {
                 let pair = if i < j { (i, j) } else { (j, i) };
                 if pair.0 != pair.1 {
+                    if let Some(changed) = changed_files {
+                        if !changed.contains(&fingerprints[pair.0].file_path)
+                            && !changed.contains(&fingerprints[pair.1].file_path)
+                        {
+                            continue;
+                        }
+                    }
+                    if candidates.len() >= candidate_limit && !candidates.contains(&pair) {
+                        truncated = true;
+                        break 'bucket;
+                    }
                     candidates.insert(pair);
                 }
             }
         }
     }
 
-    // --against filter: at least one endpoint must be in a changed file.
-    if let Some(changed) = changed_files {
-        candidates.retain(|&(i, j)| {
-            changed.contains(&fingerprints[i].file_path)
-                || changed.contains(&fingerprints[j].file_path)
-        });
-    }
-
     // Verify candidates with exact Jaccard over re-derived shingle sets.
     // Shingle sets are not stored; they are rebuilt by re-tokenizing each
-    // symbol's stored source snippet.
-    let mut shingle_cache: HashMap<usize, Option<HashSet<u64>>> = HashMap::new();
-    let mut symbol_cache: HashMap<usize, Option<Symbol>> = HashMap::new();
+    // symbol's stored source snippet. Deliberately do not cache symbols here:
+    // the result limit bounds retained output, while a cache of full source
+    // snippets would otherwise make a large LSH bucket unbounded in bytes.
     let mut pairs = Vec::new();
+    let mut retained_source_bytes = 0usize;
 
     let mut sorted_candidates: Vec<(usize, usize)> = candidates.into_iter().collect();
     sorted_candidates.sort_unstable();
 
     for (i, j) in sorted_candidates {
-        for idx in [i, j] {
-            if let Entry::Vacant(entry) = symbol_cache.entry(idx) {
-                entry.insert(db.get_symbol(&fingerprints[idx].symbol_id)?);
-            }
-            if let Entry::Vacant(entry) = shingle_cache.entry(idx) {
-                entry.insert(symbol_cache[&idx].as_ref().and_then(symbol_shingles));
-            }
-        }
-
-        let (Some(sa), Some(sb)) = (&shingle_cache[&i], &shingle_cache[&j]) else {
+        let Some(a) = db.get_symbol(&fingerprints[i].symbol_id)? else {
             continue;
         };
-        let similarity = jaccard(sa, sb);
+        let Some(b) = db.get_symbol(&fingerprints[j].symbol_id)? else {
+            continue;
+        };
+        let (Some(sa), Some(sb)) = (symbol_shingles(&a), symbol_shingles(&b)) else {
+            continue;
+        };
+        let similarity = jaccard(&sa, &sb);
         if similarity < threshold {
             continue;
         }
-        let (Some(a), Some(b)) = (&symbol_cache[&i], &symbol_cache[&j]) else {
+
+        let source_bytes = symbol_source_bytes(&a).saturating_add(symbol_source_bytes(&b));
+        if source_bytes > MAX_PAIR_SOURCE_BYTES {
+            // A single oversized pair must not defeat the byte bound. It is
+            // omitted and surfaced as an incomplete search instead.
+            truncated = true;
             continue;
-        };
+        }
+
         pairs.push(DuplicatePair {
-            a: a.clone(),
-            b: b.clone(),
+            a,
+            b,
             similarity,
             token_count_a: fingerprints[i].token_count,
             token_count_b: fingerprints[j].token_count,
         });
+        retained_source_bytes = retained_source_bytes.saturating_add(source_bytes);
+        if pairs.len() > limit {
+            pairs.sort_by(compare_pairs);
+            if let Some(removed) = pairs.pop() {
+                retained_source_bytes =
+                    retained_source_bytes.saturating_sub(pair_source_bytes(&removed));
+            }
+            truncated = true;
+        }
+        while retained_source_bytes > MAX_RESULT_SOURCE_BYTES && !pairs.is_empty() {
+            pairs.sort_by(compare_pairs);
+            if let Some(removed) = pairs.pop() {
+                retained_source_bytes =
+                    retained_source_bytes.saturating_sub(pair_source_bytes(&removed));
+            }
+            truncated = true;
+        }
     }
 
-    pairs.sort_by(|x, y| {
-        y.similarity
-            .partial_cmp(&x.similarity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| x.a.id.cmp(&y.a.id))
-            .then_with(|| x.b.id.cmp(&y.b.id))
-    });
+    pairs.sort_by(compare_pairs);
 
-    Ok(pairs)
+    Ok(DuplicateSearch { pairs, truncated })
+}
+
+fn symbol_source_bytes(symbol: &Symbol) -> usize {
+    symbol.source.as_ref().map_or(0, String::len)
+}
+
+fn pair_source_bytes(pair: &DuplicatePair) -> usize {
+    symbol_source_bytes(&pair.a).saturating_add(symbol_source_bytes(&pair.b))
+}
+
+fn compare_pairs(x: &DuplicatePair, y: &DuplicatePair) -> std::cmp::Ordering {
+    y.similarity
+        .partial_cmp(&x.similarity)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| x.a.id.cmp(&y.a.id))
+        .then_with(|| x.b.id.cmp(&y.b.id))
 }
 
 /// Rebuild a symbol's shingle set from its stored source snippet.

@@ -1486,6 +1486,22 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
     }
 
     #[test]
+    fn test_near_duplicates_limit_is_bounded_and_reported() {
+        let temp = TempDir::new().unwrap();
+        write_fixture(temp.path());
+        fs::copy(temp.path().join("src/a.rs"), temp.path().join("src/d.rs")).unwrap();
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        indexer.index().unwrap();
+
+        let search =
+            crate::fingerprint::find_near_duplicates_limited(indexer.database(), 0.85, 50, None, 1)
+                .unwrap();
+        assert_eq!(search.pairs.len(), 1);
+        assert!(search.truncated);
+    }
+
+    #[test]
     fn test_parallel_indexing_also_fingerprints() {
         let temp = TempDir::new().unwrap();
         write_fixture(temp.path());

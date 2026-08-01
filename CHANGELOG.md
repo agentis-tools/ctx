@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ctx duplicates` now bounds candidate and result memory, adds `--limit`,
+  and reports truncation in both human and JSON output (#104).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
