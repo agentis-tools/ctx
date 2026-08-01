@@ -214,6 +214,7 @@ fn run(args: Args) -> Result<Outcome> {
             threshold,
             min_tokens,
             against,
+            limit,
             fail_on_found,
         }) => {
             // Quality command: returns its own Outcome (Findings with
@@ -222,6 +223,7 @@ fn run(args: Args) -> Result<Outcome> {
                 threshold,
                 min_tokens,
                 against.as_deref(),
+                limit,
                 json,
                 fail_on_found,
             );

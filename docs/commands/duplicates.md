@@ -14,6 +14,8 @@ The `duplicates` command compares MinHash fingerprints (built during `ctx index`
 
 Tokens are normalized before comparison - identifiers become `ID`, string and number literals become `LIT`, comments are dropped - so **renamed variables and changed literals still match**. Candidate pairs are found with LSH banding over 128-permutation MinHash signatures, then verified with the exact Jaccard similarity.
 
+Search results are bounded. `--limit` caps the number of pairs retained and printed, and the candidate set is capped as well so a pathological LSH bucket cannot grow memory without bound. Human output says when truncation occurred; JSON reports `truncated: true`. The default limit is 1,000.
+
 > **Breaking change:** this replaces the old line-based detector. `--threshold` is a 0.0-1.0 Jaccard similarity over normalized 5-token shingles, **not** a percentage of matching lines; the old `--similarity <PERCENT>` / `--min-lines <N>` flags are gone. Existing indexes lack fingerprints: rebuild once with `ctx index --force` after upgrading.
 
 ## Prerequisites
@@ -31,6 +33,7 @@ ctx index
 | `--threshold <F>` | Jaccard similarity threshold (0.0-1.0) over normalized token shingles. Values below 0.5 are clamped to 0.5 (LSH candidate detection is unreliable below that) | 0.85 |
 | `--min-tokens <N>` | Ignore functions with fewer than N normalized tokens | 50 |
 | `--against <REF>` | Only report pairs where at least one function is in a file changed relative to REF | none |
+| `--limit <N>` | Maximum number of pairs to retain and print; output is marked truncated when the bound is reached | 1000 |
 | `--fail-on-found` | Exit 1 when any near-duplicate pair is reported | false |
 | `--json` | Machine-readable output (global flag) | false |
 
@@ -52,7 +55,7 @@ ctx duplicates
 
 Output:
 ```
-Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens)
+Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens, limit 1000)
 ====================================================================================================
 
 1. similarity 0.952
@@ -61,6 +64,12 @@ Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 
 
 ----------------------------------------------------------------------------------------------------
 Found 1 near-duplicate pair(s).
+```
+
+For a large repository, use a smaller bounded report when inspecting results interactively:
+
+```bash
+ctx duplicates --limit 25
 ```
 
 ### Only Pairs Touching Changed Files
@@ -90,6 +99,8 @@ ctx duplicates --json
     "threshold": 0.85,
     "min_tokens": 50,
     "against": null,
+    "limit": 1000,
+    "truncated": false,
     "skipped_languages": [],
     "pairs": [
       {
