@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Refreshed README measurements, token-budget wording, LSP guidance, and
+  library version examples; governance now checks README version references
+  against the manifest (#101).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

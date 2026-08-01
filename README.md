@@ -13,8 +13,12 @@ architecture, and declare "done" without proof.
 your repo into a queryable model (every symbol, call, and dependency) and uses it to **ground**
 your agent and **gate** its output on every turn:
 
-- **Ground:** hand the agent a map before it starts, and the right ~8k tokens of context instead of
-  the wrong 503k.
+- **Ground:** hand the agent a map before it starts, and a token-budgeted, whole-file context
+  selection instead of dumping the whole repository. On the v0.4.0 tag
+  (`1425cfc5a5ba96802a7adf7a9271bd1f1c3c1dda`, 2026-07-24),
+  `ctx --count-only --encoding cl100k_base` from the repository root reported 502,856
+  file-content tokens with the default ignore rules. The count excludes formatter wrappers and
+  the optional tree block, which add rendered-output tokens.
 - **Govern:** show the blast radius of every edit, and enforce your architecture rules as
   deterministic gates it can't ship past.
 
@@ -90,8 +94,10 @@ publication.
 ## The loop: index → ground → govern
 
 **Build the model first.** Every intelligence and governance command reads a prebuilt index, so
-`ctx index` always comes first (it writes a single `.ctx/codebase.sqlite`). On this repo it indexes
-**870 symbols and 5,463 call edges in 0.36s.** Run it once, then keep it warm with `--watch`.
+`ctx index` always comes first (it writes a single `.ctx/codebase.sqlite`). On the v0.4.0 tag
+(`1425cfc5a5ba96802a7adf7a9271bd1f1c3c1dda`, 2026-07-24), running `ctx index` at the repository root with the default ignore rules
+produced **2,701 symbols and 18,730 extracted edges**; counts vary with the checkout and indexing
+configuration, while timing varies with the machine. Run it once, then keep it warm with `--watch`.
 
 ```bash
 ctx index                        # build the world model (or `ctx index --watch` in the background)
@@ -100,7 +106,7 @@ ctx index                        # build the world model (or `ctx index --watch`
 **Ground:** feed the agent the right context, selected by meaning *and* call-graph relevance:
 
 ```bash
-ctx smart "add rate limiting" --max-tokens 8000   # ~8.7k tokens instead of 503k, about 58× smaller
+ctx smart "add rate limiting" --max-tokens 8000   # fit selected whole files to a token budget
 ctx diff --summary                                # context for what changed, with dependency expansion
 ctx similar "retry with backoff"                  # reuse before you write: find it if it already exists
 ```
@@ -267,6 +273,19 @@ The full flag reference for every command lives at
 
 See [Language Support](https://docs.agentis.tools/docs/language-support) for detail.
 
+### LSP extraction
+
+Tree-sitter is the default, fast local extractor. For languages or repositories
+that need server-assisted resolution, configure an LSP backend with
+`ctx lsp add <language>` and inspect it with `ctx lsp list` and `ctx lsp doctor`.
+Each configured language can use `tree-sitter`, `lsp`, or `hybrid`; hybrid keeps
+tree-sitter extraction and asks the server only to resolve references that stay
+ambiguous or unresolved. For built-in languages, a failed server falls back to
+tree-sitter; for languages without a built-in grammar, ctx keeps file records but
+cannot extract server-backed symbols. In both cases indexing continues with a
+warning. The registry lookup and any configured server may be network-backed, so
+offline use requires a locally installed server and a committed/manual configuration.
+
 ## Using ctx as a library
 
 Everything the CLI does is available as a Rust library, so you can embed indexing, search, and
@@ -275,10 +294,10 @@ context generation in your own tools. The package is `agentis-ctx`; the library 
 
 ```toml
 [dependencies]
-agentis-ctx = "0.3"
+agentis-ctx = "0.4"
 
 # On Windows (or to skip DuckDB analytics):
-# agentis-ctx = { version = "0.3", default-features = false }
+# agentis-ctx = { version = "0.4", default-features = false }
 ```
 
 ```rust

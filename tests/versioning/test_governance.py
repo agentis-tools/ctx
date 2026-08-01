@@ -65,6 +65,22 @@ example = "9.9.9"
 """
         self.assertEqual(governance.manifest_version(text), "0.3.4")
 
+    def test_readme_contract_errors_detect_stale_version_and_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text(
+                '[package]\nname = "agentis-ctx"\nversion = "0.4.0"\n',
+                encoding="utf-8",
+            )
+            (root / "README.md").write_text(
+                'agentis-ctx = "0.3"\nSee v0.3.9\n', encoding="utf-8"
+            )
+            errors = governance.readme_contract_errors(root)
+
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("agentis-ctx" in error for error in errors))
+        self.assertTrue(any("release v0.3.9" in error for error in errors))
+
 
 class ContractPolicyTests(unittest.TestCase):
     def test_removed_commands_and_options_are_breaking(self):
