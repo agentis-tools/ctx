@@ -177,7 +177,7 @@ fn run(args: Args) -> Result<Outcome> {
         }) => {
             let provider = resolve_embed_provider(provider, openai);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, provider, serial)
+                commands::run_embed_watch(force, verbose, batch_size, provider, serial)
             } else {
                 commands::run_embed(force, verbose, batch_size, provider, serial)
             }

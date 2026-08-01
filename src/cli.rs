@@ -265,7 +265,7 @@ internal and unstable. Access is read-only and engine-hardened.
 
     /// Generate embeddings for semantic search
     Embed {
-        /// Force re-embedding of all symbols
+        /// Force re-embedding of all symbols (also applies to watch startup)
         // No `short`: `-f` is the global `--format` flag (other subcommands'
         // `--force` are also long-only). Use `--force`.
         #[arg(long)]

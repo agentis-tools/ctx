@@ -253,7 +253,8 @@ ctx embed --watch           # Watch for index changes and auto-embed
 `--force` clears the existing embedding corpus (and the optional vector-search
 cache) before rebuilding it. Use it when switching providers or Ollama models;
 the semantic commands fail with exit code 2 rather than mixing incompatible
-vectors if the corpus does not match the selected provider.
+vectors if the corpus does not match the selected provider, model, or
+dimension. `--force` also applies to the initial build of `ctx embed --watch`.
 
 ### Watch Mode for Embeddings
 

@@ -242,7 +242,9 @@ ctx embed --provider openai        # `--openai` is a deprecated alias
 ```
 
 Embeddings from different providers/models live in different vector spaces, so
-switching providers requires re-embedding (`--force`); ctx warns on a mismatch.
+switching providers or models requires re-embedding (`--force`); semantic
+commands fail with exit code 2 on a mismatch. `--force` also applies to the
+initial build of `ctx embed --watch`.
 
 This generates embeddings for all symbols. Embeddings are stored in SQLite and only need to be generated once (or when new symbols are added).
 

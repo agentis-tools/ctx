@@ -56,6 +56,10 @@ pub fn run_embed(
     let total_symbols = db.get_stats()?.symbols;
     let existing_embeddings = db.count_embeddings()?;
 
+    if existing_embeddings > 0 && !force {
+        embeddings::ensure_index_compatible(&db, provider.as_ref())?;
+    }
+
     if verbose {
         println!("Total symbols: {}", total_symbols);
         println!("Existing embeddings: {}", existing_embeddings);
@@ -103,6 +107,7 @@ pub fn run_embed(
 
 /// Watch for index changes and auto-embed new symbols.
 pub fn run_embed_watch(
+    force: bool,
     verbose: bool,
     batch_size: usize,
     provider: Provider,
@@ -130,10 +135,24 @@ pub fn run_embed_watch(
     // Do initial embedding
     {
         let db = index::open_database(&root)?;
+        if force {
+            let deleted = db.delete_all_embeddings()?;
+            if verbose {
+                println!(
+                    "Deleted {} existing embeddings before rebuilding the {} corpus",
+                    deleted,
+                    provider.name()
+                );
+            }
+        }
         let total_symbols = db.get_stats()?.symbols;
         let existing = db.count_embeddings()?;
 
-        if existing < total_symbols {
+        if existing > 0 && !force {
+            embeddings::ensure_index_compatible(&db, provider.as_ref())?;
+        }
+
+        if force || existing < total_symbols {
             println!(
                 "Initial embedding: {} symbols missing embeddings...",
                 total_symbols - existing

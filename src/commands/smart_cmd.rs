@@ -49,6 +49,17 @@ pub fn run_smart(
         }
         return Err(ctx::error::CtxError::embedding(message));
     }
+    let symbol_count = db.get_stats()?.symbols;
+    if embedding_count < symbol_count {
+        let message = format!(
+            "Embedding corpus is incomplete: {} of {} symbols have embeddings. Run 'ctx embed' first to generate the missing embeddings.",
+            embedding_count, symbol_count
+        );
+        if format == OutputFormat::Json {
+            ctx::json::emit("smart", serde_json::json!({ "error": message }))?;
+        }
+        return Err(ctx::error::CtxError::embedding(message));
+    }
 
     if provider == Provider::Local {
         eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
