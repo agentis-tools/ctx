@@ -20,6 +20,8 @@ The `duplicates` command compares MinHash fingerprints (built during `ctx index`
 
 Tokens are normalized before comparison - identifiers become `ID`, string and number literals become `LIT`, comments are dropped - so **renamed variables and changed literals still match**. Candidate pairs are found with LSH banding over 128-permutation MinHash signatures, then verified with the exact Jaccard similarity.
 
+Search results are bounded. `--limit` accepts 1-10,000 and caps retained pairs; candidate and retained source bytes are bounded as well. Human output reports truncation and JSON emits `truncated: true`. With `--fail-on-found`, an incomplete search fails closed.
+
 All indexed languages participate, **including C, C++, Zig, and Solidity** (Solidity is tokenized via the solang-parser lexer; the Tree-sitter languages normalize identifiers and literals and discard comments).
 
 > **Breaking change:** this replaces the old line-based detector. `--threshold` is a 0.0-1.0 Jaccard similarity over normalized 5-token shingles, **not** a percentage of matching lines; the old `--similarity <PERCENT>` / `--min-lines <N>` flags are gone. Existing indexes lack fingerprints: rebuild once with `ctx index --force` after upgrading.
@@ -39,6 +41,7 @@ ctx index
 | `--threshold <F>` | Jaccard similarity threshold (0.0-1.0) over normalized token shingles. Values below 0.5 are clamped to 0.5 (LSH candidate detection is unreliable below that) | 0.85 |
 | `--min-tokens <N>` | Ignore functions with fewer than N normalized tokens | 50 |
 | `--against <REF>` | Only report pairs where at least one function is in a file changed relative to REF | none |
+| `--limit <N>` | Maximum number of pairs to retain and print (1-10000); output is marked truncated when the bound is reached | 1000 |
 | `--fail-on-found` | Exit 1 when any near-duplicate pair is reported | false |
 | `--json` | Machine-readable output (global flag) | false |
 
@@ -48,7 +51,7 @@ ctx index
 |------|---------|
 | 0 | Success (default mode is informational, even with pairs found) |
 | 1 | `--fail-on-found` was given and at least one pair was reported |
-| 2 | Operational error (missing index, bad git ref, invalid threshold) |
+| 2 | Operational error (missing index, bad git ref, invalid threshold, or invalid limit) |
 
 ## Examples
 
@@ -95,9 +98,11 @@ ctx duplicates --json
   "command": "duplicates",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
-    "threshold": 0.85,
-    "min_tokens": 50,
-    "against": null,
+  "threshold": 0.85,
+  "min_tokens": 50,
+  "against": null,
+  "limit": 1000,
+  "truncated": false,
     "skipped_languages": [],
     "pairs": [
       {

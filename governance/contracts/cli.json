@@ -142,6 +142,7 @@
         "--help": "-h, --help Print help (see a summary with '-h')",
         "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
         "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--limit": "--limit <LIMIT> Maximum number of pairs to retain and print (1-10000). Results are marked truncated when the search reaches this bound [default: 1000]",
         "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
         "--min-tokens": "--min-tokens <MIN_TOKENS> Ignore functions with fewer than N normalized tokens [default: 50]",
         "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
