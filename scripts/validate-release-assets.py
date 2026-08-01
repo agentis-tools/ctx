@@ -37,6 +37,7 @@ def main() -> None:
         for line in sums.read_text().splitlines():
             digest, name = line.split(maxsplit=1)
             listed[name.lstrip("* ")] = digest
+        assert "SHA256SUMS" not in listed, "SHA256SUMS must not list itself"
         artifacts = [p for p in args.directory.iterdir() if p.is_file() and p.name != "SHA256SUMS"]
         for path in artifacts:
             actual = hashlib.sha256(path.read_bytes()).hexdigest()

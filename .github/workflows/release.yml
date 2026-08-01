@@ -279,7 +279,7 @@ jobs:
           cp downloaded/ctx-agent-plugins/plugin-SHA256SUMS dist/
           (
             cd dist
-            find . -maxdepth 1 -type f -printf '%f\n' \
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
               | LC_ALL=C sort \
               | xargs sha256sum > SHA256SUMS
           )
