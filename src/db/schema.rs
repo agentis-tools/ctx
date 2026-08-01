@@ -233,6 +233,7 @@ impl Database {
 
             -- Indexes for fast lookups
             CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+            CREATE INDEX IF NOT EXISTS idx_symbols_qualified_name ON symbols(qualified_name);
             CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
             CREATE INDEX IF NOT EXISTS idx_symbols_kind ON symbols(kind);
             CREATE INDEX IF NOT EXISTS idx_symbols_parent ON symbols(parent_id);
@@ -1641,6 +1642,18 @@ impl Database {
     ///
     /// Returns the number of edges that were resolved.
     pub fn resolve_edge_targets(&self) -> Result<usize> {
+        // The resolver runs after every indexing pass, including no-op
+        // refreshes. Avoid rebuilding all candidate sets when the graph is
+        // already fully resolved.
+        let unresolved: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE target_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if unresolved == 0 {
+            return Ok(0);
+        }
+
         let rust_function_references = {
             let mut stmt = self.conn.prepare(
                 r#"

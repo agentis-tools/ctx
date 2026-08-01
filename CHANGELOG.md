@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Indexing now skips the unresolved-edge resolver when no unresolved edges
+  remain and adds the qualified-name lookup index identified by profiling of
+  the resolver hot path (#96).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
