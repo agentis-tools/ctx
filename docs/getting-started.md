@@ -177,6 +177,9 @@ ctx semantic "functions that validate user input"
 ctx semantic "database connection management"
 ```
 
+For air-gapped machines, stage the local model cache and optional DuckDB
+extension before disconnecting; see [Offline operation](./offline.md).
+
 ### Explore Relationships
 
 **Who calls this function?**

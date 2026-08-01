@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Added offline staging guidance for fastembed model caches and DuckDB's
+  `sqlite_scanner` extension; `CTX_DUCKDB_OFFLINE=1` now provides a clear
+  failure when the extension is not staged (#100).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

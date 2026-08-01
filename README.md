@@ -337,6 +337,8 @@ schema.
 
 Commit `config.toml` and `rules.toml` so the team and CI share the same defaults and policy. Ignore
 generated data such as `codebase.sqlite`; ctx can rebuild it with `ctx index`.
+See [Offline operation](docs/offline.md) when model files or DuckDB extensions
+must be staged before disconnecting a machine.
 
 - **Tree-sitter** parses every supported language into symbols and relationship edges.
 - **SQLite** (with FTS5 and `sqlite-vec`) is the persistent, single-file store.
@@ -352,6 +354,9 @@ Indexing respects `.gitignore`, an optional `.contextignore`, and 170+ built-in 
 | `OPENAI_API_KEY` | Required for `--provider openai` on `embed` / `semantic` / `smart` / `similar` |
 | `OLLAMA_HOST` | Ollama server URL for `--provider ollama` (default `http://localhost:11434`) |
 | `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) |
+| `FASTEMBED_CACHE_DIR` | Directory for staged fastembed model files used by the local provider |
+| `CTX_DUCKDB_OFFLINE` | Set to `1` to disable DuckDB extension installation and require staged analytics extensions |
+| `CTX_DUCKDB_EXTENSION_DIRECTORY` | DuckDB extension directory used with `CTX_DUCKDB_OFFLINE=1` |
 | `GITHUB_TOKEN` | Optional for `review` (uses `gh` CLI auth by default) |
 | `CTX_NO_UPDATE_CHECK` | Silence the passive "new release available" notice |
 
