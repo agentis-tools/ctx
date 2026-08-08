@@ -12,7 +12,9 @@ use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
 use ctx::output;
-use ctx::smart::{format_dry_run, format_explain, smart_context_filtered, SmartConfig};
+use ctx::smart::{
+    format_dry_run, format_explain, smart_context_filtered_with_options, SmartConfig,
+};
 use ctx::walker;
 
 /// Run smart context selection.
@@ -20,6 +22,7 @@ use ctx::walker;
 pub fn run_smart(
     task: &str,
     max_tokens: usize,
+    include_oversized_top: bool,
     depth: i32,
     top: usize,
     explain: bool,
@@ -33,6 +36,12 @@ pub fn run_smart(
     encoding: &str,
     stats: bool,
 ) -> Result<()> {
+    if max_tokens == 0 {
+        return Err(ctx::error::CtxError::Other(
+            "--max-tokens must be greater than zero".to_string(),
+        ));
+    }
+
     let start = Instant::now();
     let encoding = super::context::parse_encoding(encoding)?;
     let root = env::current_dir()?;
@@ -75,9 +84,26 @@ pub fn run_smart(
 
     eprintln!("Analyzing task: \"{}\"...", task);
 
-    let result = smart_context_filtered(&db, &analytics, provider.as_ref(), task, config, &filter)?;
+    // Count-only has always retained the highest-ranked file even when it is
+    // larger than the requested content budget. Keep that compatibility while
+    // normal smart output defaults to a strict budget.
+    let result = smart_context_filtered_with_options(
+        &db,
+        &analytics,
+        provider.as_ref(),
+        task,
+        config,
+        &filter,
+        include_oversized_top || count_only,
+    )?;
 
     if result.selected_files.is_empty() {
+        if result.truncated {
+            return Err(ctx::error::CtxError::Other(format!(
+                "no selected file fits within --max-tokens {}; raise the budget or use --include-oversized-top",
+                max_tokens
+            )));
+        }
         eprintln!("No relevant files found for: \"{}\"", task);
         std::process::exit(2);
     }
@@ -92,18 +118,6 @@ pub fn run_smart(
             String::new()
         }
     );
-
-    // If the single most-relevant file alone exceeds the budget it is included
-    // anyway (rather than silently dropped); tell the user why little else fits.
-    if let Some(top) = result.selected_files.first() {
-        if top.token_count > max_tokens {
-            eprintln!(
-                "note: {} ({} tokens) exceeds the {}-token budget; included alone \
-                 — raise --max-tokens to include more",
-                top.path, top.token_count, max_tokens
-            );
-        }
-    }
 
     // Convert selected files to FileEntry format for context generation
     let entries: Vec<walker::FileEntry> = result
@@ -138,13 +152,33 @@ pub fn run_smart(
         eprintln!("{}", format_explain(&result));
     }
 
-    // Generate context output
-    let output_result = if entries.is_empty() {
+    // Render before writing so --max-tokens is a hard limit on the complete
+    // stdout document, including wrappers and the optional project tree.
+    let (output_result, rendered_omitted) = if entries.is_empty() {
         eprintln!("No files to include in context.");
         return Ok(());
     } else {
-        output::stream_context(&root, &entries, format.to_lib(), !no_tree, show_sizes)?
+        fit_rendered_budget(
+            &root,
+            &entries,
+            format.to_lib(),
+            !no_tree,
+            show_sizes,
+            max_tokens,
+            encoding,
+            include_oversized_top,
+        )?
     };
+
+    if rendered_omitted > 0 {
+        eprintln!(
+            "Rendered token budget: {} file{} omitted to keep stdout within {} tokens",
+            rendered_omitted,
+            if rendered_omitted == 1 { "" } else { "s" },
+            max_tokens
+        );
+    }
+    print!("{}", output_result.content);
 
     eprintln!(
         "Generated context: {} files, ~{} tokens",
@@ -153,4 +187,120 @@ pub fn run_smart(
     );
 
     Ok(())
+}
+
+/// Render candidates incrementally and keep only packs whose complete output
+/// fits the requested tokenizer budget. Streaming cannot know whether a later
+/// tree or closing block would cross the hard limit before bytes are written.
+fn fit_rendered_budget(
+    root: &std::path::Path,
+    entries: &[walker::FileEntry],
+    format: ctx::formatter::OutputFormat,
+    include_tree: bool,
+    show_sizes: bool,
+    max_tokens: usize,
+    encoding: ctx::tokens::Encoding,
+    include_oversized_top: bool,
+) -> Result<(ctx::output::ContextResult, usize)> {
+    if include_oversized_top {
+        let rendered =
+            output::render_stream_context(root, entries, format, include_tree, show_sizes)?;
+        return Ok((rendered, 0));
+    }
+
+    let mut selected = Vec::new();
+    let mut omitted = 0;
+    for entry in entries {
+        let mut candidate = selected.clone();
+        candidate.push(entry.clone());
+        let rendered =
+            output::render_stream_context(root, &candidate, format, include_tree, show_sizes)?;
+        let tokens = ctx::tokens::count_tokens_with_encoding(&rendered.content, encoding)
+            .map_err(ctx::error::CtxError::token_count)?;
+        if tokens <= max_tokens {
+            selected.push(entry.clone());
+        } else {
+            omitted += 1;
+        }
+    }
+
+    if selected.is_empty() {
+        return Err(ctx::error::CtxError::token_count(format!(
+            "rendered context framing exceeds --max-tokens {}; raise the budget or use --include-oversized-top",
+            max_tokens
+        )));
+    }
+
+    let rendered =
+        output::render_stream_context(root, &selected, format, include_tree, show_sizes)?;
+    Ok((rendered, omitted))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn entry(root: &std::path::Path, path: &str) -> walker::FileEntry {
+        let absolute_path = root.join(path);
+        walker::FileEntry {
+            size: std::fs::metadata(&absolute_path).unwrap().len(),
+            absolute_path,
+            relative_path: PathBuf::from(path),
+        }
+    }
+
+    #[test]
+    fn rendered_budget_drops_files_to_fit_wrappers() {
+        let temp = TempDir::new().unwrap();
+        std::fs::write(temp.path().join("a.rs"), "fn a() { let value = 1; }\n").unwrap();
+        std::fs::write(temp.path().join("b.rs"), "fn b() { let value = 2; }\n").unwrap();
+        let entries = vec![entry(temp.path(), "a.rs"), entry(temp.path(), "b.rs")];
+        let one = output::render_stream_context(
+            temp.path(),
+            &entries[..1],
+            ctx::formatter::OutputFormat::Plain,
+            true,
+            false,
+        )
+        .unwrap();
+        let one_tokens =
+            ctx::tokens::count_tokens_with_encoding(&one.content, ctx::tokens::Encoding::default())
+                .unwrap();
+        let all = output::render_stream_context(
+            temp.path(),
+            &entries,
+            ctx::formatter::OutputFormat::Plain,
+            true,
+            false,
+        )
+        .unwrap();
+        let all_tokens =
+            ctx::tokens::count_tokens_with_encoding(&all.content, ctx::tokens::Encoding::default())
+                .unwrap();
+
+        let (rendered, omitted) = fit_rendered_budget(
+            temp.path(),
+            &entries,
+            ctx::formatter::OutputFormat::Plain,
+            true,
+            false,
+            one_tokens,
+            ctx::tokens::Encoding::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(omitted, 1);
+        assert!(!rendered.content.contains("b.rs"));
+        assert!(all_tokens > one_tokens);
+        assert!(
+            ctx::tokens::count_tokens_with_encoding(
+                &rendered.content,
+                ctx::tokens::Encoding::default()
+            )
+            .unwrap()
+                <= one_tokens
+        );
+    }
 }

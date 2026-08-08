@@ -2,6 +2,7 @@
 
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
+use std::path::Path;
 
 use super::{parse_params, schema_for, CallGraphParams, SmartContextParams};
 use crate::mcp::server::CtxServer;
@@ -167,7 +168,7 @@ pub async fn smart_context(
     use crate::embeddings::ollama::OllamaProvider;
     use crate::embeddings::openai::OpenAIProvider;
     use crate::embeddings::{Embedding, EmbeddingProvider, Provider};
-    use crate::smart::{smart_context_with_embedding, SmartConfig};
+    use crate::smart::{smart_context_with_embedding_with_options, SmartConfig};
     use crate::tokens::Encoding;
 
     let params: SmartContextParams = parse_params(args)?;
@@ -268,31 +269,115 @@ pub async fn smart_context(
             .lock()
             .unwrap();
 
-        smart_context_with_embedding(&db, &analytics, &params.task, &task_embedding, config)
+        smart_context_with_embedding_with_options(
+            &db,
+            &analytics,
+            &params.task,
+            &task_embedding,
+            config,
+            false,
+        )
     }
     .map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
 
+    let max_tokens = params.max_tokens.unwrap_or(8000);
+    if max_tokens == 0 {
+        return Err(internal_error("max_tokens must be greater than zero"));
+    }
+
     if result.selected_files.is_empty() {
+        if result.truncated {
+            return Err(internal_error(format!(
+                "max_tokens={} is too small for the selected context; increase max_tokens",
+                max_tokens
+            )));
+        }
         return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No relevant files found for task: \"{}\"",
             params.task
         ))]));
     }
 
-    // Format output
-    let mut output = format!("Smart context for: \"{}\"\n\n", params.task);
+    let root = server.root();
+    let files: Vec<_> = result.selected_files.iter().collect();
+    let output = render_smart_context_output(
+        &root,
+        &params.task,
+        &files,
+        result.omitted_count,
+        max_tokens,
+    )
+    .map_err(internal_error)?;
+
+    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+}
+
+/// Render MCP smart context without exceeding the tool's declared token
+/// budget. Files are kept whole; a file that would overflow the complete
+/// response is omitted and the next ranked candidate is tried.
+fn render_smart_context_output(
+    root: &Path,
+    task: &str,
+    files: &[&crate::smart::FileSelection],
+    already_omitted: usize,
+    max_tokens: usize,
+) -> std::result::Result<String, String> {
+    let mut selected = Vec::new();
+
+    for file in files {
+        let mut candidate = selected.clone();
+        candidate.push(*file);
+        let omitted = already_omitted + files.len() - candidate.len();
+        let output = format_smart_context_output(root, task, &candidate, omitted);
+        let tokens =
+            crate::tokens::count_tokens_with_encoding(&output, crate::tokens::Encoding::default())
+                .map_err(|error| format!("failed to count MCP smart context tokens: {error}"))?;
+        if tokens <= max_tokens {
+            selected = candidate;
+        }
+    }
+
+    if selected.is_empty() {
+        return Err(format!(
+            "max_tokens={} is too small for the smart_context response; increase max_tokens",
+            max_tokens
+        ));
+    }
+
+    let omitted = already_omitted + files.len() - selected.len();
+    let output = format_smart_context_output(root, task, &selected, omitted);
+    let tokens =
+        crate::tokens::count_tokens_with_encoding(&output, crate::tokens::Encoding::default())
+            .map_err(|error| format!("failed to count MCP smart context tokens: {error}"))?;
+    if tokens > max_tokens {
+        return Err(format!(
+            "failed to fit smart_context response within max_tokens={} ({} tokens)",
+            max_tokens, tokens
+        ));
+    }
+    Ok(output)
+}
+
+fn format_smart_context_output(
+    root: &Path,
+    task: &str,
+    files: &[&crate::smart::FileSelection],
+    omitted: usize,
+) -> String {
+    let total_tokens: usize = files.iter().map(|file| file.token_count).sum();
+    let mut output = format!("Smart context for: \"{}\"\n\n", task);
     output.push_str(&format!(
         "Selected {} files ({} tokens){}:\n\n",
-        result.selected_files.len(),
-        result.total_tokens,
-        if result.truncated {
-            format!(", {} omitted due to token limit", result.omitted_count)
+        files.len(),
+        total_tokens,
+        if omitted > 0 {
+            format!(", {} omitted due to token limit", omitted)
         } else {
             String::new()
         }
     ));
 
-    for file in &result.selected_files {
+    for file in files {
         output.push_str(&format!(
             "- {} (relevance: {:.0}%, {} tokens)\n",
             file.path,
@@ -304,11 +389,8 @@ pub async fn smart_context(
         }
     }
 
-    // Include the actual file contents if they fit
     output.push_str("\n---\n\nSelected file contents:\n\n");
-
-    let root = server.root();
-    for file in &result.selected_files {
+    for file in files {
         let path = root.join(&file.path);
         if let Ok(content) = std::fs::read_to_string(&path) {
             output.push_str(&format!("// === {} ===\n\n", file.path));
@@ -316,8 +398,7 @@ pub async fn smart_context(
             output.push_str("\n\n");
         }
     }
-
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    output
 }
 
 #[cfg(test)]

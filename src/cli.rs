@@ -107,7 +107,8 @@ pub struct Args {
     #[arg(long, global = true)]
     pub count_only: bool,
 
-    /// Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)
+    /// Maximum tokens for plain context output; smart, diff, and review accept
+    /// their own command-specific token budget options
     #[arg(long, global = true)]
     pub max_tokens: Option<usize>,
 
@@ -446,9 +447,13 @@ internal and unstable. Access is read-only and engine-hardened.
         /// Natural language description of the task (e.g., "add caching to the parser")
         task: String,
 
-        /// Maximum tokens in output
+        /// Hard maximum for the complete rendered context
         #[arg(long, default_value = "8000")]
         max_tokens: usize,
+
+        /// Allow the most relevant file to exceed the hard rendered-output budget
+        #[arg(long)]
+        include_oversized_top: bool,
 
         /// Call graph expansion depth
         #[arg(long, default_value = "2")]

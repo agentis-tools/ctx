@@ -32,7 +32,8 @@ Before using `ctx smart`, you must:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--max-tokens <N>` | Maximum tokens in output | 8000 |
+| `--max-tokens <N>` | Hard maximum for the complete rendered context, measured with `--encoding` | 8000 |
+| `--include-oversized-top` | Allow the most relevant file to exceed the hard output maximum | false |
 | `--depth <N>` | Call graph expansion depth | 2 |
 | `--top <N>` | Top semantic matches to consider | 10 |
 | `--explain` | Show why each file was selected | false |
@@ -69,6 +70,17 @@ ctx smart "implement caching" --max-tokens 4000 --count-only --encoding o200k_ba
 `--count-only` prints its count summary on stdout and diagnostics on stderr. It
 takes precedence over `--dry-run` and `--explain`, so those combinations do not
 emit a selection preview or formatted context.
+
+By default, `--max-tokens` counts the complete rendered stdout document,
+including the project tree and format wrappers. The selector may omit a file
+that fits by itself if adding its wrapper would exceed the limit. Use
+`--include-oversized-top` only when retaining the highest-ranked file is more
+important than a hard context-window guard; that opt-in restores the previous
+oversized-top behavior.
+
+A zero budget is rejected. `--dry-run` intentionally previews all relevant
+files because it does not emit a context document; use `--count-only` to
+inspect the budgeted selection.
 
 ### Explain Selection
 

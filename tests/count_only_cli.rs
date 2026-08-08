@@ -106,6 +106,30 @@ fn smart_and_diff_reject_invalid_encoding_with_exit_two() {
     }
 }
 
+#[test]
+fn smart_rejects_zero_budget_and_honors_global_budget_position() {
+    let temp = tempfile::tempdir().unwrap();
+
+    for args in [
+        vec!["smart", "task", "--max-tokens", "0"],
+        vec!["--max-tokens", "0", "smart", "task"],
+    ] {
+        let output = ctx(temp.path(), &args);
+        assert_eq!(output.status.code(), Some(2), "args: {args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("--max-tokens must be greater than zero"),
+            "args: {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = ctx(temp.path(), &["--max-tokens", "1", "query", "stats"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("--max-tokens is only supported for context, smart, diff, and review commands"));
+}
+
 #[cfg(feature = "duckdb")]
 #[test]
 fn smart_count_only_suppresses_dry_run_and_explain_output() {
