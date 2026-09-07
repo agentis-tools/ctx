@@ -35,7 +35,7 @@ ignore = "0.4"
 globset = "0.4"
 
 # Code Intelligence (SQLite Foundation + sqlite-vec)
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 sqlite-vec = "0.1.6"
 zerocopy = { version = "0.8", features = ["derive"] }
 sha2 = "0.11"
@@ -43,7 +43,7 @@ flate2 = "1.0"                    # For source compression
 
 # Tree-sitter for code parsing
 # Keep the runtime and language grammars on their compatible LanguageFn API releases.
-tree-sitter = "0.26.11"
+tree-sitter = "0.27.0"
 tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25.0"
@@ -108,7 +108,7 @@ rustyline = { version = "18", features = ["with-file-history"] }
 # dependency, so ort is in the graph for every feature set.
 #
 # Dependabot is configured to leave this crate alone (.github/dependabot.yml).
-fastembed = "=5.4.0"
+fastembed = "=6.0.2"
 
 # Phase 2: DuckDB for analytical queries (optional, not available on Windows)
 duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
