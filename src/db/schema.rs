@@ -2490,6 +2490,36 @@ impl Database {
         )
     }
 
+    /// C/C++: a call to `f` usually has two same-named candidates — the
+    /// prototype in a header and the definition in a `.c`/`.cc` file — so
+    /// name matching treated it as ambiguous and left it unresolved (on jq,
+    /// 69 % of in-repo calls). Bind such calls to the definition when exactly
+    /// one non-header function/method of that name exists. Returns the number
+    /// of edges bound.
+    pub fn resolve_c_family_definitions(&self) -> Result<usize> {
+        self.conn.execute(
+            r#"
+            WITH defs AS (
+                SELECT name, MIN(id) AS id, COUNT(*) AS n
+                FROM symbols
+                WHERE kind IN ('function', 'method')
+                  AND (file_path LIKE '%.c' OR file_path LIKE '%.cc' OR file_path LIKE '%.cpp'
+                       OR file_path LIKE '%.cxx')
+                GROUP BY name
+            )
+            UPDATE edges SET target_id = (SELECT id FROM defs WHERE defs.name = edges.target_name)
+            WHERE kind = 'calls' AND target_id IS NULL
+              AND target_name IN (SELECT name FROM defs WHERE n = 1)
+              AND source_id IN (
+                  SELECT id FROM symbols
+                  WHERE file_path LIKE '%.c' OR file_path LIKE '%.h' OR file_path LIKE '%.cc'
+                     OR file_path LIKE '%.cpp' OR file_path LIKE '%.cxx' OR file_path LIKE '%.hpp'
+                     OR file_path LIKE '%.hh')
+            "#,
+            [],
+        )
+    }
+
     /// Open a named SAVEPOINT (nests inside any enclosing transaction).
     pub fn savepoint(&self, name: &str) -> Result<()> {
         self.conn.execute_batch(&format!("SAVEPOINT {name}"))

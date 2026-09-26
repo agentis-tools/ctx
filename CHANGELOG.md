@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a language server to finish loading (default 300 s).
 
 ### Fixed
+- C/C++: calls that name a function declared in a header and defined in one
+  `.c`/`.cc` file are now bound to the definition during indexing (previously
+  they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
+  no longer offers a header prototype next to its own definition, which split
+  the model's confidence between two equivalent answers.
 - Go files with an `import` were never stored: import edges used the file
   path as `edges.source_id`, violating its foreign key, and the failure was
   hidden behind an already-written content hash. Go imports now live in module

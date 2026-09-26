@@ -965,6 +965,17 @@ impl Indexer {
                 }
             }
         }
+        match self.db.resolve_c_family_definitions() {
+            Ok(n) if self.verbose && n > 0 => {
+                eprintln!("Bound {} C/C++ calls to their unique definition", n)
+            }
+            Ok(_) => {}
+            Err(e) => {
+                if self.verbose {
+                    eprintln!("Warning: C/C++ definition binding failed: {}", e);
+                }
+            }
+        }
         match self.db.unbind_rust_method_calls_to_free_functions() {
             Ok(n) if self.verbose && n > 0 => {
                 eprintln!(

@@ -111,6 +111,15 @@ fn rank_candidates<'a>(
     };
     let src_dir = dir(src_file);
     let mut v: Vec<&JudgeCandidate> = cands.to_vec();
+    // C/C++: a header prototype and its definition are the same function for
+    // a caller. Offering both splits the model's confidence between two
+    // equivalent answers, so drop the prototype when a definition is present.
+    let has_definition = |name: &str| {
+        cands
+            .iter()
+            .any(|c| c.name == name && is_c_family(&c.file_path) && !is_c_header(&c.file_path))
+    };
+    v.retain(|c| !(is_c_header(&c.file_path) && has_definition(&c.name)));
     v.sort_by_key(|c| {
         let stem = c
             .file_path
@@ -134,6 +143,19 @@ fn rank_candidates<'a>(
     });
     v.truncate(MAX_CANDIDATES);
     v
+}
+
+fn is_c_header(path: &str) -> bool {
+    [".h", ".hh", ".hpp", ".hxx"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+}
+
+fn is_c_family(path: &str) -> bool {
+    is_c_header(path)
+        || [".c", ".cc", ".cpp", ".cxx"]
+            .iter()
+            .any(|ext| path.ends_with(ext))
 }
 
 fn import_lines(text: &str) -> Vec<String> {
@@ -486,6 +508,15 @@ mod tests {
         let ranked = rank_candidates("src/x/here.rs", &v, "use crate::y::util;");
         let ids: Vec<&str> = ranked.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, ["c", "a", "b", "d"]);
+    }
+
+    #[test]
+    fn c_header_prototype_is_dropped_when_definition_is_a_candidate() {
+        let h = cand("h", "src/jv.h");
+        let c = cand("c", "src/jv.c");
+        let ranked = rank_candidates("src/builtin.c", &[&h, &c], "#include \"jv.h\"");
+        let ids: Vec<&str> = ranked.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["c"]);
     }
 
     #[test]
