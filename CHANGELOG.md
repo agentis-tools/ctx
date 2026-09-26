@@ -18,16 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ctx's own 4 082 call edges, call-graph accuracy goes from 0.83 to 0.99 and
   links wrongly bound to in-repo functions from 390 to 7. The API key is read
   only from `JEV_API_KEY`.
+- `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
+  for a language server to finish loading (default 300 s).
 
-### Added (cont.)
-- **BREAKING (output):** `ctx hotspots` now ranks by churn × size by default
+### Changed
+- BREAKING: `ctx hotspots` now ranks by churn × size by default
   (`--signal lines`); `--signal complexity` restores the old ranking. In a
   time-split backtest on 10 repositories (Rust, Python, TypeScript, Go, C,
   C++), size beat complexity at predicting which functions later got bug
   fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
   and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
-- `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
-  for a language server to finish loading (default 300 s).
 
 ### Fixed
 - C/C++: calls that name a function declared in a header and defined in one
