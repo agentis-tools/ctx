@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
   lookup index identified by profiling of its hot path (#96).
+- Hardened self-update staging and writability probes with exclusive randomized
+  temporary files, bounded release/archive/member reads, and bounded
+  decompression. Snapshot backfill now uses a randomized private RAII tempdir
+  for historical worktrees.
 
 ## [0.4.0] - 2026-07-24
 
@@ -128,6 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Updated both Cargo lockfiles through Cargo tooling to move `h2` and `rustls`
+  past their current security advisories.
 - Refreshed the root and performance-harness dependency locks together, including
   the bundled SQLite runtime, so both independently locked Cargo packages resolve
   the same reviewed dependency set.
