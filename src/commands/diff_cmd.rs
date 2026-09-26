@@ -84,17 +84,18 @@ pub fn run_diff(
                 .iter()
                 .filter(|f| f.change_type != diff::ChangeType::Deleted)
                 .map(|f| {
-                    let path = root.join(&f.path);
-                    let token_count = std::fs::read(&path)
-                        .ok()
-                        .and_then(|bytes| {
-                            tokens::count_tokens_with_encoding(
-                                &String::from_utf8_lossy(&bytes),
-                                encoding,
-                            )
+                    let token_count =
+                        walker::secure_file_path(&root, std::path::Path::new(&f.path))
                             .ok()
-                        })
-                        .unwrap_or(0);
+                            .and_then(|path| std::fs::read(path).ok())
+                            .and_then(|bytes| {
+                                tokens::count_tokens_with_encoding(
+                                    &String::from_utf8_lossy(&bytes),
+                                    encoding,
+                                )
+                                .ok()
+                            })
+                            .unwrap_or(0);
                     diff::ContextFile {
                         path: f.path.clone(),
                         priority: 1.0,
@@ -163,17 +164,23 @@ pub fn run_diff(
     let entries: Vec<walker::FileEntry> = result
         .context_files
         .iter()
-        .map(|f| {
+        .filter_map(|f| {
             let relative_path = std::path::PathBuf::from(&f.path);
-            let absolute_path = root.join(&relative_path);
+            let absolute_path = match walker::secure_file_path(&root, &relative_path) {
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!("Warning: refusing unsafe diff path {}: {}", f.path, error);
+                    return None;
+                }
+            };
             let size = std::fs::metadata(&absolute_path)
                 .map(|m| m.len())
                 .unwrap_or(0);
-            walker::FileEntry {
+            Some(walker::FileEntry {
                 absolute_path,
                 relative_path,
                 size,
-            }
+            })
         })
         .collect();
 

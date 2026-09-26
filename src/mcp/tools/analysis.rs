@@ -167,8 +167,9 @@ pub async fn smart_context(
     use crate::embeddings::ollama::OllamaProvider;
     use crate::embeddings::openai::OpenAIProvider;
     use crate::embeddings::{Embedding, EmbeddingProvider, Provider};
-    use crate::smart::{smart_context_with_embedding, SmartConfig};
+    use crate::smart::{smart_context_with_embedding_filtered, SmartConfig};
     use crate::tokens::Encoding;
+    use crate::walker::{secure_file_path, FilePatternFilter};
 
     let params: SmartContextParams = parse_params(args)?;
 
@@ -203,8 +204,7 @@ pub async fn smart_context(
     // `use_openai` bool, else the `.ctx/config.toml` default, else local. Network
     // providers embed asynchronously so they don't block the async runtime.
     // (Named `project_config` so it doesn't shadow the `SmartConfig` above.)
-    let project_config =
-        crate::config::CtxConfig::load(&std::env::current_dir().unwrap_or_default());
+    let project_config = crate::config::CtxConfig::load(server.root());
     let provider = match params.provider.as_deref() {
         Some("openai") => Provider::Openai,
         Some("ollama") => Provider::Ollama,
@@ -268,7 +268,15 @@ pub async fn smart_context(
             .lock()
             .unwrap();
 
-        smart_context_with_embedding(&db, &analytics, &params.task, &task_embedding, config)
+        let filter = FilePatternFilter::all(server.root());
+        smart_context_with_embedding_filtered(
+            &db,
+            &analytics,
+            &params.task,
+            &task_embedding,
+            config,
+            &filter,
+        )
     }
     .map_err(|e| internal_error(format!("Smart context selection failed: {}", e)))?;
 
@@ -309,8 +317,10 @@ pub async fn smart_context(
 
     let root = server.root();
     for file in &result.selected_files {
-        let path = root.join(&file.path);
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        let Ok(path) = secure_file_path(root, std::path::Path::new(&file.path)) else {
+            continue;
+        };
+        if let Ok(content) = std::fs::read_to_string(path) {
             output.push_str(&format!("// === {} ===\n\n", file.path));
             output.push_str(&content);
             output.push_str("\n\n");

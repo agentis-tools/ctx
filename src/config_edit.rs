@@ -20,6 +20,7 @@ use crate::config::CONFIG_FILE;
 use crate::error::{CtxError, Result};
 use crate::index::CTX_DIR;
 use crate::lsp_registry::{LanguageEntry, ServerSpec};
+use crate::walker::{validate_project_path, write_project_file_with_mode};
 
 /// Provenance value marking a `[lsp.<lang>]` table as registry-managed.
 pub const SOURCE_REGISTRY: &str = "registry";
@@ -99,13 +100,13 @@ const CANONICAL_KEYS: [&str; 8] = [
 /// customizations on the table survive.
 pub fn upsert_lsp_entry(root: &Path, lang: &str, entry: &LspConfigEntry) -> Result<()> {
     let path = config_path(root);
-    fs::create_dir_all(path.parent().expect("config path has a parent"))?;
+    validate_project_path(root, Path::new(".ctx/config.toml"), true)?;
     let mut doc = load_document(&path)?;
 
     let lsp = lsp_table_mut(&mut doc, &path)?;
     lsp.insert(lang, Item::Table(entry_table(entry)));
 
-    write_atomic(&path, doc.to_string().as_bytes())
+    write_atomic(root, &path, doc.to_string().as_bytes())
 }
 
 /// Like [`upsert_lsp_entry`], but when `[lsp.<lang>]` already exists only
@@ -114,7 +115,7 @@ pub fn upsert_lsp_entry(root: &Path, lang: &str, entry: &LspConfigEntry) -> Resu
 /// untouched, as are their positions. Missing canonical keys are appended.
 pub fn refresh_lsp_entry(root: &Path, lang: &str, entry: &LspConfigEntry) -> Result<()> {
     let path = config_path(root);
-    fs::create_dir_all(path.parent().expect("config path has a parent"))?;
+    validate_project_path(root, Path::new(".ctx/config.toml"), true)?;
     let mut doc = load_document(&path)?;
 
     let lsp = lsp_table_mut(&mut doc, &path)?;
@@ -130,7 +131,7 @@ pub fn refresh_lsp_entry(root: &Path, lang: &str, entry: &LspConfigEntry) -> Res
         }
     }
 
-    write_atomic(&path, doc.to_string().as_bytes())
+    write_atomic(root, &path, doc.to_string().as_bytes())
 }
 
 /// Remove `[lsp.<lang>]` from `<root>/.ctx/config.toml` if present.
@@ -146,7 +147,7 @@ pub fn remove_lsp_entry(root: &Path, lang: &str) -> Result<bool> {
         None => false,
     };
     if removed {
-        write_atomic(&path, doc.to_string().as_bytes())?;
+        write_atomic(root, &path, doc.to_string().as_bytes())?;
     }
     Ok(removed)
 }
@@ -334,23 +335,11 @@ fn string_array(items: &[String]) -> Item {
 /// Atomically replace `path` with `data`: write to a temp file in the same
 /// directory, then rename over the target (pattern shared with the
 /// self-update binary swap).
-fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| CtxError::Other("config path has no parent directory".to_string()))?;
-    let staged = dir.join(format!(".config-toml-staged-{}", std::process::id()));
-    if let Err(e) = fs::write(&staged, data) {
-        let _ = fs::remove_file(&staged);
-        return Err(e.into());
-    }
-    // On Windows, rename cannot replace an existing file.
-    if cfg!(windows) && path.exists() {
-        let _ = fs::remove_file(path);
-    }
-    if let Err(e) = fs::rename(&staged, path) {
-        let _ = fs::remove_file(&staged);
-        return Err(e.into());
-    }
+fn write_atomic(root: &Path, path: &Path, data: &[u8]) -> Result<()> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| CtxError::Other("config path is outside project root".to_string()))?;
+    write_project_file_with_mode(root, relative, data, Some(0o600))?;
     Ok(())
 }
 

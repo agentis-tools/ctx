@@ -9,8 +9,10 @@
 //! [`FileFilter`] offers the same rules as a reusable per-file check
 //! (used by watch mode).
 
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -63,11 +65,16 @@ impl FilePatternFilter {
     /// Build a matcher that accepts every path.
     pub fn all(root: &Path) -> Self {
         Self {
-            root: root.to_path_buf(),
+            root: root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
             globset: None,
             literal_paths: Vec::new(),
             match_all: true,
         }
+    }
+
+    /// Return the project root against which paths are matched.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     /// Return whether a repository-relative or absolute path is in scope.
@@ -190,6 +197,18 @@ impl FileFilter {
 
     /// Check if a file should be included.
     pub fn should_include(&self, file_path: &Path) -> bool {
+        // Watch events may refer to deleted files, so only apply the
+        // filesystem-type check when metadata is still available.  Existing
+        // symlinks and non-regular entries are never indexable.
+        if let Ok(metadata) = fs::symlink_metadata(file_path) {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return false;
+            }
+            if secure_file_path(&self.root, file_path).is_err() {
+                return false;
+            }
+        }
+
         // Get relative path
         let rel_path = match file_path.strip_prefix(&self.root) {
             Ok(p) => p,
@@ -527,6 +546,300 @@ pub struct FileEntry {
     pub size: u64,
 }
 
+/// Resolve an existing project path without crossing the project boundary or
+/// following a symlink.  Paths supplied by callers are deliberately treated
+/// as untrusted: absolute paths must already be lexically below `root`, and
+/// parent components are rejected even when they happen to resolve back into
+/// the project.
+///
+/// This is used at read and write boundaries in addition to the discovery
+/// walker.  Checking only `Path::starts_with` is insufficient because it does
+/// not resolve symlinks, while checking only `canonicalize` would allow a
+/// caller to select a path through a symlink before it is reopened.
+pub fn validate_project_path(root: &Path, path: &Path, allow_missing: bool) -> io::Result<PathBuf> {
+    let root = root.canonicalize()?;
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+
+    let relative = candidate.strip_prefix(&root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("path is outside project root: {}", path.display()),
+        )
+    })?;
+
+    // Parent components are rejected before any filesystem operation.  This
+    // makes the accepted path contract unambiguous and prevents a later
+    // component from being interpreted relative to a symlinked directory.
+    if relative
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("parent components are not allowed: {}", path.display()),
+        ));
+    }
+
+    reject_symlink_components(&root, relative)?;
+
+    match fs::symlink_metadata(&candidate) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("symlinks are not allowed: {}", path.display()),
+                ));
+            }
+            candidate.canonicalize()
+        }
+        Err(error) if allow_missing && error.kind() == io::ErrorKind::NotFound => Ok(candidate),
+        Err(error) => Err(error),
+    }
+}
+
+/// Validate an existing regular file below `root`.
+pub fn secure_file_path(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let path = validate_project_path(root, path, false)?;
+    let metadata = fs::symlink_metadata(&path)?;
+    if !metadata.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("not a regular file: {}", path.display()),
+        ));
+    }
+    Ok(path)
+}
+
+/// Validate an existing directory below `root`.
+pub fn secure_directory_path(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let path = validate_project_path(root, path, false)?;
+    let metadata = fs::symlink_metadata(&path)?;
+    if !metadata.file_type().is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("not a directory: {}", path.display()),
+        ));
+    }
+    Ok(path)
+}
+
+/// Create missing parent directories below `root`, rejecting symlinked or
+/// non-directory ancestors.  Creation is component-by-component so an
+/// existing attacker-controlled symlink cannot be traversed by
+/// `create_dir_all`.
+pub fn ensure_project_parent(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let root = root.canonicalize()?;
+    let target = validate_project_path(&root, path, true)?;
+    let relative = target.strip_prefix(&root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "path is outside project root",
+        )
+    })?;
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+
+    ensure_directory_components(&root, parent)?;
+
+    // Re-check the leaf after parent creation to reject a symlink that was
+    // introduced between the first validation and directory creation.
+    if let Ok(metadata) = fs::symlink_metadata(&target) {
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("symlinks are not allowed: {}", target.display()),
+            ));
+        }
+    }
+    Ok(target)
+}
+
+/// Create or validate a project-relative directory without following any
+/// symlinked component.
+pub fn ensure_project_directory(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let root = root.canonicalize()?;
+    let target = validate_project_path(&root, path, true)?;
+    let relative = target.strip_prefix(&root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "path is outside project root",
+        )
+    })?;
+    ensure_directory_components(&root, relative)?;
+    secure_directory_path(&root, path)
+}
+
+/// Atomically replace a project-relative file without following symlinked
+/// ancestors or a symlink at the destination.  A unique `create_new` staging
+/// file prevents an attacker from pre-seeding the predictable PID-only names
+/// used by older writers.
+pub fn write_project_file(root: &Path, path: &Path, data: &[u8]) -> io::Result<PathBuf> {
+    write_project_file_with_mode(root, path, data, None)
+}
+
+/// Variant of [`write_project_file`] that selects the mode for a new file.
+/// Existing regular-file permissions are always preserved.
+pub fn write_project_file_with_mode(
+    root: &Path,
+    path: &Path,
+    data: &[u8],
+    new_mode: Option<u32>,
+) -> io::Result<PathBuf> {
+    let target = ensure_project_parent(root, path)?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "project path has no parent"))?;
+
+    #[cfg(unix)]
+    let existing_mode = fs::symlink_metadata(&target).ok().map(|metadata| {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o777
+    });
+    #[cfg(not(unix))]
+    let _ = new_mode;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut staged = None;
+    for attempt in 0..32u32 {
+        let candidate = parent.join(format!(
+            ".ctx-staged-{}-{}-{}",
+            std::process::id(),
+            stamp,
+            attempt
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                let write_result = (|| {
+                    file.write_all(data)?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mode = existing_mode
+                            .or_else(|| new_mode.map(|mode| mode & 0o777))
+                            .unwrap_or(0o600);
+                        file.set_permissions(fs::Permissions::from_mode(mode))?;
+                    }
+                    file.sync_all()
+                })();
+                if let Err(error) = write_result {
+                    drop(file);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error);
+                }
+                staged = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let staged = staged.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique project staging file",
+        )
+    })?;
+
+    // `rename` replaces the destination itself; it does not follow a symlink
+    // at the destination.  Windows requires removing an existing file first.
+    #[cfg(windows)]
+    if target.exists() {
+        fs::remove_file(&target)?;
+    }
+    if let Err(error) = fs::rename(&staged, &target) {
+        let _ = fs::remove_file(&staged);
+        return Err(error);
+    }
+
+    // Persist the directory entry as well as the file contents.  This is
+    // Unix-only because opening a directory for syncing is not portable to
+    // Windows.
+    #[cfg(unix)]
+    OpenOptions::new().read(true).open(parent)?.sync_all()?;
+
+    Ok(target)
+}
+
+fn reject_symlink_components(root: &Path, relative: &Path) -> io::Result<()> {
+    let mut current = root.to_path_buf();
+    let components: Vec<_> = relative.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("symlink component is not allowed: {}", current.display()),
+                ));
+            }
+            Ok(metadata) if index + 1 < components.len() && !metadata.file_type().is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("path component is not a directory: {}", current.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory_components(root: &Path, relative: &Path) -> io::Result<()> {
+    let mut current = root.to_path_buf();
+    let components: Vec<_> = relative.components().collect();
+    for component in &components {
+        let std::path::Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "invalid project directory path",
+            ));
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("unsafe project directory: {}", current.display()),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match fs::create_dir(&current) {
+                    Ok(()) => {}
+                    Err(create_error) if create_error.kind() == io::ErrorKind::AlreadyExists => {
+                        let metadata = fs::symlink_metadata(&current)?;
+                        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::PermissionDenied,
+                                format!("unsafe project directory: {}", current.display()),
+                            ));
+                        }
+                    }
+                    Err(create_error) => return Err(create_error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 /// Configuration for the file walker.
 #[derive(Debug, Clone)]
 pub struct WalkerConfig {
@@ -700,19 +1013,26 @@ pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<File
                 }
             };
 
-            // Skip directories
+            // Skip directories, symlinks, and every non-regular filesystem
+            // entry.  In particular, never let an in-tree symlink turn a
+            // repository-relative path into an out-of-root read.
             let file_type = match entry.file_type() {
                 Some(ft) => ft,
                 None => continue,
             };
-            if file_type.is_dir() {
+            if file_type.is_dir() || file_type.is_symlink() || !file_type.is_file() {
                 continue;
             }
 
             let abs_path = entry.path().to_path_buf();
 
+            let safe_abs_path = match secure_file_path(&root, &abs_path) {
+                Ok(path) => path,
+                Err(_) => continue,
+            };
+
             // Calculate relative path from root
-            let rel_path = match abs_path.strip_prefix(&root) {
+            let rel_path = match safe_abs_path.strip_prefix(&root) {
                 Ok(p) => p.to_path_buf(),
                 Err(_) => continue,
             };
@@ -736,15 +1056,15 @@ pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<File
             }
 
             // Skip binary files (check for null bytes)
-            if is_binary_file(&abs_path) {
+            if is_binary_file(&safe_abs_path) {
                 continue;
             }
 
             // Get file size
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let size = fs::metadata(&safe_abs_path).map(|m| m.len()).unwrap_or(0);
 
             entries.push(FileEntry {
-                absolute_path: abs_path,
+                absolute_path: safe_abs_path,
                 relative_path: rel_path,
                 size,
             });
@@ -1093,5 +1413,88 @@ mod tests {
             Path::new("/project/src/dotenv.rs"),
             &config
         ));
+    }
+
+    #[test]
+    fn discover_files_rejects_parent_and_absolute_paths_outside_root() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.rs"), "fn secret() {}\n").unwrap();
+
+        let config = WalkerConfig {
+            include_patterns: vec!["../".to_string()],
+            ..WalkerConfig::default()
+        };
+        let entries = discover_files(project.path(), &config).unwrap();
+        assert!(entries.is_empty());
+
+        let config = WalkerConfig {
+            include_patterns: vec![outside.path().join("secret.rs").display().to_string()],
+            ..WalkerConfig::default()
+        };
+        let entries = discover_files(project.path(), &config).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discover_files_rejects_symlink_files_and_directories() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.rs"), "fn secret() {}\n").unwrap();
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        symlink(
+            outside.path().join("secret.rs"),
+            project.path().join("src/secret.rs"),
+        )
+        .unwrap();
+        symlink(outside.path(), project.path().join("src/vendor")).unwrap();
+
+        let entries = discover_files(project.path(), &WalkerConfig::default()).unwrap();
+        assert!(
+            entries.is_empty(),
+            "symlink targets must never be discovered"
+        );
+    }
+
+    #[test]
+    fn project_path_validation_rejects_parent_components_and_symlink_leaves() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("main.rs"), "fn main() {}\n").unwrap();
+
+        assert!(validate_project_path(project.path(), Path::new("../main.rs"), false).is_err());
+        assert!(secure_file_path(project.path(), Path::new("main.rs")).is_ok());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(
+                project.path().join("main.rs"),
+                project.path().join("alias.rs"),
+            )
+            .unwrap();
+            assert!(secure_file_path(project.path(), Path::new("alias.rs")).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_writer_preserves_existing_mode_and_restricts_new_defaults() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let project = tempfile::tempdir().unwrap();
+        let existing = project.path().join(".ctx").join("config.toml");
+        std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        std::fs::write(&existing, "old\n").unwrap();
+        std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_project_file(project.path(), Path::new(".ctx/config.toml"), b"new\n").unwrap();
+        assert_eq!(std::fs::metadata(&existing).unwrap().mode() & 0o777, 0o600);
+
+        let new_path = project.path().join(".ctx").join("new.toml");
+        write_project_file(project.path(), Path::new(".ctx/new.toml"), b"new\n").unwrap();
+        assert_eq!(std::fs::metadata(new_path).unwrap().mode() & 0o777, 0o600);
     }
 }

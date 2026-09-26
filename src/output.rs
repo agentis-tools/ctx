@@ -12,7 +12,7 @@ use std::path::Path;
 
 use crate::formatter::{get_formatter, OutputFormat};
 use crate::tree::generate_tree;
-use crate::walker::FileEntry;
+use crate::walker::{secure_file_path, FileEntry};
 
 /// Result of context generation.
 pub struct ContextResult {
@@ -53,7 +53,8 @@ pub fn generate_context(
     let mut processed_count = 0usize;
 
     for entry in entries {
-        match read_file_content(&entry.absolute_path) {
+        match secure_file_path(root, &entry.relative_path).and_then(|path| read_file_content(&path))
+        {
             Ok(content) => {
                 let block = formatter.format_file(entry, &content);
                 file_blocks.push(block);
@@ -124,7 +125,8 @@ pub fn stream_context(
     let separator = formatter.separator();
 
     for (i, entry) in entries.iter().enumerate() {
-        match read_file_content(&entry.absolute_path) {
+        match secure_file_path(root, &entry.relative_path).and_then(|path| read_file_content(&path))
+        {
             Ok(content) => {
                 let block = formatter.format_file(entry, &content);
                 if i > 0 {

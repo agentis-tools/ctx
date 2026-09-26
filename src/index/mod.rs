@@ -20,7 +20,10 @@ use sha2::{Digest, Sha256};
 use crate::db::{Database, FileRecord, ParseResult};
 use crate::lsp::{FileBackend, LspManager};
 use crate::parser::CodeParser;
-use crate::walker::{discover_files, FileEntry, WalkerConfig};
+use crate::walker::{
+    discover_files, ensure_project_directory, secure_file_path, validate_project_path, FileEntry,
+    WalkerConfig,
+};
 
 // --- Helper functions for store_file ---
 
@@ -113,14 +116,13 @@ impl Indexer {
     ) -> io::Result<Self> {
         let root = root.canonicalize()?;
 
-        // Create .ctx directory if needed
-        let ctx_dir = root.join(CTX_DIR);
-        if !ctx_dir.exists() {
-            fs::create_dir_all(&ctx_dir)?;
-        }
+        // Create `.ctx` component-by-component and reject a repository-owned
+        // symlink before opening the persistent database.
+        ensure_project_directory(&root, Path::new(CTX_DIR))?;
 
         // Open database
-        let db_path = ctx_dir.join(DB_FILE);
+        let db_relative = Path::new(CTX_DIR).join(DB_FILE);
+        let db_path = validate_project_path(&root, &db_relative, true)?;
         let db = Database::open(&db_path).map_err(|e| io::Error::other(e.to_string()))?;
 
         // Optional LSP extraction backend (inert without [lsp.*] config).
@@ -647,11 +649,7 @@ impl Indexer {
 
     /// Index a single file.
     pub fn index_file(&mut self, path: &Path) -> io::Result<bool> {
-        let abs_path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.root.join(path)
-        };
+        let abs_path = secure_file_path(&self.root, path)?;
 
         let rel_path = abs_path
             .strip_prefix(&self.root)
@@ -930,15 +928,21 @@ fn compress_source(content: &str) -> Vec<u8> {
 
 /// Open the database for a project.
 pub fn open_database(root: &Path) -> crate::error::Result<Database> {
-    let ctx_dir = root.join(CTX_DIR);
-    let db_path = ctx_dir.join(DB_FILE);
-
-    if !db_path.exists() {
-        return Err(crate::error::CtxError::IndexNotFound(format!(
+    let ctx_dir = match crate::walker::secure_directory_path(root, Path::new(CTX_DIR)) {
+        Ok(path) => path,
+        Err(_) => {
+            return Err(crate::error::CtxError::IndexNotFound(format!(
+                "run 'ctx index' first (expected {})",
+                root.join(CTX_DIR).join(DB_FILE).display()
+            )))
+        }
+    };
+    let db_path = secure_file_path(&ctx_dir, Path::new(DB_FILE)).map_err(|_| {
+        crate::error::CtxError::IndexNotFound(format!(
             "run 'ctx index' first (expected {})",
-            db_path.display()
-        )));
-    }
+            root.join(CTX_DIR).join(DB_FILE).display()
+        ))
+    })?;
 
     Database::open(&db_path)
 }
@@ -1157,6 +1161,20 @@ fn helper() -> i32 {
         let stats = indexer.database().get_stats().unwrap();
         assert_eq!(stats.files, 1);
         assert!(stats.symbols >= 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_index_rejects_symlinked_ctx_directory() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        symlink(outside.path(), project.path().join(CTX_DIR)).unwrap();
+
+        let result = Indexer::with_config(project.path(), false, WalkerConfig::default());
+        assert!(result.is_err(), "index must not write through .ctx symlink");
+        assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
     }
 
     #[test]

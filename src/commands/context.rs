@@ -119,7 +119,18 @@ pub fn run_count_only(
     let mut skipped_count = 0usize;
 
     for entry in entries {
-        let path = root.join(&entry.relative_path);
+        let path = match walker::secure_file_path(root, &entry.relative_path) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!(
+                    "Warning: refusing unsafe path {}: {}",
+                    entry.relative_path.display(),
+                    e
+                );
+                skipped_count += 1;
+                continue;
+            }
+        };
         // Use lossy read to match read_file_content behavior in output.rs
         match std::fs::read(&path) {
             Ok(bytes) => {
@@ -167,7 +178,17 @@ pub fn filter_files_by_tokens(
     let mut file_tokens: Vec<(usize, &FileEntry)> = Vec::new();
 
     for entry in entries {
-        let path = root.join(&entry.relative_path);
+        let path = match walker::secure_file_path(root, &entry.relative_path) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!(
+                    "Warning: refusing unsafe path {}: {}",
+                    entry.relative_path.display(),
+                    e
+                );
+                continue;
+            }
+        };
         // Use lossy read to match read_file_content behavior in output.rs
         if let Ok(bytes) = std::fs::read(&path) {
             let content = String::from_utf8_lossy(&bytes);

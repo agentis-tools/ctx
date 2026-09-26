@@ -24,7 +24,7 @@ use crate::embeddings::{semantic_search, Embedding, EmbeddingProvider, SearchRes
 use crate::error::{CtxError, Result};
 use crate::tokens::{count_file_tokens, select_by_token_budget, Encoding, HasTokenCount};
 use crate::utils::lexical_tokens;
-use crate::walker::FilePatternFilter;
+use crate::walker::{secure_file_path, validate_project_path, FilePatternFilter};
 
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
@@ -313,12 +313,28 @@ pub fn smart_context_with_embedding_filtered(
         expand_symbol(&mut files, analytics, result, config.depth, filter)?;
     }
 
-    // 4. Convert to vector and count tokens
+    // 4. Convert to vector and count tokens.  File paths originate in the
+    // persisted index, so normalize them through the current project root
+    // before any token count or later context read.  A stale or malicious
+    // index entry must not become an arbitrary filesystem path.
     let mut selections: Vec<FileSelection> = files.into_values().collect();
+
+    selections.retain_mut(|selection| {
+        let path = std::path::Path::new(&selection.path);
+        let Ok(absolute) = validate_project_path(filter.root(), path, true) else {
+            return false;
+        };
+        let Ok(relative) = absolute.strip_prefix(filter.root()) else {
+            return false;
+        };
+        selection.path = relative.to_string_lossy().replace('\\', "/");
+        true
+    });
 
     // Count tokens for each file
     for selection in &mut selections {
-        selection.token_count = count_file_token_safe(&selection.path, config.encoding);
+        selection.token_count =
+            count_file_token_safe(filter.root(), &selection.path, config.encoding);
     }
 
     // 4b. Lexical relevance: reward candidates whose path or matched symbol names
@@ -549,8 +565,11 @@ fn rank_files(files: &mut [FileSelection]) {
 }
 
 /// Count tokens in a file, returning 0 on error.
-fn count_file_token_safe(path: &str, encoding: Encoding) -> usize {
-    count_file_tokens(Path::new(path), encoding)
+fn count_file_token_safe(root: &Path, path: &str, encoding: Encoding) -> usize {
+    let Ok(path) = secure_file_path(root, Path::new(path)) else {
+        return 0;
+    };
+    count_file_tokens(&path, encoding)
         .map(|tc| tc.count)
         .unwrap_or(0)
 }

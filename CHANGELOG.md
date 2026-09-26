@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Hardened project path handling across discovery, context selection, MCP file
+  tools, and harness/config writers: symlinks, special files, parent escapes,
+  and absolute paths outside the project are rejected, while generated files
+  and persistent `.ctx` state are replaced through collision-resistant
+  project-local staging files.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
