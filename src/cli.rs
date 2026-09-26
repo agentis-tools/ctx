@@ -114,6 +114,11 @@ pub struct Args {
     /// Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base)
     #[arg(long, default_value = "cl100k_base", global = true)]
     pub encoding: String,
+
+    /// Trust this checkout's project configuration for provider, model, and
+    /// Ollama host defaults (network-capable; review `.ctx/config.toml` first)
+    #[arg(long, global = true)]
+    pub trust_project: bool,
 }
 
 #[derive(Subcommand, Debug)]

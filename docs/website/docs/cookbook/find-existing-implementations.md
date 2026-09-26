@@ -54,8 +54,9 @@ ctx similar \
   --json
 ```
 
-The project `.ctx/config.toml` can provide the provider, so the flag is optional when the configured
-model matches the index. The worked query ranked these existing functions highly:
+The project `.ctx/config.toml` can provide the provider when you pass the
+explicit global `--trust-project` flag after reviewing the file. Otherwise,
+use `--provider` directly. The worked query ranked these existing functions highly:
 
 - `recorded_checksum` — extracts an embedded `ctx:checksum` value;
 - `content_checksum` — hashes content while excluding checksum-header lines;

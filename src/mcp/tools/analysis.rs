@@ -201,19 +201,22 @@ pub async fn smart_context(
     };
 
     // Resolve provider: explicit `provider` string wins, else the deprecated
-    // `use_openai` bool, else the `.ctx/config.toml` default, else local. Network
-    // providers embed asynchronously so they don't block the async runtime.
+    // `use_openai` bool, else the trusted `.ctx/config.toml` default, else
+    // local. Network providers embed asynchronously so they don't block the
+    // async runtime. Project model/host settings are likewise honored only
+    // after the server was launched with project trust.
     // (Named `project_config` so it doesn't shadow the `SmartConfig` above.)
     let project_config = crate::config::CtxConfig::load(server.root());
+    let project_provider = if server.trust_project() {
+        project_config.embedding.provider
+    } else {
+        None
+    };
     let provider = match params.provider.as_deref() {
         Some("openai") => Provider::Openai,
         Some("ollama") => Provider::Ollama,
         Some("local") => Provider::Local,
-        None => Provider::resolve(
-            None,
-            params.use_openai.unwrap_or(false),
-            project_config.embedding.provider,
-        ),
+        None => Provider::resolve(None, params.use_openai.unwrap_or(false), project_provider),
         Some(other) => {
             return Err(internal_error(format!(
                 "Unknown provider '{}'. Expected: local, openai, or ollama.",
@@ -237,8 +240,16 @@ pub async fn smart_context(
         }
         Provider::Ollama => {
             let provider = OllamaProvider::from_config_async(
-                project_config.embedding.model.as_deref(),
-                project_config.embedding.host.as_deref(),
+                project_config
+                    .embedding
+                    .model
+                    .as_deref()
+                    .filter(|_| server.trust_project()),
+                project_config
+                    .embedding
+                    .host
+                    .as_deref()
+                    .filter(|_| server.trust_project()),
             )
             .await
             .map_err(|e| internal_error(format!("Failed to initialize Ollama provider: {}", e)))?;
