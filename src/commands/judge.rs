@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use ctx::config::CtxConfig;
 use ctx::error::Result;
 use ctx::exit::Outcome;
 use ctx::judge::{judge_edges, JudgeOptions, JudgeReport};
@@ -19,14 +18,14 @@ pub fn run_judge(cmd: JudgeCommand, json: bool) -> Result<Outcome> {
             min_confidence,
             concurrency,
         } => {
-            let cfg = CtxConfig::load(&root);
+            let judge_cfg = ctx::judge::JudgeConfig::load(&root);
             let opts = JudgeOptions {
                 offline,
                 dry_run,
                 limit,
-                min_confidence: min_confidence.unwrap_or(cfg.judge.min_confidence),
+                min_confidence: min_confidence.unwrap_or(judge_cfg.min_confidence),
                 concurrency,
-                model: cfg.judge.model.clone(),
+                model: judge_cfg.model.clone(),
                 verbose: !json,
                 ..JudgeOptions::default()
             };

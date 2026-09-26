@@ -34,6 +34,54 @@ use crate::error::{CtxError, Result};
 
 pub const DEFAULT_URL: &str = "https://api.typesafe.ai/v1/systemone";
 pub const DEFAULT_MODEL: &str = "jev-latest";
+
+/// `[judge]` section of `.ctx/config.toml`. The API key is never read from
+/// this file: it comes from `JEV_API_KEY`, so a committed config cannot carry
+/// credentials.
+///
+/// Loaded on its own (not as a [`crate::config::CtxConfig`] field) so adding
+/// the section does not change the public shape of `CtxConfig`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct JudgeConfig {
+    /// Re-resolve ambiguous call edges after every `ctx index`.
+    pub edges: bool,
+    /// Model id sent to the decision API.
+    pub model: String,
+    /// Minimum confidence for an answer to change an edge.
+    pub min_confidence: f64,
+}
+
+impl Default for JudgeConfig {
+    fn default() -> Self {
+        Self {
+            edges: false,
+            model: DEFAULT_MODEL.into(),
+            min_confidence: 0.7,
+        }
+    }
+}
+
+impl JudgeConfig {
+    /// Load the `[judge]` table of `<root>/.ctx/config.toml`. A missing file or
+    /// table yields defaults; a malformed file yields defaults (the general
+    /// config loader already warns about it).
+    pub fn load(root: &Path) -> Self {
+        #[derive(serde::Deserialize, Default)]
+        #[serde(default)]
+        struct File {
+            judge: JudgeConfig,
+        }
+        let path = root
+            .join(crate::index::CTX_DIR)
+            .join(crate::config::CONFIG_FILE);
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| toml::from_str::<File>(&text).ok())
+            .map(|file| file.judge)
+            .unwrap_or_default()
+    }
+}
 const QUESTION_ID: &str = "edge_callee.v1";
 const MAX_CANDIDATES: usize = 30;
 const MAX_CALLER_SOURCE: usize = 3000;
@@ -517,6 +565,25 @@ mod tests {
         let ranked = rank_candidates("src/builtin.c", &[&h, &c], "#include \"jv.h\"");
         let ids: Vec<&str> = ranked.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, ["c"]);
+    }
+
+    #[test]
+    fn judge_config_reads_its_own_table() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            !JudgeConfig::load(dir.path()).edges,
+            "absent file = defaults"
+        );
+        std::fs::create_dir_all(dir.path().join(".ctx")).unwrap();
+        std::fs::write(
+            dir.path().join(".ctx/config.toml"),
+            "[embedding]\nprovider = \"local\"\n[judge]\nedges = true\nmin_confidence = 0.9\n",
+        )
+        .unwrap();
+        let cfg = JudgeConfig::load(dir.path());
+        assert!(cfg.edges);
+        assert_eq!(cfg.min_confidence, 0.9);
+        assert_eq!(cfg.model, DEFAULT_MODEL);
     }
 
     #[test]

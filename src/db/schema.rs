@@ -2499,7 +2499,7 @@ impl Database {
     pub fn resolve_c_family_definitions(&self) -> Result<usize> {
         self.conn.execute(
             r#"
-            WITH defs AS (
+            WITH defs AS MATERIALIZED (
                 SELECT name, MIN(id) AS id, COUNT(*) AS n
                 FROM symbols
                 WHERE kind IN ('function', 'method')

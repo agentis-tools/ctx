@@ -127,10 +127,7 @@ impl LspClient {
             failed: None,
             consecutive_timeouts: 0,
             warmup_pending: true,
-            ready_timeout: config
-                .ready_timeout_ms
-                .map(Duration::from_millis)
-                .unwrap_or(DEFAULT_READY_TIMEOUT),
+            ready_timeout: DEFAULT_READY_TIMEOUT,
             ready_checked: false,
             shut_down: false,
             server_name: None,
@@ -206,6 +203,14 @@ impl LspClient {
             .map_err(|e| format!("initialized notification failed: {e}"))?;
 
         Ok(())
+    }
+
+    /// Override how long [`Self::ensure_ready`] waits for the server to finish
+    /// loading (`[lsp.<language>] ready_timeout_ms`); `None` keeps the default.
+    pub(crate) fn set_ready_timeout(&mut self, ms: Option<u64>) {
+        if let Some(ms) = ms {
+            self.ready_timeout = Duration::from_millis(ms);
+        }
     }
 
     /// Block until the server reports it has finished loading the workspace,

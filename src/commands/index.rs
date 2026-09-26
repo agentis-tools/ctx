@@ -133,12 +133,12 @@ pub fn run_index(config: IndexConfig) -> Result<()> {
     // Opt-in model-assisted edge resolution (`[judge] edges = true`): asks only
     // about edges not already answered; without JEV_API_KEY it re-applies the
     // cached answers offline so a reindex never silently loses them.
-    let cfg = ctx::config::CtxConfig::load(&root);
-    if cfg.judge.edges {
+    let judge_cfg = ctx::judge::JudgeConfig::load(&root);
+    if judge_cfg.edges {
         let opts = ctx::judge::JudgeOptions {
             offline: std::env::var("JEV_API_KEY").is_err(),
-            min_confidence: cfg.judge.min_confidence,
-            model: cfg.judge.model.clone(),
+            min_confidence: judge_cfg.min_confidence,
+            model: judge_cfg.model.clone(),
             verbose: config.verbose,
             ..ctx::judge::JudgeOptions::default()
         };
