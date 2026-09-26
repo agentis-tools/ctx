@@ -34,6 +34,31 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub struct CtxConfig {
     /// Embedding backend defaults.
     pub embedding: EmbeddingConfig,
+    /// Model-assisted judgments (opt-in; see `ctx judge`).
+    pub judge: JudgeConfig,
+}
+
+/// `[judge]` section. The API key is never read from this file: it comes
+/// from `JEV_API_KEY`, so a committed config cannot carry credentials.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct JudgeConfig {
+    /// Re-resolve ambiguous call edges after every `ctx index`.
+    pub edges: bool,
+    /// Model id sent to the decision API.
+    pub model: String,
+    /// Minimum confidence for an answer to change an edge.
+    pub min_confidence: f64,
+}
+
+impl Default for JudgeConfig {
+    fn default() -> Self {
+        Self {
+            edges: false,
+            model: crate::judge::DEFAULT_MODEL.into(),
+            min_confidence: 0.7,
+        }
+    }
 }
 
 /// `[embedding]` section: default provider and provider-specific settings.

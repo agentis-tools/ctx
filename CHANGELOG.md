@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
+  model (TypeSafe Jev). For each call whose name matches in-repo functions, the
+  model picks the real callee among the same-named candidates or `external`
+  (standard library / dependency). Answers are cached in a new `judgments`
+  table keyed by a hash of exactly what was sent, so re-indexing re-applies
+  them without network calls (`--offline`). `[judge] edges = true` in
+  `.ctx/config.toml` runs it after every `ctx index`. Against rust-analyzer on
+  ctx's own 4 082 call edges, call-graph accuracy goes from 0.83 to 0.99 and
+  links wrongly bound to in-repo functions from 390 to 7. The API key is read
+  only from `JEV_API_KEY`.
+
 ### Fixed
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving

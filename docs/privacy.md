@@ -52,6 +52,12 @@ explicitly configure:
 - **Local embedding model download:** the local embedding provider may download
   model files from its model host on first use. This downloads model data; it
   does not upload your repository for embedding.
+- **Model-assisted judgments (`ctx judge`, opt-in):** when you run
+  `ctx judge edges` with `JEV_API_KEY` set, or enable `[judge] edges = true`,
+  ctx sends TypeSafe's API, for each ambiguous call: the calling function's
+  source (up to 3 000 characters), its file's import lines, the call-site line,
+  and the names, paths and signatures of same-named candidate functions.
+  Answers are cached locally; `--offline` sends nothing.
 - **MCP and host applications:** if you enable the optional MCP feature, ctx
   returns requested codebase information to the MCP client you configured.
   That client and any model provider it uses handle the returned information

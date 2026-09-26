@@ -30,6 +30,7 @@
         "harness",
         "hotspots",
         "index",
+        "judge",
         "lsp",
         "map",
         "query",
@@ -344,6 +345,49 @@
         "--stats": "--stats Print stats (file count, total size, time taken)",
         "--verbose": "-v, --verbose Show verbose output",
         "--watch": "-w, --watch Watch for changes and reindex automatically"
+      },
+      "subcommands": []
+    },
+    "ctx judge": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": [
+        "edges"
+      ]
+    },
+    "ctx judge edges": {
+      "options": {
+        "--concurrency": "--concurrency <CONCURRENCY> Parallel requests [default: 8]",
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--dry-run": "--dry-run Report what would change without rewriting edges",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--limit": "--limit <LIMIT> Stop after this many new model calls (0 = no limit) [default: 0]",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--min-confidence": "--min-confidence <MIN_CONFIDENCE> Minimum confidence for an answer to change an edge",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--offline": "--offline Apply cached answers only; never call the model",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
       },
       "subcommands": []
     },

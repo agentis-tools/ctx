@@ -130,6 +130,24 @@ pub fn run_index(config: IndexConfig) -> Result<()> {
     eprintln!("  Traits:    {}", stats.traits);
     eprintln!("  Edges:     {}", stats.edges);
 
+    // Opt-in model-assisted edge resolution (`[judge] edges = true`): asks only
+    // about edges not already answered; without JEV_API_KEY it re-applies the
+    // cached answers offline so a reindex never silently loses them.
+    let cfg = ctx::config::CtxConfig::load(&root);
+    if cfg.judge.edges {
+        let opts = ctx::judge::JudgeOptions {
+            offline: std::env::var("JEV_API_KEY").is_err(),
+            min_confidence: cfg.judge.min_confidence,
+            model: cfg.judge.model.clone(),
+            verbose: config.verbose,
+            ..ctx::judge::JudgeOptions::default()
+        };
+        match ctx::judge::judge_edges(&root, indexer.database(), &opts) {
+            Ok(r) => super::judge::print_report(&r, false),
+            Err(e) => eprintln!("Warning: judge edges skipped: {e}"),
+        }
+    }
+
     // Watch mode
     if config.watch {
         eprintln!("\nWatching for changes... (Ctrl+C to stop)");
