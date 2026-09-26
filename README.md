@@ -151,7 +151,7 @@ Semantic search and `ctx smart`/`ctx similar` need embeddings first. Generate th
 | [`ctx check`](https://docs.agentis.tools/docs/commands/check) | Enforce architecture rules from `.ctx/rules.toml` over the real edge graph | Exit 1 on any violation |
 | [`ctx score`](https://docs.agentis.tools/docs/commands/score) | Composite delta: check violations + new duplication + complexity/fan-out | `--fail-on "<expr>"` |
 | [`ctx duplicates`](https://docs.agentis.tools/docs/commands/duplicates) | MinHash near-duplicate detection over normalized token shingles | `--fail-on-found` |
-| [`ctx hotspots`](https://docs.agentis.tools/docs/commands/hotspots) | Rank refactoring targets by churn × complexity | informational |
+| [`ctx hotspots`](https://docs.agentis.tools/docs/commands/hotspots) | Rank refactoring targets by churn × size (or complexity) | informational |
 | [`ctx sql`](https://docs.agentis.tools/docs/commands/sql) | Read-only SQL over the stable `v1.*` views for custom queries and gates | `--fail-on-rows` |
 
 Architecture rules live in your repo as code (`.ctx/rules.toml`: layers, forbidden dependencies,

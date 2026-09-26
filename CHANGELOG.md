@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only from `JEV_API_KEY`.
 
 ### Added (cont.)
-- `ctx hotspots --signal lines` ranks by churn × size instead of churn ×
-  complexity (see the multi-project backtest in the Jev/ctx lab report).
+- **BREAKING (output):** `ctx hotspots` now ranks by churn × size by default
+  (`--signal lines`); `--signal complexity` restores the old ranking. In a
+  time-split backtest on 10 repositories (Rust, Python, TypeScript, Go, C,
+  C++), size beat complexity at predicting which functions later got bug
+  fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.049]).
 - `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
   for a language server to finish loading (default 300 s).
 

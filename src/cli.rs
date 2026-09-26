@@ -603,8 +603,8 @@ EXIT CODES:
         #[arg(long, value_enum, default_value_t = HotspotBy::File)]
         by: HotspotBy,
 
-        /// Structural signal multiplied with churn: complexity (default) or lines
-        #[arg(long, value_enum, default_value_t = HotspotSignal::Complexity)]
+        /// Structural signal multiplied with churn: lines (default) or complexity
+        #[arg(long, value_enum, default_value_t = HotspotSignal::Lines)]
         signal: HotspotSignal,
 
         /// Minimum number of commits for a file to be analyzed
