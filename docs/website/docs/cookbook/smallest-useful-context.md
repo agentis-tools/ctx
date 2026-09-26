@@ -61,9 +61,10 @@ ctx smart "add a new field to historical snapshot metadata" \
   --provider ollama
 ```
 
-Use the provider and model that match the stored embeddings. The project-level
-`.ctx/config.toml` can supply the provider, so the explicit flag is optional when that configuration
-is correct.
+Use the provider and model that match the stored embeddings. If you rely on a
+provider default from the committed project config, add the explicit global
+`--trust-project` flag after reviewing that file; an explicit `--provider`
+choice remains available without project trust.
 
 The preview answers **why a file became a candidate**: a semantic match, a caller, or a dependency.
 It does not prove that every candidate belongs in the final bundle, and it does not prove that an

@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
@@ -69,13 +69,66 @@ pub struct OllamaProvider {
 fn resolve_host(config_host: Option<&str>) -> String {
     let raw = std::env::var("OLLAMA_HOST")
         .ok()
-        .filter(|h| !h.is_empty())
-        .or_else(|| config_host.map(str::to_string));
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| {
+            config_host
+                .filter(|h| !h.trim().is_empty())
+                .map(str::to_string)
+        });
     match raw {
-        Some(h) if h.starts_with("http://") || h.starts_with("https://") => h,
-        Some(h) => format!("http://{}", h),
+        Some(h) => {
+            let h = h.trim();
+            if h.starts_with("http://") || h.starts_with("https://") {
+                h.to_string()
+            } else {
+                format!("http://{}", h)
+            }
+        }
         None => DEFAULT_HOST.to_string(),
     }
+}
+
+/// Whether an Ollama URL is restricted to a loopback endpoint. Hostnames are
+/// deliberately not resolved here: accepting only the literal `localhost` or
+/// an IP address that is already loopback avoids treating an attacker-owned DNS
+/// name as local.
+fn is_strict_loopback(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+}
+
+/// Validate an Ollama endpoint before constructing a client that may carry a
+/// bearer token. Remote authenticated endpoints must use HTTPS; unauthenticated
+/// local development may continue using the conventional loopback HTTP URL.
+fn validate_host(host: &str, authenticated: bool) -> Result<()> {
+    let url = Url::parse(host)
+        .map_err(|e| CtxError::embedding(format!("Invalid Ollama host '{}': {}", host, e)))?;
+
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(CtxError::embedding(format!(
+            "Invalid Ollama host '{}': expected an http:// or https:// URL",
+            host
+        )));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(CtxError::embedding(
+            "Ollama host URLs must not contain embedded credentials",
+        ));
+    }
+    if authenticated && url.scheme() != "https" && !is_strict_loopback(&url) {
+        return Err(CtxError::embedding(format!(
+            "Refusing to send OLLAMA_API_KEY over insecure non-loopback Ollama URL '{}'; use https:// or a strict loopback URL",
+            host
+        )));
+    }
+    Ok(())
 }
 
 /// Resolve the model by precedence `OLLAMA_EMBED_MODEL` env > config > default.
@@ -125,17 +178,19 @@ impl OllamaProvider {
     fn new_unprobed(config_model: Option<&str>, config_host: Option<&str>) -> Result<Self> {
         let model = resolve_model(config_model);
         let host = resolve_host(config_host);
+        let api_key = std::env::var("OLLAMA_API_KEY")
+            .ok()
+            .filter(|token| !token.is_empty());
+        validate_host(&host, api_key.is_some())?;
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         // Optional bearer token for authenticated / remote Ollama hosts.
-        if let Ok(token) = std::env::var("OLLAMA_API_KEY") {
-            if !token.is_empty() {
-                let value = HeaderValue::from_str(&format!("Bearer {}", token)).map_err(|e| {
-                    CtxError::embedding(format!("Invalid OLLAMA_API_KEY format: {}", e))
-                })?;
-                headers.insert(AUTHORIZATION, value);
-            }
+        if let Some(token) = api_key {
+            let value = HeaderValue::from_str(&format!("Bearer {}", token)).map_err(|e| {
+                CtxError::embedding(format!("Invalid OLLAMA_API_KEY format: {}", e))
+            })?;
+            headers.insert(AUTHORIZATION, value);
         }
 
         let client = Client::builder()
@@ -373,6 +428,36 @@ mod tests {
             "mxbai-embed-large"
         ); // env wins
         std::env::remove_var("OLLAMA_EMBED_MODEL");
+    }
+
+    #[test]
+    fn authenticated_loopback_http_is_allowed() {
+        assert!(validate_host("http://localhost:11434", true).is_ok());
+        assert!(validate_host("http://127.0.0.1:11434", true).is_ok());
+        assert!(validate_host("http://[::1]:11434", true).is_ok());
+    }
+
+    #[test]
+    fn authenticated_non_loopback_http_is_rejected() {
+        let error = validate_host("http://ollama.example.test:11434", true).unwrap_err();
+        assert!(error.to_string().contains("OLLAMA_API_KEY"));
+        assert!(validate_host("https://ollama.example.test:11434", true).is_ok());
+    }
+
+    #[test]
+    fn non_loopback_http_without_credentials_remains_compatible() {
+        assert!(validate_host("http://ollama.example.test:11434", false).is_ok());
+    }
+
+    #[test]
+    fn loopback_check_does_not_accept_lookalike_hostnames() {
+        let url = Url::parse("http://localhost.attacker.test:11434").unwrap();
+        assert!(!is_strict_loopback(&url));
+    }
+
+    #[test]
+    fn embedded_credentials_are_rejected() {
+        assert!(validate_host("https://user:pass@ollama.example.test", false).is_err());
     }
 
     /// Build a provider without a probe so `parse_response`/dimension logic can be

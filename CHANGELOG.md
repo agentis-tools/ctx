@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   temporary files, bounded release/archive/member reads, and bounded
   decompression. Snapshot backfill now uses a randomized private RAII tempdir
   for historical worktrees.
+- Project embedding defaults are untrusted unless `--trust-project` is passed;
+  this prevents a committed `.ctx/config.toml` from silently selecting a
+  network-backed provider or routing `OLLAMA_API_KEY` to its host. Authenticated
+  non-loopback Ollama endpoints now require HTTPS, while strict loopback HTTP
+  remains supported.
+- Local FastEmbed artifacts now use an absolute per-user ctx cache outside the
+  checkout, so a tracked `.fastembed_cache` cannot substitute a model. Model
+  initialization fails rather than falling back to a project-relative cache
+  when no safe absolute cache directory is available.
 
 ## [0.4.0] - 2026-07-24
 

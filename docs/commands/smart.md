@@ -37,6 +37,7 @@ Before using `ctx smart`, you must:
 | `--top <N>` | Top semantic matches to consider | 10 |
 | `--explain` | Show why each file was selected | false |
 | `--dry-run` | Show selection without file contents | false |
+| `--trust-project` | Trust provider, model, and Ollama host defaults from the committed `.ctx/config.toml` | false |
 | `--count-only` | Count the selected, budgeted files without preview or context output | false |
 | `--encoding <ENCODING>` | Tokenizer used for selection and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
 | `--stats` | Print count timing to stderr with `--count-only` | false |

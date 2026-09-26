@@ -484,12 +484,34 @@ indexing:
 [embedding]
 provider = "ollama"            # local (default) | openai | ollama
 model = "qwen3-embedding:8b"   # Ollama/OpenAI model name
-# host = "http://localhost:11434"  # Ollama only
+# host = "http://localhost:11434"  # Ollama only; requires --trust-project
 ```
 
-Resolution is always **CLI flag > environment variable > `.ctx/config.toml` >
-built-in default**, so the file never overrides an explicit request. `.ctx/` is
-otherwise git-ignored; the repo's `.gitignore` keeps `config.toml` and `rules.toml` tracked.
+By default, a checkout's project defaults are treated as untrusted. The
+provider from `.ctx/config.toml` is used only when you explicitly pass the
+global `--trust-project` flag. An explicit `--provider`/`--openai` choice still
+wins without that flag, but project-selected Ollama model and host settings are
+ignored unless the project is trusted. This prevents a committed config from
+silently routing an ambient API key or source text to a repository-selected
+endpoint.
+
+Once trusted, resolution is **CLI flag > environment variable >
+`.ctx/config.toml` > built-in default**. A malformed optional config is ignored
+with a warning. `.ctx/` is otherwise git-ignored; the repo's `.gitignore` keeps
+`config.toml` and `rules.toml` tracked.
+
+Review `.ctx/config.toml` before granting trust. For MCP, opt in when launching
+the server (`ctx serve --mcp --trust-project`); the default MCP server ignores
+the project's provider and Ollama host settings. `OLLAMA_HOST` from the process
+environment remains the explicit user-selected authority and takes precedence
+over the project file. It is still subject to the same credential transport
+check: if `OLLAMA_API_KEY` is set, an environment-selected non-loopback HTTP
+host is rejected too.
+
+When `OLLAMA_API_KEY` is present, ctx refuses to send it to a non-loopback
+Ollama endpoint over HTTP. Use `https://` for remote authenticated endpoints;
+strict loopback HTTP remains valid for local development. Local FastEmbed
+artifacts use the per-user ctx cache, never a checkout's `.fastembed_cache`.
 
 ### Language servers (`[lsp.<language>]`)
 
@@ -557,7 +579,8 @@ dependencies, allowed dependents, metric limits, and frozen paths.
 ### Embedding providers
 
 `ctx embed`, `ctx semantic`, `ctx smart`, and `ctx similar` accept
-`--provider <local|openai|ollama>` (or set a default in `.ctx/config.toml`):
+`--provider <local|openai|ollama>` (or set a project default in
+`.ctx/config.toml` and pass `--trust-project`):
 
 - **`local`** (default) — [fastembed](https://github.com/Anush008/fastembed-rs)
   `all-MiniLM-L6-v2`, 384-dim. Offline; downloads a ~90 MB model on first run.

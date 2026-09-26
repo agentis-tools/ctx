@@ -1,9 +1,11 @@
 //! Local embedding provider using fastembed.
 //!
 //! Uses all-MiniLM-L6-v2 (384 dimensions) for fast, offline embeddings.
-//! No API key required - models are downloaded once and cached locally.
+//! No API key required - models are downloaded once and cached in the user's
+//! absolute ctx cache, never in the project checkout.
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use super::{Embedding, EmbeddingProvider, LOCAL_EMBEDDING_DIM};
@@ -16,6 +18,37 @@ pub struct LocalProvider {
     model_name: String,
 }
 
+/// Return the per-user cache used for downloaded FastEmbed model artifacts.
+///
+/// FastEmbed defaults to `.fastembed_cache`, which is relative to the current
+/// working directory and therefore can be supplied by a checked-out project.
+/// Keep model files outside the project so a repository cannot substitute a
+/// model simply by committing that directory. Refuse a relative fallback: a
+/// model cache must never silently become project-controlled again.
+fn fastembed_cache_dir() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().ok();
+    let candidates = [
+        dirs::cache_dir(),
+        dirs::home_dir().map(|home| home.join(".cache")),
+    ];
+
+    for base in candidates.into_iter().flatten() {
+        let candidate = base.join("ctx").join("fastembed");
+        if candidate.is_absolute()
+            && !cwd
+                .as_ref()
+                .map(|current| candidate.starts_with(current))
+                .unwrap_or(false)
+        {
+            return Ok(candidate);
+        }
+    }
+
+    Err(CtxError::embedding(
+        "Cannot determine an absolute per-user FastEmbed cache outside the project",
+    ))
+}
+
 impl LocalProvider {
     /// Create a new local provider with the default model (all-MiniLM-L6-v2).
     pub fn new() -> Result<Self> {
@@ -25,10 +58,14 @@ impl LocalProvider {
     /// Create a provider with a specific model.
     pub fn with_model(model: EmbeddingModel) -> Result<Self> {
         let model_name = format!("{:?}", model);
+        let cache_dir = fastembed_cache_dir()?;
 
-        let text_embedding =
-            TextEmbedding::try_new(InitOptions::new(model).with_show_download_progress(true))
-                .map_err(|e| CtxError::ModelNotFound(e.to_string()))?;
+        let text_embedding = TextEmbedding::try_new(
+            InitOptions::new(model)
+                .with_cache_dir(cache_dir)
+                .with_show_download_progress(true),
+        )
+        .map_err(|e| CtxError::ModelNotFound(e.to_string()))?;
 
         Ok(Self {
             model: Mutex::new(text_embedding),
@@ -96,6 +133,13 @@ impl EmbeddingProvider for LocalProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fastembed_cache_is_absolute_and_project_independent() {
+        let cache = fastembed_cache_dir().expect("test environment should have a user cache");
+        assert!(cache.is_absolute());
+        assert!(cache.ends_with(std::path::Path::new("ctx").join("fastembed")));
+    }
 
     #[test]
     #[ignore] // Requires model download

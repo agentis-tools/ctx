@@ -12,16 +12,22 @@ use commands::MapFormat;
 use ctx::error::Result;
 use ctx::exit::Outcome;
 
-/// Resolve the embedding provider from the CLI flags and the project's
-/// `.ctx/config.toml` default (flag > `--openai` > config > built-in default).
+/// Resolve the embedding provider from the CLI flags and, when explicitly
+/// trusted, the project's `.ctx/config.toml` default.
 fn resolve_embed_provider(
     flag: Option<ctx::embeddings::Provider>,
     openai: bool,
+    trust_project: bool,
 ) -> ctx::embeddings::Provider {
     let config_default = std::env::current_dir()
         .ok()
         .and_then(|cwd| ctx::config::CtxConfig::load(&cwd).embedding.provider);
-    ctx::embeddings::Provider::resolve(flag, openai, config_default)
+    ctx::embeddings::Provider::resolve_with_project_trust(
+        flag,
+        openai,
+        config_default,
+        trust_project,
+    )
 }
 
 /// Exit codes: 0 = clean, 1 = findings, 2 = operational error,
@@ -88,6 +94,7 @@ fn run(args: Args) -> Result<Outcome> {
     let count_only = args.count_only;
     let encoding = args.encoding.clone();
     let stats = args.stats;
+    let trust_project = args.trust_project;
 
     // Custom --version handling: clap's auto flag is disabled (it would
     // exit before `--check` could run). `ctx --version` prints the same
@@ -175,11 +182,11 @@ fn run(args: Args) -> Result<Outcome> {
             watch,
             serial,
         }) => {
-            let provider = resolve_embed_provider(provider, openai);
+            let provider = resolve_embed_provider(provider, openai, trust_project);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, provider, serial)
+                commands::run_embed_watch(verbose, batch_size, provider, serial, trust_project)
             } else {
-                commands::run_embed(force, verbose, batch_size, provider, serial)
+                commands::run_embed(force, verbose, batch_size, provider, serial, trust_project)
             }
         }
         Some(Command::Semantic {
@@ -189,9 +196,9 @@ fn run(args: Args) -> Result<Outcome> {
             provider,
             openai,
         }) => {
-            let provider = resolve_embed_provider(provider, openai);
+            let provider = resolve_embed_provider(provider, openai, trust_project);
             let output = if json { "json".to_string() } else { output };
-            commands::run_semantic(&query, limit, &output, provider)
+            commands::run_semantic(&query, limit, &output, provider, trust_project)
         }
         Some(Command::Similar {
             query,
@@ -200,10 +207,18 @@ fn run(args: Args) -> Result<Outcome> {
             provider,
             openai,
         }) => {
-            let provider = resolve_embed_provider(provider, openai);
+            let provider = resolve_embed_provider(provider, openai, trust_project);
             // `similar` participates in the Outcome convention directly:
             // Clean on success, Err (exit 2) when embeddings are missing.
-            return commands::run_similar(&query, limit, keyword, provider, json, &patterns);
+            return commands::run_similar(
+                &query,
+                limit,
+                keyword,
+                provider,
+                json,
+                &patterns,
+                trust_project,
+            );
         }
         Some(Command::Complexity {
             threshold,
@@ -265,10 +280,23 @@ fn run(args: Args) -> Result<Outcome> {
             show_sizes,
             no_tree,
         }) => {
-            let provider = resolve_embed_provider(provider, openai);
+            let provider = resolve_embed_provider(provider, openai, trust_project);
             commands::run_smart(
-                &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
-                no_tree, &patterns, count_only, &encoding, stats,
+                &task,
+                max_tokens,
+                depth,
+                top,
+                explain,
+                dry_run,
+                provider,
+                format,
+                show_sizes,
+                no_tree,
+                &patterns,
+                count_only,
+                &encoding,
+                stats,
+                trust_project,
             )
         }
         Some(Command::Diff {
@@ -375,7 +403,7 @@ fn run(args: Args) -> Result<Outcome> {
             vi,
         }) => commands::run_shell(history, no_history, vi),
         #[cfg(feature = "mcp")]
-        Some(Command::Serve { mcp }) => commands::run_serve(mcp),
+        Some(Command::Serve { mcp }) => commands::run_serve(mcp, trust_project),
         None => commands::run_context(args),
     };
 

@@ -480,16 +480,44 @@ language servers for LSP-backed indexing:
 [embedding]
 provider = "ollama"                 # local (default) | openai | ollama
 model = "qwen3-embedding:8b"        # Ollama/OpenAI model name
-# host = "http://localhost:11434"   # Ollama only
+# host = "http://localhost:11434"   # Ollama only; requires --trust-project
 ```
 
-Resolution is **CLI flag > environment variable > `.ctx/config.toml` > built-in default**. A
-malformed optional config is ignored with a warning. After changing provider or model, rebuild
-embeddings because vectors from different models are not interchangeable:
+By default, a checkout's project defaults are treated as untrusted. The provider
+from `.ctx/config.toml` is used only when you explicitly pass the global
+`--trust-project` flag. An explicit `--provider`/`--openai` choice still wins
+without that flag, but project-selected Ollama model and host settings are
+ignored unless the project is trusted. This prevents a committed config from
+silently routing an ambient API key or source text to a repository-selected
+endpoint.
+
+Once trusted, resolution is **CLI flag > environment variable > `.ctx/config.toml`
+> built-in default**. A malformed optional config is ignored with a warning. After
+changing provider or model, rebuild embeddings because vectors from different
+models are not interchangeable:
 
 ```bash
-ctx embed --force
+ctx --trust-project embed --force
 ```
+
+Review `.ctx/config.toml` before granting trust. For MCP, opt in when launching
+the server (`ctx serve --mcp --trust-project`); the default MCP server ignores
+the project's provider and Ollama host settings. `OLLAMA_HOST` from the process
+environment remains the explicit user-selected authority and takes precedence
+over the project file. It is still subject to the same credential transport
+check: if `OLLAMA_API_KEY` is set, an environment-selected non-loopback HTTP
+host is rejected too.
+
+When `OLLAMA_API_KEY` is present, ctx refuses to send it to a non-loopback
+Ollama endpoint over HTTP. Use `https://` for remote authenticated endpoints.
+The conventional `http://localhost:11434`, `http://127.0.0.1:11434`, and
+`http://[::1]:11434` loopback URLs remain valid for local development.
+
+The local FastEmbed model is cached in the per-user ctx cache (for example
+`~/.cache/ctx/fastembed/` on Linux or `~/Library/Caches/ctx/fastembed/` on
+macOS), never in the checkout's `.fastembed_cache` directory. If ctx cannot
+determine an absolute per-user cache path, local model initialization fails
+instead of falling back to a project-relative cache.
 
 ### Language servers (`[lsp.<language>]`)
 

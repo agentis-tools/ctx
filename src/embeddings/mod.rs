@@ -58,18 +58,36 @@ pub enum Provider {
 }
 
 impl Provider {
-    /// Resolve the effective provider by precedence:
+    /// Resolve the effective provider by the legacy precedence:
     /// `--provider` flag > deprecated `--openai` flag > `.ctx/config.toml`
-    /// (`[embedding].provider`) > built-in default (`local`).
+    /// (`[embedding].provider`) > built-in default (`local`). New callers
+    /// handling untrusted checkouts should use
+    /// [`Provider::resolve_with_project_trust`] instead.
     pub fn resolve(
         provider: Option<Provider>,
         openai_flag: bool,
         config_default: Option<Provider>,
     ) -> Provider {
+        Self::resolve_with_project_trust(provider, openai_flag, config_default, true)
+    }
+
+    /// Resolve the effective provider while controlling whether a committed
+    /// project configuration may select a network-backed provider.
+    ///
+    /// Explicit CLI choices still win. When `trust_project` is false, the
+    /// project default is ignored so a checkout cannot silently turn an
+    /// invocation into a network request.
+    pub fn resolve_with_project_trust(
+        provider: Option<Provider>,
+        openai_flag: bool,
+        config_default: Option<Provider>,
+        trust_project: bool,
+    ) -> Provider {
         match provider {
             Some(p) => p,
             None if openai_flag => Provider::Openai,
-            None => config_default.unwrap_or_default(),
+            None if trust_project => config_default.unwrap_or_default(),
+            None => Provider::default(),
         }
     }
 
@@ -83,15 +101,29 @@ impl Provider {
     }
 }
 
-/// Build the embedding provider for the given backend, applying any
-/// provider-specific settings from `.ctx/config.toml` (`embedding`). This is the
-/// single place providers are constructed, so a new backend wires in once.
+/// Build an embedding provider using safe defaults for project configuration.
 ///
-/// Env vars still take precedence over the config values (see the Ollama
-/// resolvers); pass `&EmbeddingConfig::default()` when there is no config.
+/// This compatibility helper intentionally does not trust the Ollama host from
+/// `.ctx/config.toml`; use [`build_provider_with_project_trust`] only after an
+/// explicit project trust decision.
 pub fn build_provider(
     provider: Provider,
     embedding: &crate::config::EmbeddingConfig,
+) -> Result<Box<dyn EmbeddingProvider>> {
+    build_provider_with_project_trust(provider, embedding, false)
+}
+
+/// Build an embedding provider, optionally honoring project-controlled
+/// provider settings.
+///
+/// A committed `.ctx/config.toml` is untrusted by default. Its Ollama provider,
+/// model, and host settings are ignored unless `trust_project` is true.
+/// Callers that have an explicit trust/approval flow (for example
+/// `ctx --trust-project` or a deliberately configured MCP server) can opt in.
+pub fn build_provider_with_project_trust(
+    provider: Provider,
+    embedding: &crate::config::EmbeddingConfig,
+    trust_project: bool,
 ) -> Result<Box<dyn EmbeddingProvider>> {
     match provider {
         Provider::Local => Ok(Box::new(local::LocalProvider::new()?)),
@@ -105,10 +137,32 @@ pub fn build_provider(
             Ok(Box::new(p))
         }
         Provider::Ollama => Ok(Box::new(ollama::OllamaProvider::from_config(
-            embedding.model.as_deref(),
-            embedding.host.as_deref(),
+            project_ollama_model(embedding, trust_project),
+            project_ollama_host(embedding, trust_project),
         )?)),
     }
+}
+
+/// Return project-selected Ollama model settings only after an explicit trust
+/// decision. An environment-selected model remains available to explicit
+/// callers through the Ollama resolver.
+fn project_ollama_model(
+    embedding: &crate::config::EmbeddingConfig,
+    trust_project: bool,
+) -> Option<&str> {
+    trust_project
+        .then_some(embedding.model.as_deref())
+        .flatten()
+}
+
+/// Return the project-selected Ollama host only after an explicit trust
+/// decision. Environment-provided hosts are resolved by the Ollama provider
+/// itself and remain available to explicit callers.
+fn project_ollama_host(
+    embedding: &crate::config::EmbeddingConfig,
+    trust_project: bool,
+) -> Option<&str> {
+    trust_project.then_some(embedding.host.as_deref()).flatten()
 }
 
 /// Warn (to stderr) when the query provider/dimension differs from what the index
@@ -482,5 +536,42 @@ mod tests {
         let json = emb.to_json().unwrap();
         let restored = Embedding::from_json(&json).unwrap();
         assert_eq!(emb.vector, restored.vector);
+    }
+
+    #[test]
+    fn untrusted_project_cannot_select_network_provider_by_default() {
+        assert_eq!(
+            Provider::resolve_with_project_trust(None, false, Some(Provider::Ollama), false),
+            Provider::Local
+        );
+        assert_eq!(
+            Provider::resolve_with_project_trust(None, false, Some(Provider::Ollama), true),
+            Provider::Ollama
+        );
+        // An explicit CLI choice remains an opt-in even when the project is
+        // not trusted; only project-controlled defaults are suppressed.
+        assert_eq!(
+            Provider::resolve_with_project_trust(Some(Provider::Ollama), false, None, false),
+            Provider::Ollama
+        );
+    }
+
+    #[test]
+    fn untrusted_project_cannot_select_ollama_host() {
+        let config = crate::config::EmbeddingConfig {
+            host: Some("https://repo-selected.example.test".to_string()),
+            model: Some("repo-selected-model".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(project_ollama_host(&config, false), None);
+        assert_eq!(
+            project_ollama_host(&config, true),
+            Some("https://repo-selected.example.test")
+        );
+        assert_eq!(project_ollama_model(&config, false), None);
+        assert_eq!(
+            project_ollama_model(&config, true),
+            Some("repo-selected-model")
+        );
     }
 }

@@ -32,6 +32,7 @@ pub fn run_smart(
     count_only: bool,
     encoding: &str,
     stats: bool,
+    trust_project: bool,
 ) -> Result<()> {
     let start = Instant::now();
     let encoding = super::context::parse_encoding(encoding)?;
@@ -50,8 +51,11 @@ pub fn run_smart(
     if provider == Provider::Local {
         eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
     }
-    let provider =
-        embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+    let provider = embeddings::build_provider_with_project_trust(
+        provider,
+        &ctx::config::CtxConfig::load(&root).embedding,
+        trust_project,
+    )?;
 
     // Warn if the query provider/dimension differs from the index.
     embeddings::warn_index_mismatch(&db, provider.as_ref());

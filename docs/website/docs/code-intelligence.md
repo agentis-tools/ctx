@@ -254,7 +254,7 @@ This generates embeddings for all symbols. Embeddings are stored in SQLite and o
 | OpenAI | text-embedding-3-small | 1536 | `OPENAI_API_KEY` env var |
 | Ollama | `nomic-embed-text` (default) | probed from model | local/remote Ollama server (`OLLAMA_HOST`, default `http://localhost:11434`) |
 
-Select with `--provider <local|openai|ollama>`; see [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults.
+Select with `--provider <local|openai|ollama>`; see [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults. A committed project default requires the explicit global `--trust-project` flag.
 
 ### Embedding Options
 
