@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`--signal lines`); `--signal complexity` restores the old ranking. In a
   time-split backtest on 10 repositories (Rust, Python, TypeScript, Go, C,
   C++), size beat complexity at predicting which functions later got bug
-  fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.049]).
+  fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
+  and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
 - `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
   for a language server to finish loading (default 300 s).
 
