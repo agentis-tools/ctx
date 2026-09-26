@@ -27,6 +27,10 @@ ctx index
 
 For full analysis (complexity, modularity), the index creates the analytics database automatically.
 
+The report's statistics are loaded directly from the indexed symbol table and
+checked against the database counts. If the index is inconsistent, `ctx audit`
+fails instead of presenting empty-data perfect scores.
+
 ## Options
 
 | Option | Description | Default |

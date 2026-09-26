@@ -1,14 +1,95 @@
 //! Analysis-related MCP tools.
 
+use std::collections::{HashSet, VecDeque};
+
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{parse_params, schema_for, CallGraphParams, SmartContextParams};
+use super::{
+    bounded_mcp_depth, bounded_mcp_output, bounded_mcp_top, parse_params, schema_for,
+    CallGraphParams, SmartContextParams,
+};
+use crate::db::{Database, EdgeKind, Symbol};
+use crate::limits::MAX_MCP_SEARCH_RESULTS;
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
 fn internal_error(msg: impl Into<String>) -> rmcp::ErrorData {
     rmcp::ErrorData::new(ErrorCode::INTERNAL_ERROR, msg.into(), None)
+}
+
+type GraphResult = crate::error::Result<Vec<(Symbol, Option<u32>, Option<String>, i32)>>;
+
+/// Traverse resolved call edges in reverse, honoring the MCP depth parameter.
+fn collect_callers(db: &Database, start_id: &str, max_depth: i32) -> GraphResult {
+    let max_depth = bounded_mcp_depth(Some(max_depth));
+    let mut queue = VecDeque::from([(start_id.to_string(), 0)]);
+    let mut visited = HashSet::from([start_id.to_string()]);
+    let mut callers = Vec::new();
+
+    while let Some((target_id, depth)) = queue.pop_front() {
+        if callers.len() >= MAX_MCP_SEARCH_RESULTS as usize {
+            break;
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let next_depth = depth + 1;
+        for edge in db.get_incoming_edges_limited(&target_id, MAX_MCP_SEARCH_RESULTS)? {
+            if callers.len() >= MAX_MCP_SEARCH_RESULTS as usize {
+                break;
+            }
+            if edge.kind != EdgeKind::Calls
+                || edge.target_id.as_deref() != Some(target_id.as_str())
+                || !visited.insert(edge.source_id.clone())
+            {
+                continue;
+            }
+
+            if let Some(caller) = db.get_symbol(&edge.source_id)? {
+                queue.push_back((caller.id.clone(), next_depth));
+                callers.push((caller, edge.line, edge.context, next_depth));
+            }
+        }
+    }
+
+    Ok(callers)
+}
+
+/// Traverse resolved call edges forward, honoring the MCP depth parameter.
+fn collect_callees(db: &Database, start_id: &str, max_depth: i32) -> GraphResult {
+    let max_depth = bounded_mcp_depth(Some(max_depth));
+    let mut queue = VecDeque::from([(start_id.to_string(), 0)]);
+    let mut visited = HashSet::from([start_id.to_string()]);
+    let mut callees = Vec::new();
+
+    while let Some((source_id, depth)) = queue.pop_front() {
+        if callees.len() >= MAX_MCP_SEARCH_RESULTS as usize {
+            break;
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let next_depth = depth + 1;
+        for edge in db.get_outgoing_edges_limited(&source_id, MAX_MCP_SEARCH_RESULTS)? {
+            if callees.len() >= MAX_MCP_SEARCH_RESULTS as usize {
+                break;
+            }
+            let Some(target_id) = edge.target_id.as_deref() else {
+                continue;
+            };
+            if edge.kind != EdgeKind::Calls || !visited.insert(target_id.to_string()) {
+                continue;
+            }
+
+            if let Some(callee) = db.get_symbol(target_id)? {
+                queue.push_back((callee.id.clone(), next_depth));
+                callees.push((callee, edge.line, edge.context, next_depth));
+            }
+        }
+    }
+
+    Ok(callees)
 }
 
 /// Create the get_callers tool definition.
@@ -48,6 +129,7 @@ pub async fn get_callers(
     args: Option<&serde_json::Map<String, Value>>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: CallGraphParams = parse_params(args)?;
+    let depth = bounded_mcp_depth(params.depth);
 
     // Find the function first
     let symbols = server
@@ -69,38 +151,41 @@ pub async fn get_callers(
     }
 
     let sym = &symbols[0];
-    let sym_name = sym.name.clone();
-
-    // Get incoming edges (callers)
-    let edges = server
-        .with_db(|db| db.get_incoming_edges(&sym_name))
+    // Traverse incoming resolved call edges to the requested depth.
+    let callers = server
+        .with_db(|db| collect_callers(db, &sym.id, depth))
         .map_err(|e| internal_error(e.to_string()))?;
 
-    if edges.is_empty() {
+    if callers.is_empty() {
         return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No callers found for '{}'",
             sym.name
         ))]));
     }
 
-    let mut output = format!("Functions that call '{}' ({}):\n\n", sym.name, edges.len());
+    let mut output = format!(
+        "Functions that call '{}' ({} within depth {}):\n\n",
+        sym.name,
+        callers.len(),
+        depth
+    );
 
-    for edge in &edges {
-        let source_id = edge.source_id.clone();
-        if let Ok(Some(caller)) = server.with_db(|db| db.get_symbol(&source_id)) {
-            output.push_str(&format!(
-                "- {} ({}:{})\n",
-                caller.name,
-                caller.file_path,
-                edge.line.unwrap_or(caller.line_start)
-            ));
-            if let Some(ref ctx) = edge.context {
-                output.push_str(&format!("  Call: {}\n", ctx));
-            }
+    for (caller, line, context, distance) in callers {
+        output.push_str(&format!(
+            "- {} ({}:{}, depth {})\n",
+            caller.name,
+            caller.file_path,
+            line.unwrap_or(caller.line_start),
+            distance
+        ));
+        if let Some(ctx) = context {
+            output.push_str(&format!("  Call: {}\n", ctx));
         }
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 /// Execute the get_callees tool.
@@ -109,6 +194,7 @@ pub async fn get_callees(
     args: Option<&serde_json::Map<String, Value>>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: CallGraphParams = parse_params(args)?;
+    let depth = bounded_mcp_depth(params.depth);
 
     // Find the function first
     let symbols = server
@@ -130,32 +216,41 @@ pub async fn get_callees(
     }
 
     let sym = &symbols[0];
-    let sym_id = sym.id.clone();
-
-    // Get outgoing edges (callees)
-    let edges = server
-        .with_db(|db| db.get_outgoing_edges(&sym_id))
+    // Traverse outgoing resolved call edges to the requested depth.
+    let callees = server
+        .with_db(|db| collect_callees(db, &sym.id, depth))
         .map_err(|e| internal_error(e.to_string()))?;
 
-    if edges.is_empty() {
+    if callees.is_empty() {
         return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "No function calls found in '{}'",
             sym.name
         ))]));
     }
 
-    let mut output = format!("Functions called by '{}' ({}):\n\n", sym.name, edges.len());
+    let mut output = format!(
+        "Functions called by '{}' ({} within depth {}):\n\n",
+        sym.name,
+        callees.len(),
+        depth
+    );
 
-    for edge in &edges {
+    for (callee, line, context, distance) in callees {
         output.push_str(&format!(
-            "- {} [{}] (line {})\n",
-            edge.target_name,
-            edge.kind.as_str(),
-            edge.line.unwrap_or(0)
+            "- {} [calls] ({}:{}, depth {})\n",
+            callee.name,
+            callee.file_path,
+            line.unwrap_or(callee.line_start),
+            distance
         ));
+        if let Some(ctx) = context {
+            output.push_str(&format!("  Call: {}\n", ctx));
+        }
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 /// Execute the smart_context tool.
@@ -167,6 +262,8 @@ pub async fn smart_context(
     use crate::embeddings::ollama::OllamaProvider;
     use crate::embeddings::openai::OpenAIProvider;
     use crate::embeddings::{Embedding, EmbeddingProvider, Provider};
+    use crate::limits::MAX_MCP_RESPONSE_BYTES;
+    use crate::output::read_file_content_with_limit;
     use crate::smart::{smart_context_with_embedding_filtered, SmartConfig};
     use crate::tokens::Encoding;
     use crate::walker::{secure_file_path, FilePatternFilter};
@@ -195,8 +292,8 @@ pub async fn smart_context(
     // Configure smart context
     let config = SmartConfig {
         max_tokens: params.max_tokens.unwrap_or(8000),
-        depth: params.depth.unwrap_or(2),
-        top: params.top.unwrap_or(10),
+        depth: bounded_mcp_depth(params.depth),
+        top: bounded_mcp_top(params.top),
         encoding: Encoding::default(),
     };
 
@@ -331,19 +428,62 @@ pub async fn smart_context(
         let Ok(path) = secure_file_path(root, std::path::Path::new(&file.path)) else {
             continue;
         };
-        if let Ok(content) = std::fs::read_to_string(path) {
+        let remaining = MAX_MCP_RESPONSE_BYTES.saturating_sub(output.len()) as u64;
+        if remaining == 0 {
+            break;
+        }
+        if let Ok(content) = read_file_content_with_limit(&path, remaining) {
             output.push_str(&format!("// === {} ===\n\n", file.path));
             output.push_str(&content);
             output.push_str("\n\n");
+        } else {
+            // The next file did not fit in the remaining response budget (or
+            // exceeded the per-file cap). Stop before attempting more reads.
+            break;
         }
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{Edge, FileRecord, SymbolKind, Visibility};
+
+    fn test_symbol(id: &str, name: &str, line: u32) -> Symbol {
+        Symbol {
+            id: id.to_string(),
+            file_path: "test.rs".to_string(),
+            name: name.to_string(),
+            qualified_name: None,
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: line,
+            line_end: line,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        }
+    }
+
+    fn test_edge(source_id: &str, target_id: &str) -> Edge {
+        Edge {
+            source_id: source_id.to_string(),
+            target_id: Some(target_id.to_string()),
+            target_name: target_id.to_string(),
+            kind: EdgeKind::Calls,
+            line: Some(1),
+            col: Some(0),
+            context: None,
+        }
+    }
 
     #[test]
     fn test_get_callers_tool_definition() {
@@ -364,5 +504,40 @@ mod tests {
         let tool = smart_context_tool();
         assert_eq!(tool.name.as_ref(), "smart_context");
         assert!(tool.description.is_some());
+    }
+
+    #[test]
+    fn graph_helpers_honor_depth_and_deduplicate_cycles() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "test.rs".to_string(),
+                content_hash: "test".to_string(),
+                size_bytes: 0,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        for (id, name, line) in [("a", "a", 1), ("b", "b", 2), ("c", "c", 3)] {
+            db.insert_symbol(&test_symbol(id, name, line)).unwrap();
+        }
+        db.insert_edge(&test_edge("a", "b")).unwrap();
+        db.insert_edge(&test_edge("a", "b")).unwrap();
+        db.insert_edge(&test_edge("b", "c")).unwrap();
+        db.insert_edge(&test_edge("c", "a")).unwrap();
+
+        assert_eq!(collect_callees(&db, "a", 1).unwrap().len(), 1);
+        assert_eq!(
+            collect_callees(&db, "a", i32::MAX)
+                .unwrap()
+                .iter()
+                .map(|(symbol, _, _, _)| symbol.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+        assert_eq!(collect_callers(&db, "b", 1).unwrap().len(), 1);
+        assert_eq!(collect_callers(&db, "b", 2).unwrap().len(), 2);
     }
 }

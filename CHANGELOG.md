@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and absolute paths outside the project are rejected, while generated files
   and persistent `.ctx` state are replaced through collision-resistant
   project-local staging files.
+- Fixed `ctx audit` reporting zero indexed symbols by using a dedicated all-symbol
+  query with count consistency checks; recursive call and impact graphs now
+  deduplicate edge/state expansion and clamp traversal depth, and search limits
+  are bounded.
+- Bounded repository discovery, index/MCP file reads, graph results, and MCP
+  responses to prevent unbounded file and result allocations. MCP caller/callee
+  depth is now applied instead of ignored. Markdown output now chooses
+  content-safe fences and sanitizes repository-controlled path labels.
+- Reused Solidity newline indexes during symbol and call-edge extraction to
+  avoid rebuilding or rescanning the full source prefix for every location.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name

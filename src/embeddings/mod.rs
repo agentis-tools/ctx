@@ -318,6 +318,7 @@ pub fn semantic_search(
     query_embedding: &Embedding,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
+    let limit = limit.min(crate::limits::MAX_SEARCH_RESULTS as usize);
     // Try fast vector search first (sqlite-vec, O(log n))
     if db.has_vector_embeddings() {
         if let Ok(results) = db.vector_search(&query_embedding.vector, limit) {

@@ -577,6 +577,26 @@ impl Database {
         self.find_symbols_filtered(pattern, limit, None, None)
     }
 
+    /// Load every indexed symbol in deterministic source order.
+    ///
+    /// This is intentionally separate from [`Self::find_symbols`]. Search
+    /// limits are bounded at public boundaries and a wildcard search is not a
+    /// safe or correct substitute for an all-rows audit query.
+    pub fn all_symbols(&self) -> Result<Vec<Symbol>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, file_path, name, qualified_name, kind, visibility,
+                   signature, brief, docstring, line_start, line_end,
+                   col_start, col_end, parent_id, source
+            FROM symbols
+            ORDER BY file_path, line_start, id
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| Ok(symbol_from_row(row)))?;
+        rows.collect()
+    }
+
     /// Find symbols by name with optional file path and kind filters.
     ///
     /// - `pattern`: Name pattern to search for
@@ -593,6 +613,7 @@ impl Database {
         file_pattern: Option<&str>,
         kind_filter: Option<&str>,
     ) -> Result<Vec<Symbol>> {
+        let limit = crate::limits::clamp_search_limit(limit);
         // Escape SQL LIKE special characters in the pattern
         let escaped_pattern = escape_like_pattern(pattern);
         let like_pattern = format!("%{}%", escaped_pattern);
@@ -745,6 +766,23 @@ impl Database {
         rows.collect()
     }
 
+    /// Get at most `limit` edges from a symbol.
+    pub fn get_outgoing_edges_limited(&self, symbol_id: &str, limit: i32) -> Result<Vec<Edge>> {
+        let limit = crate::limits::clamp_search_limit(limit);
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT source_id, target_id, target_name, kind, line, col, context
+            FROM edges
+            WHERE source_id = ?
+            ORDER BY line
+            LIMIT ?
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![symbol_id, limit], |row| Ok(edge_from_row(row)))?;
+        rows.collect()
+    }
+
     /// Get edges to a symbol (callers).
     pub fn get_incoming_edges(&self, target_name: &str) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(
@@ -757,6 +795,25 @@ impl Database {
         )?;
 
         let rows = stmt.query_map([target_name, target_name], |row| Ok(edge_from_row(row)))?;
+        rows.collect()
+    }
+
+    /// Get at most `limit` edges to a symbol or target name.
+    pub fn get_incoming_edges_limited(&self, target_name: &str, limit: i32) -> Result<Vec<Edge>> {
+        let limit = crate::limits::clamp_search_limit(limit);
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT source_id, target_id, target_name, kind, line, col, context
+            FROM edges
+            WHERE target_name = ? OR target_id = ?
+            ORDER BY source_id
+            LIMIT ?
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![target_name, target_name, limit], |row| {
+            Ok(edge_from_row(row))
+        })?;
         rows.collect()
     }
 
@@ -1193,6 +1250,7 @@ impl Database {
     /// Semantic search using FTS5 full-text search.
     /// Searches across name, signature, brief, and docstring fields.
     pub fn semantic_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64)>> {
+        let limit = crate::limits::clamp_search_limit(limit);
         // Preprocess query: split into keywords, handle natural language
         let keywords = preprocess_search_query(query);
 
@@ -1230,6 +1288,7 @@ impl Database {
 
     /// Hybrid search combining exact match with semantic search.
     pub fn hybrid_search(&self, query: &str, limit: i32) -> Result<Vec<(Symbol, f64, String)>> {
+        let limit = crate::limits::clamp_search_limit(limit);
         let mut results: std::collections::HashMap<String, (Symbol, f64, String)> =
             std::collections::HashMap::new();
 
@@ -1442,6 +1501,7 @@ impl Database {
 
     /// Get symbols that don't have embeddings yet.
     pub fn get_symbols_without_embeddings(&self, limit: i64) -> Result<Vec<Symbol>> {
+        let limit = limit.clamp(1, crate::limits::MAX_SEARCH_RESULTS as i64);
         let mut stmt = self.conn.prepare(
             r#"
             SELECT s.id, s.file_path, s.name, s.qualified_name, s.kind, s.visibility,
@@ -1561,6 +1621,7 @@ impl Database {
         query_embedding: &[f32],
         limit: usize,
     ) -> Result<Vec<(String, String, String, String, u32, f32)>> {
+        let limit = limit.min(crate::limits::MAX_SEARCH_RESULTS as usize);
         if !self.has_vector_search() {
             return Ok(Vec::new());
         }
@@ -2682,6 +2743,45 @@ mod tests {
         // Search for it
         let results = db.find_symbols("main", 10).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn all_symbols_is_not_limited_by_search_semantics() {
+        let db = Database::open_in_memory().unwrap();
+        let file = FileRecord {
+            path: "src/lib.rs".to_string(),
+            content_hash: "hash".to_string(),
+            size_bytes: 1,
+            language: Some("rust".to_string()),
+            last_indexed: 0,
+        };
+        db.upsert_file(&file, None).unwrap();
+
+        for name in ["alpha", "beta"] {
+            db.insert_symbol(&Symbol {
+                id: format!("src/lib.rs::{name}"),
+                file_path: file.path.clone(),
+                name: name.to_string(),
+                qualified_name: None,
+                kind: SymbolKind::Function,
+                visibility: Visibility::Private,
+                signature: None,
+                brief: None,
+                docstring: None,
+                line_start: if name == "alpha" { 2 } else { 1 },
+                line_end: 1,
+                col_start: 0,
+                col_end: 0,
+                parent_id: None,
+                source: None,
+            })
+            .unwrap();
+        }
+
+        let symbols = db.all_symbols().unwrap();
+        assert_eq!(symbols.len() as i64, db.get_stats().unwrap().symbols);
+        assert_eq!(symbols[0].name, "beta");
+        assert_eq!(symbols[1].name, "alpha");
     }
 
     #[test]

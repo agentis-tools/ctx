@@ -19,6 +19,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 
 use crate::default_ignores::DEFAULT_IGNORES;
+use crate::limits::{MAX_DISCOVERED_BYTES, MAX_DISCOVERED_FILES, MAX_FILE_BYTES};
 
 /// Reusable matcher for positional file and directory patterns.
 ///
@@ -969,6 +970,8 @@ pub fn should_include_file(root: &Path, file_path: &Path, config: &WalkerConfig)
 pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<FileEntry>> {
     let root = root.canonicalize()?;
     let mut entries = Vec::new();
+    let mut total_size = 0u64;
+    let mut limit_warning_emitted = false;
 
     // Build ignore matcher for default and custom ignores
     let ignore_matcher = build_ignore_matcher(&root, config);
@@ -988,6 +991,10 @@ pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<File
 
     // Helper to process a single walk
     let mut process_walk = |start_path: &Path, apply_glob_filter: bool| -> io::Result<()> {
+        if entries.len() >= MAX_DISCOVERED_FILES || total_size >= MAX_DISCOVERED_BYTES {
+            return Ok(());
+        }
+
         if !start_path.exists() {
             eprintln!("Warning: path does not exist: {}", start_path.display());
             return Ok(());
@@ -1063,11 +1070,36 @@ pub fn discover_files(root: &Path, config: &WalkerConfig) -> io::Result<Vec<File
             // Get file size
             let size = fs::metadata(&safe_abs_path).map(|m| m.len()).unwrap_or(0);
 
+            if size > MAX_FILE_BYTES {
+                eprintln!(
+                    "Warning: skipping {} ({} exceeds the {} per-file limit)",
+                    rel_path.display(),
+                    format_size(size),
+                    format_size(MAX_FILE_BYTES)
+                );
+                continue;
+            }
+
+            if entries.len() >= MAX_DISCOVERED_FILES
+                || total_size.saturating_add(size) > MAX_DISCOVERED_BYTES
+            {
+                if !limit_warning_emitted {
+                    eprintln!(
+                        "Warning: discovery limit reached ({} files or {} aggregate); remaining files skipped",
+                        MAX_DISCOVERED_FILES,
+                        format_size(MAX_DISCOVERED_BYTES)
+                    );
+                    limit_warning_emitted = true;
+                }
+                return Ok(());
+            }
+
             entries.push(FileEntry {
                 absolute_path: safe_abs_path,
                 relative_path: rel_path,
                 size,
             });
+            total_size = total_size.saturating_add(size);
         }
         Ok(())
     };

@@ -7,10 +7,11 @@
 //! pipe-friendly streaming.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use crate::formatter::{get_formatter, OutputFormat};
+use crate::limits::MAX_FILE_BYTES;
 use crate::tree::generate_tree;
 use crate::walker::{secure_file_path, FileEntry};
 
@@ -168,8 +169,35 @@ pub fn stream_context(
 }
 
 /// Read file content, handling encoding gracefully.
-fn read_file_content(path: &Path) -> io::Result<String> {
-    let bytes = fs::read(path)?;
+pub fn read_file_content(path: &Path) -> io::Result<String> {
+    read_file_content_with_limit(path, MAX_FILE_BYTES)
+}
+
+/// Read at most `max_bytes` from a file while retaining the global per-file cap.
+///
+/// Callers that expose a smaller aggregate response budget can use this helper
+/// to avoid reading a full file only to truncate it after assembling a response.
+pub fn read_file_content_with_limit(path: &Path, max_bytes: u64) -> io::Result<String> {
+    let file = fs::File::open(path)?;
+    if let Ok(metadata) = file.metadata() {
+        if metadata.len() > MAX_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                format!("file exceeds the {} byte per-file limit", MAX_FILE_BYTES),
+            ));
+        }
+    }
+
+    let read_limit = max_bytes.min(MAX_FILE_BYTES);
+    let mut bytes = Vec::new();
+    file.take(read_limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > read_limit {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("file exceeds the {} byte read limit", read_limit),
+        ));
+    }
 
     // Try UTF-8 first
     match String::from_utf8(bytes.clone()) {

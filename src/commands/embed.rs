@@ -251,6 +251,7 @@ pub fn run_semantic(
 ) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
+    let limit = limit.min(ctx::limits::MAX_SEARCH_RESULTS as usize);
 
     // Check if we have embeddings
     let embedding_count = db.count_embeddings()?;
