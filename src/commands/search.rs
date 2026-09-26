@@ -8,12 +8,14 @@ use ctx::db;
 use ctx::error::Result;
 use ctx::index;
 use ctx::json::SymbolRef;
+use ctx::limits::clamp_search_limit;
 use ctx::utils::{truncate_path, truncate_str};
 
 /// Run semantic/text search.
 pub fn run_search(query: &str, limit: i32, output: &str) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
+    let limit = clamp_search_limit(limit);
 
     // Use hybrid search combining exact matches with FTS5 semantic search
     let mut results = db.hybrid_search(query, limit)?;

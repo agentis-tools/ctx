@@ -11,6 +11,7 @@ use ctx::analytics;
 use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
+use ctx::limits::{clamp_graph_depth, MAX_SEARCH_RESULTS};
 use ctx::output;
 use ctx::smart::{format_dry_run, format_explain, smart_context_filtered, SmartConfig};
 use ctx::walker;
@@ -72,8 +73,8 @@ pub fn run_smart(
     };
     let config = SmartConfig {
         max_tokens: effective_max_tokens,
-        depth,
-        top,
+        depth: clamp_graph_depth(depth),
+        top: top.min(MAX_SEARCH_RESULTS as usize),
         encoding,
     };
 

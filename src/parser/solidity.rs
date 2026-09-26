@@ -30,9 +30,13 @@ impl SolidityParser {
         let mut edges = Vec::new();
         let mut imports = Vec::new();
         let mut exports = Vec::new();
+        // Reuse one line index for every symbol. Rebuilding `source.lines()`
+        // per symbol made source extraction quadratic in large contracts.
+        let lines: Vec<&str> = source.lines().collect();
+        let line_index = LineIndex::new(source);
 
         // Build a map of doc comments by their end location
-        let doc_comments = extract_doc_comments(&comments, source);
+        let doc_comments = extract_doc_comments(&comments, source, &line_index);
 
         // Process each top-level item
         for part in &tree.0 {
@@ -72,6 +76,8 @@ impl SolidityParser {
                             signature,
                             &def.loc,
                             &doc_comments,
+                            &lines,
+                            &line_index,
                         );
 
                         // Process contract parts
@@ -84,6 +90,8 @@ impl SolidityParser {
                             &doc_comments,
                             &mut symbols,
                             &mut edges,
+                            &lines,
+                            &line_index,
                         );
                     }
                 }
@@ -96,9 +104,16 @@ impl SolidityParser {
 
                 SourceUnitPart::FunctionDefinition(func) => {
                     // Free function (not in a contract)
-                    if let Some(symbol) =
-                        extract_function(func, file_path, source, None, None, &doc_comments)
-                    {
+                    if let Some(symbol) = extract_function(
+                        func,
+                        file_path,
+                        source,
+                        None,
+                        None,
+                        &doc_comments,
+                        &lines,
+                        &line_index,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -116,6 +131,8 @@ impl SolidityParser {
                             Some(format!("struct {}", name.name)),
                             &def.loc,
                             &doc_comments,
+                            &lines,
+                            &line_index,
                         );
                     }
                 }
@@ -133,6 +150,8 @@ impl SolidityParser {
                             Some(format!("enum {}", name.name)),
                             &def.loc,
                             &doc_comments,
+                            &lines,
+                            &line_index,
                         );
                     }
                 }
@@ -150,6 +169,8 @@ impl SolidityParser {
                             Some(format!("error {}", name.name)),
                             &def.loc,
                             &doc_comments,
+                            &lines,
+                            &line_index,
                         );
                     }
                 }
@@ -167,6 +188,8 @@ impl SolidityParser {
                             Some(format!("event {}", name.name)),
                             &def.loc,
                             &doc_comments,
+                            &lines,
+                            &line_index,
                         );
                     }
                 }
@@ -176,7 +199,7 @@ impl SolidityParser {
         }
 
         // Extract function call edges from function bodies
-        extract_call_edges(file_path, source, &symbols, &mut edges);
+        extract_call_edges(file_path, source, &symbols, &mut edges, &line_index);
 
         let module = ModuleInfo {
             file_path: file_path.to_string(),
@@ -219,8 +242,10 @@ fn push_symbol(
     signature: Option<String>,
     loc: &Loc,
     doc_comments: &[(u32, String)],
+    lines: &[&str],
+    line_index: &LineIndex,
 ) {
-    let (line_start, line_end, col_start, col_end) = loc_to_lines(loc, source);
+    let (line_start, line_end, col_start, col_end) = line_index.loc_to_lines(loc, source);
     let docstring = find_doc_comment(doc_comments, line_start);
     let brief = docstring.as_ref().and_then(|d| extract_brief(d));
 
@@ -243,7 +268,7 @@ fn push_symbol(
         col_start,
         col_end,
         parent_id,
-        source: extract_source(source, line_start, line_end),
+        source: extract_source(lines, line_start, line_end),
     });
 }
 
@@ -258,6 +283,8 @@ fn extract_contract_parts(
     doc_comments: &[(u32, String)],
     symbols: &mut Vec<Symbol>,
     edges: &mut Vec<Edge>,
+    lines: &[&str],
+    line_index: &LineIndex,
 ) {
     for part in parts {
         match part {
@@ -269,6 +296,8 @@ fn extract_contract_parts(
                     Some(contract_name),
                     Some(contract_id),
                     doc_comments,
+                    lines,
+                    line_index,
                 ) {
                     symbols.push(symbol);
                 }
@@ -290,6 +319,8 @@ fn extract_contract_parts(
                         Some(format!("{} {}", type_str, name.name)),
                         &var.loc,
                         doc_comments,
+                        lines,
+                        line_index,
                     );
                 }
             }
@@ -307,6 +338,8 @@ fn extract_contract_parts(
                         Some(format!("event {}", name.name)),
                         &event.loc,
                         doc_comments,
+                        lines,
+                        line_index,
                     );
                 }
             }
@@ -324,6 +357,8 @@ fn extract_contract_parts(
                         Some(format!("struct {}", name.name)),
                         &def.loc,
                         doc_comments,
+                        lines,
+                        line_index,
                     );
                 }
             }
@@ -341,6 +376,8 @@ fn extract_contract_parts(
                         Some(format!("enum {}", name.name)),
                         &def.loc,
                         doc_comments,
+                        lines,
+                        line_index,
                     );
                 }
             }
@@ -358,6 +395,8 @@ fn extract_contract_parts(
                         Some(format!("error {}", name.name)),
                         &def.loc,
                         doc_comments,
+                        lines,
+                        line_index,
                     );
                 }
             }
@@ -384,6 +423,7 @@ fn extract_contract_parts(
 }
 
 /// Extract a function definition.
+#[allow(clippy::too_many_arguments)]
 fn extract_function(
     func: &pt::FunctionDefinition,
     file_path: &str,
@@ -391,8 +431,10 @@ fn extract_function(
     parent_name: Option<&str>,
     parent_id: Option<&str>,
     doc_comments: &[(u32, String)],
+    lines: &[&str],
+    line_index: &LineIndex,
 ) -> Option<Symbol> {
-    let (line_start, line_end, col_start, col_end) = loc_to_lines(&func.loc, source);
+    let (line_start, line_end, col_start, col_end) = line_index.loc_to_lines(&func.loc, source);
     let docstring = find_doc_comment(doc_comments, line_start);
     let brief = docstring.as_ref().and_then(|d| extract_brief(d));
 
@@ -410,7 +452,7 @@ fn extract_function(
     };
 
     let visibility = extract_function_visibility(&func.attributes);
-    let signature = build_function_signature(func, source);
+    let signature = build_function_signature(func, source, lines, line_index);
 
     let qualified_name = parent_name.map(|p| format!("{}.{}", p, name));
 
@@ -429,7 +471,7 @@ fn extract_function(
         col_start,
         col_end,
         parent_id: parent_id.map(String::from),
-        source: extract_source(source, line_start, line_end),
+        source: extract_source(lines, line_start, line_end),
     })
 }
 
@@ -503,10 +545,14 @@ fn extract_variable_visibility(attrs: &[VariableAttribute]) -> Visibility {
 }
 
 /// Build a function signature string.
-fn build_function_signature(func: &pt::FunctionDefinition, source: &str) -> Option<String> {
+fn build_function_signature(
+    func: &pt::FunctionDefinition,
+    source: &str,
+    lines: &[&str],
+    line_index: &LineIndex,
+) -> Option<String> {
     // Get the source text up to the function body
-    let (start_line, _, _, _) = loc_to_lines(&func.loc, source);
-    let lines: Vec<&str> = source.lines().collect();
+    let (start_line, _, _, _) = line_index.loc_to_lines(&func.loc, source);
 
     if start_line == 0 || start_line as usize > lines.len() {
         return None;
@@ -572,39 +618,59 @@ fn format_type_inner(ty: &pt::Type) -> String {
     }
 }
 
-/// Convert a Loc to line/column numbers (1-indexed lines, 0-indexed columns).
-fn loc_to_lines(loc: &Loc, source: &str) -> (u32, u32, u32, u32) {
-    match loc {
-        Loc::File(_, start, end) => {
-            let (start_line, start_col) = offset_to_line_col(source, *start);
-            let (end_line, end_col) = offset_to_line_col(source, *end);
-            (start_line, end_line, start_col, end_col)
-        }
-        _ => (1, 1, 0, 0),
-    }
+/// Newline offsets used to map parser byte locations to source lines.
+///
+/// Solang reports byte offsets. Keeping the line starts once per source file
+/// makes each location lookup logarithmic instead of rescanning the prefix from
+/// byte zero for every symbol.
+#[derive(Debug)]
+struct LineIndex {
+    starts: Vec<usize>,
 }
 
-/// Convert byte offset to line and column.
-fn offset_to_line_col(source: &str, offset: usize) -> (u32, u32) {
-    let mut line = 1u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
+impl LineIndex {
+    fn new(source: &str) -> Self {
+        let mut starts = vec![0];
+        for (offset, byte) in source.bytes().enumerate() {
+            if byte == b'\n' {
+                starts.push(offset + 1);
+            }
         }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
+        Self { starts }
+    }
+
+    /// Convert a Loc to line/column numbers (1-indexed lines, 0-indexed
+    /// character columns).
+    fn loc_to_lines(&self, loc: &Loc, source: &str) -> (u32, u32, u32, u32) {
+        match loc {
+            Loc::File(_, start, end) => {
+                let (start_line, start_col) = self.offset_to_line_col(source, *start);
+                let (end_line, end_col) = self.offset_to_line_col(source, *end);
+                (start_line, end_line, start_col, end_col)
+            }
+            _ => (1, 1, 0, 0),
         }
     }
-    (line, col)
+
+    /// Convert a byte offset to a line and a character column.
+    fn offset_to_line_col(&self, source: &str, raw_offset: usize) -> (u32, u32) {
+        let mut offset = raw_offset.min(source.len());
+        while offset > 0 && !source.is_char_boundary(offset) {
+            offset -= 1;
+        }
+
+        let line_index = self
+            .starts
+            .partition_point(|line_start| *line_start <= offset)
+            .saturating_sub(1);
+        let line_start = self.starts[line_index];
+        let column = source[line_start..offset].chars().count() as u32;
+        (line_index as u32 + 1, column)
+    }
 }
 
 /// Extract source code for a range of lines.
-fn extract_source(source: &str, start_line: u32, end_line: u32) -> Option<String> {
-    let lines: Vec<&str> = source.lines().collect();
+fn extract_source(lines: &[&str], start_line: u32, end_line: u32) -> Option<String> {
     if start_line == 0 || end_line == 0 {
         return None;
     }
@@ -637,19 +703,23 @@ fn extract_contract_name(source: &str) -> Option<String> {
 
 /// Extract doc comments from the comment list.
 /// Returns a list of (end_line, comment_text) for NatSpec comments.
-fn extract_doc_comments(comments: &[pt::Comment], source: &str) -> Vec<(u32, String)> {
+fn extract_doc_comments(
+    comments: &[pt::Comment],
+    source: &str,
+    line_index: &LineIndex,
+) -> Vec<(u32, String)> {
     let mut result = Vec::new();
 
     for comment in comments {
         match comment {
             pt::Comment::DocLine(loc, text) => {
-                let (_, end_line, _, _) = loc_to_lines(loc, source);
+                let (_, end_line, _, _) = line_index.loc_to_lines(loc, source);
                 // Strip the leading "///" and trim
                 let content = text.trim_start_matches("///").trim();
                 result.push((end_line, content.to_string()));
             }
             pt::Comment::DocBlock(loc, text) => {
-                let (_, end_line, _, _) = loc_to_lines(loc, source);
+                let (_, end_line, _, _) = line_index.loc_to_lines(loc, source);
                 // Parse the block comment
                 let content = parse_doc_block(text);
                 result.push((end_line, content));
@@ -707,7 +777,13 @@ fn find_doc_comment(comments: &[(u32, String)], target_line: u32) -> Option<Stri
 }
 
 /// Extract function call edges by re-parsing and walking the AST.
-fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: &mut Vec<Edge>) {
+fn extract_call_edges(
+    file_path: &str,
+    source: &str,
+    symbols: &[Symbol],
+    edges: &mut Vec<Edge>,
+    line_index: &LineIndex,
+) {
     // Build a map of function line ranges to their IDs
     let func_ranges: Vec<_> = symbols
         .iter()
@@ -727,7 +803,14 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                 SourceUnitPart::ContractDefinition(def) => {
                     for cpart in &def.parts {
                         if let ContractPart::FunctionDefinition(func) = cpart {
-                            extract_modifier_edges(func, source, &func_ranges, symbols, edges);
+                            extract_modifier_edges(
+                                func,
+                                source,
+                                &func_ranges,
+                                symbols,
+                                edges,
+                                line_index,
+                            );
                             if let Some(ref body) = func.body {
                                 extract_calls_from_statement(
                                     body,
@@ -736,6 +819,7 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                                     &func_ranges,
                                     symbols,
                                     edges,
+                                    line_index,
                                 );
                             }
                         }
@@ -743,7 +827,7 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                 }
                 SourceUnitPart::FunctionDefinition(func) => {
                     // Handle free functions (top-level functions outside contracts)
-                    extract_modifier_edges(func, source, &func_ranges, symbols, edges);
+                    extract_modifier_edges(func, source, &func_ranges, symbols, edges, line_index);
                     if let Some(ref body) = func.body {
                         extract_calls_from_statement(
                             body,
@@ -752,6 +836,7 @@ fn extract_call_edges(file_path: &str, source: &str, symbols: &[Symbol], edges: 
                             &func_ranges,
                             symbols,
                             edges,
+                            line_index,
                         );
                     }
                 }
@@ -774,6 +859,7 @@ fn extract_modifier_edges(
     func_ranges: &[(u32, u32, String)],
     symbols: &[Symbol],
     edges: &mut Vec<Edge>,
+    line_index: &LineIndex,
 ) {
     for attr in &func.attributes {
         if let FunctionAttribute::BaseOrModifier(_, base) = attr {
@@ -783,7 +869,7 @@ fn extract_modifier_edges(
                 None => continue,
             };
 
-            let (line, _, col, _) = loc_to_lines(&base.loc, source);
+            let (line, _, col, _) = line_index.loc_to_lines(&base.loc, source);
 
             // Find which function this attribute is on.
             let source_id = func_ranges
@@ -819,9 +905,18 @@ fn extract_calls_from_statements(
     func_ranges: &[(u32, u32, String)],
     symbols: &[Symbol],
     edges: &mut Vec<Edge>,
+    line_index: &LineIndex,
 ) {
     for stmt in statements {
-        extract_calls_from_statement(stmt, file_path, source, func_ranges, symbols, edges);
+        extract_calls_from_statement(
+            stmt,
+            file_path,
+            source,
+            func_ranges,
+            symbols,
+            edges,
+            line_index,
+        );
     }
 }
 
@@ -833,17 +928,50 @@ fn extract_calls_from_statement(
     func_ranges: &[(u32, u32, String)],
     symbols: &[Symbol],
     edges: &mut Vec<Edge>,
+    line_index: &LineIndex,
 ) {
     match stmt {
         pt::Statement::Expression(_, expr) => {
-            extract_calls_from_expr(expr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                expr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::VariableDefinition(_, _, Some(expr)) => {
-            extract_calls_from_expr(expr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                expr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::If(_, cond, then_stmt, else_stmt) => {
-            extract_calls_from_expr(cond, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_statement(then_stmt, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                cond,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_statement(
+                then_stmt,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
             if let Some(else_s) = else_stmt {
                 extract_calls_from_statement(
                     else_s,
@@ -852,12 +980,29 @@ fn extract_calls_from_statement(
                     func_ranges,
                     symbols,
                     edges,
+                    line_index,
                 );
             }
         }
         pt::Statement::While(_, cond, body) => {
-            extract_calls_from_expr(cond, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_statement(body, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                cond,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_statement(
+                body,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::For(_, init, cond, update, body) => {
             if let Some(init_stmt) = init {
@@ -868,10 +1013,19 @@ fn extract_calls_from_statement(
                     func_ranges,
                     symbols,
                     edges,
+                    line_index,
                 );
             }
             if let Some(cond_expr) = cond {
-                extract_calls_from_expr(cond_expr, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    cond_expr,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
             if let Some(update_expr) = update {
                 extract_calls_from_expr(
@@ -881,6 +1035,7 @@ fn extract_calls_from_statement(
                     func_ranges,
                     symbols,
                     edges,
+                    line_index,
                 );
             }
             if let Some(body_stmt) = body {
@@ -891,12 +1046,29 @@ fn extract_calls_from_statement(
                     func_ranges,
                     symbols,
                     edges,
+                    line_index,
                 );
             }
         }
         pt::Statement::DoWhile(_, body, cond) => {
-            extract_calls_from_statement(body, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_expr(cond, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_statement(
+                body,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_expr(
+                cond,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::Block { statements, .. } => {
             extract_calls_from_statements(
@@ -906,16 +1078,41 @@ fn extract_calls_from_statement(
                 func_ranges,
                 symbols,
                 edges,
+                line_index,
             );
         }
         pt::Statement::Return(_, Some(expr)) => {
-            extract_calls_from_expr(expr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                expr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::Emit(_, expr) => {
-            extract_calls_from_expr(expr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                expr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
         pt::Statement::Try(_, expr, _, catch_clauses) => {
-            extract_calls_from_expr(expr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                expr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
             for clause in catch_clauses {
                 match clause {
                     pt::CatchClause::Simple(_, _, stmt) => {
@@ -926,6 +1123,7 @@ fn extract_calls_from_statement(
                             func_ranges,
                             symbols,
                             edges,
+                            line_index,
                         );
                     }
                     pt::CatchClause::Named(_, _, _, stmt) => {
@@ -936,6 +1134,7 @@ fn extract_calls_from_statement(
                             func_ranges,
                             symbols,
                             edges,
+                            line_index,
                         );
                     }
                 }
@@ -955,10 +1154,11 @@ fn extract_calls_from_expr(
     func_ranges: &[(u32, u32, String)],
     symbols: &[Symbol],
     edges: &mut Vec<Edge>,
+    line_index: &LineIndex,
 ) {
     match expr {
         Expression::FunctionCall(loc, func_expr, _args) => {
-            let (line, _, col, _) = loc_to_lines(loc, source);
+            let (line, _, col, _) = line_index.loc_to_lines(loc, source);
 
             // Get the function name and, for qualified calls like
             // `LibraryName.fn(...)`, the fully qualified name so the resolver can
@@ -1005,13 +1205,21 @@ fn extract_calls_from_expr(
 
             // Recurse into arguments
             for arg in _args {
-                extract_calls_from_expr(arg, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    arg,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
         }
 
         Expression::FunctionCallBlock(loc, func_expr, _) => {
             // Handle block-style function calls (used with modifiers)
-            let (line, _, col, _) = loc_to_lines(loc, source);
+            let (line, _, col, _) = line_index.loc_to_lines(loc, source);
             let (func_name, context) = match func_expr.as_ref() {
                 Expression::Variable(id) => (Some(id.name.clone()), None),
                 Expression::MemberAccess(_, object, member) => {
@@ -1080,8 +1288,24 @@ fn extract_calls_from_expr(
         | Expression::AssignXor(_, l, r)
         | Expression::AssignShiftLeft(_, l, r)
         | Expression::AssignShiftRight(_, l, r) => {
-            extract_calls_from_expr(l, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_expr(r, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                l,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_expr(
+                r,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
 
         Expression::Not(_, e)
@@ -1093,38 +1317,126 @@ fn extract_calls_from_expr(
         | Expression::PostIncrement(_, e)
         | Expression::PostDecrement(_, e)
         | Expression::Parenthesis(_, e) => {
-            extract_calls_from_expr(e, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                e,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
 
         Expression::ConditionalOperator(_, cond, then_e, else_e) => {
-            extract_calls_from_expr(cond, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_expr(then_e, file_path, source, func_ranges, symbols, edges);
-            extract_calls_from_expr(else_e, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                cond,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_expr(
+                then_e,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
+            extract_calls_from_expr(
+                else_e,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
 
         Expression::ArraySubscript(_, arr, idx) => {
-            extract_calls_from_expr(arr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                arr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
             if let Some(i) = idx {
-                extract_calls_from_expr(i, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    i,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
         }
 
         Expression::ArraySlice(_, arr, start, end) => {
-            extract_calls_from_expr(arr, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                arr,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
             if let Some(s) = start {
-                extract_calls_from_expr(s, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    s,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
             if let Some(e) = end {
-                extract_calls_from_expr(e, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    e,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
         }
 
         Expression::MemberAccess(_, e, _) => {
-            extract_calls_from_expr(e, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                e,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
 
         Expression::New(_, e) => {
-            extract_calls_from_expr(e, file_path, source, func_ranges, symbols, edges);
+            extract_calls_from_expr(
+                e,
+                file_path,
+                source,
+                func_ranges,
+                symbols,
+                edges,
+                line_index,
+            );
         }
 
         Expression::List(_, exprs) => {
@@ -1140,7 +1452,15 @@ fn extract_calls_from_expr(
 
         Expression::ArrayLiteral(_, exprs) => {
             for e in exprs {
-                extract_calls_from_expr(e, file_path, source, func_ranges, symbols, edges);
+                extract_calls_from_expr(
+                    e,
+                    file_path,
+                    source,
+                    func_ranges,
+                    symbols,
+                    edges,
+                    line_index,
+                );
             }
         }
 

@@ -104,6 +104,11 @@ impl Analytics {
     /// - A qualified name like "LocalProvider::new"
     /// - A full ID like "src/embeddings/local.rs::LocalProvider::new@20"
     pub fn call_graph(&self, start_name: &str, max_depth: i32) -> Result<Vec<CallGraphNode>> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE start_symbol AS (
@@ -119,6 +124,14 @@ impl Analytics {
                 ORDER BY file_path, line_start
                 LIMIT 1
             ),
+            call_edges AS (
+                -- Traversal does not depend on edge metadata. Collapse duplicate
+                -- rows before recursion so parallel parser/index edges cannot
+                -- multiply the number of simple paths exponentially.
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             graph AS (
                 -- Base case: start from resolved symbol
                 SELECT 
@@ -130,9 +143,12 @@ impl Analytics {
                 FROM code.symbols s
                 JOIN start_symbol ss ON s.id = ss.id
                 
-                UNION ALL
+                UNION
                 
-                -- Recursive case: follow outgoing edges (only resolved edges)
+                -- Recursive case: follow outgoing edges (only resolved edges).
+                -- UNION collapses identical (node, depth) states reached through
+                -- different paths, avoiding exponential diamond expansion while
+                -- the depth bound keeps cycles finite.
                 SELECT 
                     t.name,
                     t.file_path,
@@ -140,15 +156,14 @@ impl Analytics {
                     g.depth + 1 as depth,
                     t.id as current_id
                 FROM graph g
-                JOIN code.edges e ON e.source_id = g.current_id
+                JOIN call_edges e ON e.source_id = g.current_id
                 JOIN code.symbols t ON e.target_id = t.id
                 WHERE g.depth < ?
-                  AND e.kind = 'calls'
-                  AND e.target_id IS NOT NULL
             )
             SELECT DISTINCT name, file_path, kind, MIN(depth) as depth
             FROM graph
             WHERE depth > 1  -- Exclude the starting symbol itself
+              AND current_id NOT IN (SELECT id FROM start_symbol)
             GROUP BY name, file_path, kind
             ORDER BY depth, name
             "#,
@@ -202,6 +217,11 @@ impl Analytics {
         target_name: &str,
         max_depth: i32,
     ) -> Result<Vec<LocatedImpactNode>> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE target_symbol AS (
@@ -217,6 +237,13 @@ impl Analytics {
                 ORDER BY file_path, line_start
                 LIMIT 1
             ),
+            call_edges AS (
+                -- Traverse each resolved source/target pair once even when the
+                -- index contains duplicate edge records.
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             impact AS (
                 -- Base case: find direct callers of the specific target symbol
                 SELECT 
@@ -229,16 +256,17 @@ impl Analytics {
                     s.line_end,
                     1 as distance,
                     s.id as current_id
-                FROM code.edges e
+                FROM call_edges e
                 JOIN code.symbols s ON e.source_id = s.id
                 JOIN target_symbol ts ON 
                     -- Only traverse resolved edges to avoid cross-file false positives
-                    e.target_id IS NOT NULL AND e.target_id = ts.id
-                WHERE e.kind = 'calls'
+                    e.target_id = ts.id
                 
-                UNION ALL
+                UNION
                 
-                -- Recursive case: find callers of callers (reverse traversal)
+                -- Recursive case: find callers of callers (reverse traversal).
+                -- UNION collapses duplicate (symbol, distance) states from
+                -- diamonds and duplicate routes through the call graph.
                 SELECT 
                     s.id,
                     s.name,
@@ -250,16 +278,16 @@ impl Analytics {
                     i.distance + 1 as distance,
                     s.id as current_id
                 FROM impact i
-                JOIN code.edges e ON 
+                JOIN call_edges e ON
                     -- Only traverse resolved edges to avoid cross-file false positives
-                    e.target_id IS NOT NULL AND e.target_id = i.current_id
+                    e.target_id = i.current_id
                 JOIN code.symbols s ON e.source_id = s.id
                 WHERE i.distance < ?
-                  AND e.kind = 'calls'
             )
             SELECT current_id, name, qualified_name, file_path, kind,
                    line_start, line_end, MIN(distance) as distance
             FROM impact
+            WHERE current_id NOT IN (SELECT id FROM target_symbol)
             GROUP BY current_id, name, qualified_name, file_path, kind, line_start, line_end
             ORDER BY distance, name, current_id
             "#,
@@ -335,6 +363,11 @@ impl Analytics {
     /// Both `from_name` and `to_name` can be symbol IDs, qualified names, or simple names.
     #[allow(dead_code)]
     pub fn has_path(&self, from_name: &str, to_name: &str, max_depth: i32) -> Result<bool> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(false);
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE source_symbol AS (
@@ -349,6 +382,11 @@ impl Analytics {
                 ORDER BY file_path
                 LIMIT 1
             ),
+            call_edges AS (
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             reachable AS (
                 -- Base case: start from source
                 SELECT 
@@ -360,17 +398,16 @@ impl Analytics {
                 
                 UNION
                 
-                -- Follow edges using only resolved target_id to avoid cross-file false positives
+                -- Follow edges using only resolved target_id to avoid cross-file
+                -- false positives. UNION deduplicates each node/depth state.
                 SELECT 
                     t.name,
                     t.id,
                     r.depth + 1
                 FROM reachable r
-                JOIN code.edges e ON e.source_id = r.current_id
+                JOIN call_edges e ON e.source_id = r.current_id
                 JOIN code.symbols t ON e.target_id = t.id
                 WHERE r.depth < ?
-                  AND e.kind = 'calls'
-                  AND e.target_id IS NOT NULL
             )
             SELECT COUNT(*) > 0
             FROM reachable r
@@ -390,6 +427,7 @@ impl Analytics {
     /// This correctly counts incoming edges per symbol ID, not by name,
     /// avoiding over-counting for common names like "new".
     pub fn most_connected(&self, limit: i32) -> Result<Vec<(String, String, i64, i64)>> {
+        let limit = crate::limits::clamp_search_limit(limit);
         let mut stmt = self.conn.prepare(
             r#"
             WITH outgoing AS (
@@ -1035,6 +1073,39 @@ mod tests {
         // main calls run which calls helper (distance 2)
         assert!(nodes.iter().any(|n| n.name == "run" && n.distance == 1));
         assert!(nodes.iter().any(|n| n.name == "main" && n.distance == 2));
+    }
+
+    #[test]
+    fn recursive_graphs_deduplicate_cycles_and_bound_depth() {
+        let conn = setup_test_db().expect("Failed to setup test db");
+        conn.execute(
+            "INSERT INTO code.edges VALUES
+                ('helper@21', 'main@1', 'main', 'calls', NULL),
+                ('helper@21', 'main@1', 'main', 'calls', NULL)",
+            [],
+        )
+        .unwrap();
+        let analytics = Analytics { conn };
+
+        let callees = analytics.call_graph("main", i32::MAX).unwrap();
+        assert_eq!(
+            callees
+                .iter()
+                .map(|node| node.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run", "helper"]
+        );
+
+        let callers = analytics
+            .impact_analysis_located("helper", i32::MAX)
+            .unwrap();
+        assert_eq!(callers.len(), 2);
+        assert!(callers
+            .iter()
+            .any(|node| node.name == "run" && node.distance == 1));
+        assert!(callers
+            .iter()
+            .any(|node| node.name == "main" && node.distance == 2));
     }
 
     #[test]
