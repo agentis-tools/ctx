@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata like every other language; Go methods include their receiver in
   their id and qualified name (`A.String` vs `B.String`), and Go symbols keep
   their source (duplicates, `ctx symbol`, embeddings).
+- Symbols with the same name on the same line (C `typedef struct jv {..} jv;`,
+  a struct and its typedef) no longer fail the whole file on `symbols.id`'s
+  UNIQUE constraint (ids get a `#kind` suffix); edges from same-named symbols
+  (two `impl`s defining `fmt`) are attributed by span. jq and fmt: 21 files
+  that failed to store now index.
+- JavaScript/TypeScript: `var f = function () {}`, `const f = function () {}`
+  and property assignments (`res.send = function send() {}`,
+  `exports.parse = () => ...`, `X.prototype.use = function () {}`) are now
+  extracted. Express went from 123 to 228 symbols.
 - Storing a file is now all-or-nothing (one SAVEPOINT): a failure part-way no
   longer leaves a "fresh" file record with partial data that later runs skip.
 - Rust method-call syntax (`x.find(..)`) is no longer bound to a same-named

@@ -788,10 +788,10 @@ impl Indexer {
             .map_err(db_error)?;
 
         // Build ID mapping and store symbols
-        let id_map = self.store_symbols(rel_path, &parse_result.symbols)?;
+        let (id_map, spans) = self.store_symbols(rel_path, &parse_result.symbols)?;
 
         // Store edges with rewritten IDs
-        self.store_edges(rel_path, &parse_result.edges, &id_map)?;
+        self.store_edges(rel_path, &parse_result.edges, &id_map, &spans)?;
 
         // Store module info
         if let Some(ref module) = parse_result.module {
@@ -826,22 +826,55 @@ impl Indexer {
     }
 
     /// Store symbols and build ID mapping from old to new IDs.
+    #[allow(clippy::type_complexity)]
     fn store_symbols(
         &self,
         rel_path: &str,
         symbols: &[crate::db::Symbol],
-    ) -> io::Result<std::collections::HashMap<String, String>> {
+    ) -> io::Result<(
+        std::collections::HashMap<String, String>,
+        std::collections::HashMap<String, Vec<(u32, u32, String)>>,
+    )> {
         let mut id_map = std::collections::HashMap::new();
+        // Parser ids carry no line, so two symbols can share one (Rust
+        // `impl Display`/`impl Debug` both defining `X::fmt`, a C `typedef
+        // struct jv {..} jv;`). Keep every stored symbol's span per parser id
+        // so edges are attributed to the symbol that actually contains them.
+        let mut spans: std::collections::HashMap<String, Vec<(u32, u32, String)>> =
+            std::collections::HashMap::new();
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for symbol in symbols {
             let parent_name = extract_parent_name(symbol.parent_id.as_deref());
-            let new_id = crate::db::Symbol::make_id_with_line(
+            let mut new_id = crate::db::Symbol::make_id_with_line(
                 rel_path,
                 &symbol.name,
                 parent_name,
                 symbol.line_start,
             );
-            id_map.insert(symbol.id.clone(), new_id.clone());
+            // Same name on the same line (struct + typedef, macro + function):
+            // disambiguate by kind, then by ordinal, instead of failing the
+            // whole file on symbols.id's UNIQUE constraint.
+            if used.contains(&new_id) {
+                let with_kind = format!("{new_id}#{}", symbol.kind.as_str());
+                new_id = if used.contains(&with_kind) {
+                    (2..)
+                        .map(|n| format!("{with_kind}{n}"))
+                        .find(|c| !used.contains(c))
+                        .unwrap_or(with_kind)
+                } else {
+                    with_kind
+                };
+            }
+            used.insert(new_id.clone());
+            id_map
+                .entry(symbol.id.clone())
+                .or_insert_with(|| new_id.clone());
+            spans.entry(symbol.id.clone()).or_default().push((
+                symbol.line_start,
+                symbol.line_end,
+                new_id.clone(),
+            ));
 
             let mut sym = symbol.clone();
             sym.file_path = rel_path.to_string();
@@ -854,7 +887,7 @@ impl Indexer {
             self.db.insert_symbol(&sym).map_err(db_error)?;
         }
 
-        Ok(id_map)
+        Ok((id_map, spans))
     }
 
     /// Store edges with rewritten source/target IDs.
@@ -863,10 +896,23 @@ impl Indexer {
         rel_path: &str,
         edges: &[crate::db::Edge],
         id_map: &std::collections::HashMap<String, String>,
+        spans: &std::collections::HashMap<String, Vec<(u32, u32, String)>>,
     ) -> io::Result<()> {
         for edge in edges {
             let mut e = edge.clone();
-            e.source_id = rewrite_id(&e.source_id, rel_path, id_map);
+            // An ambiguous parser id resolves to the symbol whose span holds
+            // the edge's line (innermost first).
+            let by_span = spans
+                .get(&e.source_id)
+                .filter(|v| v.len() > 1)
+                .and_then(|v| {
+                    let line = e.line?;
+                    v.iter()
+                        .filter(|(a, b, _)| *a <= line && line <= *b)
+                        .min_by_key(|(a, b, _)| b - a)
+                        .map(|(_, _, id)| id.clone())
+                });
+            e.source_id = by_span.unwrap_or_else(|| rewrite_id(&e.source_id, rel_path, id_map));
             if let Some(ref target_id) = edge.target_id {
                 e.target_id = Some(rewrite_id(target_id, rel_path, id_map));
             }
@@ -1287,6 +1333,25 @@ fn helper() -> i32 {
         let again = indexer.index().unwrap();
         assert_eq!(again.files_indexed, 0);
         assert_eq!(again.files_failed, 0);
+    }
+
+    #[test]
+    fn test_same_name_same_line_symbols_do_not_fail_the_file() {
+        // `typedef struct jv {...} jv;` yields a struct and a typedef named
+        // `jv` on one line; that used to hit symbols.id's UNIQUE constraint and
+        // (with atomic per-file storage) drop the whole file.
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("jv.h"),
+            "typedef struct jv { int kind; } jv;\nint jv_kind(jv x);\n",
+        )
+        .unwrap();
+        fs::write(root.join("jv.c"), "#include \"jv.h\"\ntypedef struct jv2 { int k; } jv2;\nint jv_kind(jv x) { return x.kind; }\n").unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_failed, 0);
+        assert_eq!(result.files_indexed, 2);
     }
 
     #[test]
