@@ -320,6 +320,7 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--signal": "--signal <SIGNAL> Structural signal multiplied with churn: complexity (default) or lines Possible values: - complexity: Cyclomatic-style complexity from the index (the historical default) - lines: Size in lines (per symbol: its span; per file: the sum of its symbols' spans). In backtests on several repositories, size predicted which functions later received bug fixes better than complexity did [default: complexity]",
         "--since": "How far back to count commits (git --since date spec) [default: \"6 months ago\"]",
         "--stats": "--stats Print stats (file count, total size, time taken)"
       },

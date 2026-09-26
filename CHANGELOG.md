@@ -19,7 +19,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   links wrongly bound to in-repo functions from 390 to 7. The API key is read
   only from `JEV_API_KEY`.
 
+### Added (cont.)
+- `ctx hotspots --signal lines` ranks by churn × size instead of churn ×
+  complexity (see the multi-project backtest in the Jev/ctx lab report).
+- `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
+  for a language server to finish loading (default 300 s).
+
 ### Fixed
+- Go files with an `import` were never stored: import edges used the file
+  path as `edges.source_id`, violating its foreign key, and the failure was
+  hidden behind an already-written content hash. Go imports now live in module
+  metadata like every other language; Go methods include their receiver in
+  their id and qualified name (`A.String` vs `B.String`), and Go symbols keep
+  their source (duplicates, `ctx symbol`, embeddings).
+- Storing a file is now all-or-nothing (one SAVEPOINT): a failure part-way no
+  longer leaves a "fresh" file record with partial data that later runs skip.
+- Rust method-call syntax (`x.find(..)`) is no longer bound to a same-named
+  free function. On ctx's own index this unbinds 154 links (92 of them
+  checked against rust-analyzer, all wrong); `harness::doctor::find` goes
+  from a fan-in of 141 to 24 (5 with `ctx judge edges`).
+- LSP hybrid mode now waits for the server to finish loading before asking
+  for definitions (`experimental/serverStatus` or `$/progress`). With
+  rust-analyzer it previously resolved nothing; on ctx it now resolves 367
+  edges.
+- DuckDB-backed commands no longer download the `sqlite_scanner` extension
+  from extensions.duckdb.org at runtime. If the extension is installed
+  locally the index is attached directly; otherwise it is copied into a
+  private read-only DuckDB file. `ctx sql`, `query`, `snapshot`, `smart`
+  and `diff` now work offline and behind egress allowlists.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name

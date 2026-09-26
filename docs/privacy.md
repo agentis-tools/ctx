@@ -63,6 +63,8 @@ explicitly configure:
   That client and any model provider it uses handle the returned information
   under their own privacy terms.
 
+ctx never downloads DuckDB extensions: analytics attach the index through a locally installed `sqlite_scanner` extension when present and otherwise read a private copy of it.
+
 Your operating system, package manager, Git host, AI host application, and
 network provider may independently process information as part of their
 services. ctx does not control those third parties.

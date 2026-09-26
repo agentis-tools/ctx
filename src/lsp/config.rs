@@ -148,6 +148,10 @@ pub struct LspServerConfig {
     pub env: BTreeMap<String, String>,
     /// Per-request timeout in milliseconds (default 10 000).
     pub timeout_ms: Option<u64>,
+    /// How long cross-file resolution waits for the server to finish loading
+    /// the workspace before asking for definitions (default 300 000 ms).
+    /// Servers such as rust-analyzer answer `null` until they are ready.
+    pub ready_timeout_ms: Option<u64>,
     /// Provenance metadata written by tooling (`ctx lsp add`); accepted and
     /// ignored so configs from newer binaries keep loading.
     pub source: Option<String>,

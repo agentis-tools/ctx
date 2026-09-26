@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::commands::hotspots::HotspotBy;
+use crate::commands::hotspots::{HotspotBy, HotspotSignal};
 use ctx::embeddings::Provider;
 
 /// CLI output format (with clap integration).
@@ -602,6 +602,10 @@ EXIT CODES:
         /// Rank by file or by symbol (symbol churn is approximated by its file's churn)
         #[arg(long, value_enum, default_value_t = HotspotBy::File)]
         by: HotspotBy,
+
+        /// Structural signal multiplied with churn: complexity (default) or lines
+        #[arg(long, value_enum, default_value_t = HotspotSignal::Complexity)]
+        signal: HotspotSignal,
 
         /// Minimum number of commits for a file to be analyzed
         #[arg(long, default_value = "2")]

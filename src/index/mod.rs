@@ -748,6 +748,29 @@ impl Indexer {
         compressed: &[u8],
         parse_result: &crate::db::ParseResult,
     ) -> io::Result<()> {
+        // All-or-nothing per file: if any step fails, nothing of this file's
+        // new state (including its content hash) is kept, so the next run
+        // sees the file as changed and retries instead of skipping it with
+        // partial data. It is also one WAL commit instead of one per row.
+        const SP: &str = "ctx_store_file";
+        self.db.savepoint(SP).map_err(db_error)?;
+        match self.store_file_inner(rel_path, content, hash, compressed, parse_result) {
+            Ok(()) => self.db.release_savepoint(SP).map_err(db_error),
+            Err(e) => {
+                let _ = self.db.rollback_savepoint(SP);
+                Err(e)
+            }
+        }
+    }
+
+    fn store_file_inner(
+        &self,
+        rel_path: &str,
+        content: &str,
+        hash: &str,
+        compressed: &[u8],
+        parse_result: &crate::db::ParseResult,
+    ) -> io::Result<()> {
         let file_record = FileRecord {
             path: rel_path.to_string(),
             content_hash: hash.to_string(),
@@ -893,6 +916,20 @@ impl Indexer {
             Err(e) => {
                 if self.verbose {
                     eprintln!("Warning: edge resolution failed: {}", e);
+                }
+            }
+        }
+        match self.db.unbind_rust_method_calls_to_free_functions() {
+            Ok(n) if self.verbose && n > 0 => {
+                eprintln!(
+                    "Unbound {} Rust method calls wrongly resolved to free functions",
+                    n
+                )
+            }
+            Ok(_) => {}
+            Err(e) => {
+                if self.verbose {
+                    eprintln!("Warning: method-call check failed: {}", e);
                 }
             }
         }
@@ -1215,6 +1252,82 @@ fn helper() -> i32 {
                 .len(),
             1,
             "a no-op parallel index must not resolve legacy unresolved edges"
+        );
+    }
+
+    #[test]
+    fn test_index_go_project_end_to_end() {
+        // Regression: Go import edges used the file path as source_id, which
+        // violates edges.source_id's foreign key; every Go file with an import
+        // failed to store, and the already-written hash hid the failure.
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("main.go"),
+            "package main\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\ntype A struct{}\ntype B struct{}\n\nfunc (A) String() string { return \"a\" }\nfunc (B) String() string { return \"b\" }\n\nfunc helper(s string) string { return strings.ToUpper(s) }\n\nfunc main() { fmt.Println(helper(A{}.String())) }\n",
+        )
+        .unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_failed, 0);
+        assert_eq!(result.files_indexed, 1);
+        let symbols = indexer.db.get_file_symbols("main.go").unwrap();
+        let strings: Vec<_> = symbols.iter().filter(|s| s.name == "String").collect();
+        assert_eq!(
+            strings.len(),
+            2,
+            "both String methods stored under distinct ids"
+        );
+        assert!(indexer.db.get_stats().unwrap().edges > 0);
+        let imports = indexer.db.get_file_imports().unwrap();
+        assert!(imports
+            .iter()
+            .any(|(f, i)| f == "main.go" && i.iter().any(|x| x.from == "fmt")));
+        // A second run must be a no-op (nothing half-stored to retry).
+        let again = indexer.index().unwrap();
+        assert_eq!(again.files_indexed, 0);
+        assert_eq!(again.files_failed, 0);
+    }
+
+    #[test]
+    fn test_rust_method_call_is_not_bound_to_free_function() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("doctor.rs"),
+            "pub fn find(xs: &[u8]) -> Option<u8> { xs.first().copied() }\n",
+        )
+        .unwrap();
+        fs::write(
+            src.join("lib.rs"),
+            "mod doctor;\npub fn a(v: Vec<u8>) -> Option<u8> { v.iter().copied().find(|x| *x > 1) }\npub fn b(v: &[u8]) -> Option<u8> { doctor::find(v) }\n",
+        )
+        .unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        indexer.index().unwrap();
+        let find_id = indexer
+            .db
+            .get_file_symbols("src/doctor.rs")
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == "find")
+            .unwrap()
+            .id;
+        let incoming = indexer.db.get_incoming_edges("find").unwrap();
+        let bound: Vec<&str> = incoming
+            .iter()
+            .filter(|e| e.target_id.as_deref() == Some(find_id.as_str()))
+            .map(|e| e.source_id.as_str())
+            .collect();
+        assert!(
+            bound.iter().all(|s| !s.contains("::a@")),
+            "`.find(..)` is a method call: {bound:?}"
+        );
+        assert!(
+            bound.iter().any(|s| s.contains("::b@")),
+            "`doctor::find(..)` stays bound: {bound:?}"
         );
     }
 

@@ -490,11 +490,17 @@ impl Database {
     /// Insert multiple symbols in a transaction (batch insert for parallel indexing).
     #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_symbols_batch(&self, symbols: &[Symbol]) -> Result<usize> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         let mut count = 0;
 
         for symbol in symbols {
-            tx.execute(
+            self.conn.execute(
                 r#"
                 INSERT INTO symbols (
                     id, file_path, name, qualified_name, kind, visibility,
@@ -523,18 +529,26 @@ impl Database {
             count += 1;
         }
 
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(count)
     }
 
     /// Insert multiple edges in a transaction (batch insert for parallel indexing).
     #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_edges_batch(&self, edges: &[Edge]) -> Result<usize> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         let mut count = 0;
 
         for edge in edges {
-            tx.execute(
+            self.conn.execute(
                 r#"
                 INSERT INTO edges (source_id, target_id, target_name, kind, line, col, context)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -552,7 +566,9 @@ impl Database {
             count += 1;
         }
 
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(count)
     }
 
@@ -1006,15 +1022,26 @@ impl Database {
     /// Bulk-store PageRank scores in a single transaction, replacing any
     /// existing cache.
     pub fn store_symbol_ranks(&self, ranks: &[(String, f64)]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM symbol_rank", [])?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
+        self.conn.execute("DELETE FROM symbol_rank", [])?;
         {
-            let mut stmt = tx.prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
+            let mut stmt = self
+                .conn
+                .prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
             for (id, rank) in ranks {
                 stmt.execute(params![id, rank])?;
             }
         }
-        tx.commit()
+        match tx {
+            Some(tx) => tx.commit(),
+            None => Ok(()),
+        }
     }
 
     /// Load all cached PageRank scores.
@@ -1962,9 +1989,14 @@ impl Database {
         if fingerprints.is_empty() {
             return Ok(0);
         }
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside the per-file store savepoint, write directly.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 r#"
                 INSERT OR REPLACE INTO symbol_fingerprints (symbol_id, file_path, minhash, token_count)
                 VALUES (?, ?, ?, ?)
@@ -1979,7 +2011,9 @@ impl Database {
                 ])?;
             }
         }
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(fingerprints.len())
     }
 
@@ -2432,6 +2466,46 @@ impl Database {
         Ok(changed > 0)
     }
 
+    /// Undo a class of wrong bindings that name matching makes in Rust:
+    /// `x.find(..)` is method-call syntax, so it can never call a free
+    /// function (`fn find` at module level); binding it to one (typically the
+    /// standard library's `Iterator::find` / `str::find` bound to a same-named
+    /// repo function) inflates that function's fan-in and invents
+    /// cross-module dependencies. Calls whose callee position itself is the
+    /// name (`find(..)`, `path::find(..)`) are left alone. Returns the number
+    /// of edges unbound.
+    pub fn unbind_rust_method_calls_to_free_functions(&self) -> Result<usize> {
+        self.conn.execute(
+            r#"
+            UPDATE edges SET target_id = NULL
+            WHERE kind = 'calls' AND target_id IS NOT NULL AND context IS NOT NULL
+              AND (instr(context, '.' || target_name || '(') > 0
+                   OR instr(context, '.' || target_name || '::<') > 0)
+              AND substr(context, 1, length(target_name) + 1) <> target_name || '('
+              AND instr(context, '::' || target_name || '(') = 0
+              AND target_id IN (SELECT id FROM symbols WHERE kind = 'function' AND parent_id IS NULL)
+              AND source_id IN (SELECT id FROM symbols WHERE file_path LIKE '%.rs')
+            "#,
+            [],
+        )
+    }
+
+    /// Open a named SAVEPOINT (nests inside any enclosing transaction).
+    pub fn savepoint(&self, name: &str) -> Result<()> {
+        self.conn.execute_batch(&format!("SAVEPOINT {name}"))
+    }
+
+    /// Commit a SAVEPOINT opened with [`Database::savepoint`].
+    pub fn release_savepoint(&self, name: &str) -> Result<()> {
+        self.conn.execute_batch(&format!("RELEASE {name}"))
+    }
+
+    /// Undo everything since the SAVEPOINT and close it.
+    pub fn rollback_savepoint(&self, name: &str) -> Result<()> {
+        self.conn
+            .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))
+    }
+
     /// Run `f` inside one transaction (one WAL commit for a batch of updates).
     pub fn in_transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         self.conn.execute_batch("BEGIN")?;
@@ -2454,6 +2528,25 @@ mod judgment_tests {
 
     fn db() -> Database {
         Database::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn savepoint_rollback_discards_file_row() {
+        let d = db();
+        d.savepoint("sp").unwrap();
+        d.upsert_file(
+            &FileRecord {
+                path: "a.rs".into(),
+                content_hash: "h".into(),
+                size_bytes: 1,
+                language: Some("rust".into()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        d.rollback_savepoint("sp").unwrap();
+        assert_eq!(d.get_file_hash("a.rs").unwrap(), None);
     }
 
     #[test]

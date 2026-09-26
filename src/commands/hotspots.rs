@@ -36,6 +36,18 @@ pub enum HotspotBy {
     Symbol,
 }
 
+/// Which structural signal multiplies churn.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HotspotSignal {
+    /// Cyclomatic-style complexity from the index (the historical default).
+    #[default]
+    Complexity,
+    /// Size in lines (per symbol: its span; per file: the sum of its symbols'
+    /// spans). In backtests on several repositories, size predicted which
+    /// functions later received bug fixes better than complexity did.
+    Lines,
+}
+
 /// A ranked per-file hotspot.
 #[derive(Debug, Clone)]
 pub struct HotspotEntry {
@@ -282,6 +294,7 @@ pub fn run_hotspots(
     since: &str,
     limit: usize,
     by: HotspotBy,
+    signal: HotspotSignal,
     min_churn: u32,
     against: Option<&str>,
     json: bool,
@@ -295,11 +308,26 @@ pub fn run_hotspots(
 
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
-    let metrics = db.symbol_metrics()?;
+    let mut metrics = db.symbol_metrics()?;
+    if signal == HotspotSignal::Lines {
+        // Substitute size for complexity; everything downstream is unchanged.
+        for m in metrics.iter_mut() {
+            m.complexity = (m.line_end - m.line_start + 1).max(1);
+        }
+    }
 
     match by {
         HotspotBy::File => {
-            let complexity = db.file_complexity()?;
+            let mut complexity = db.file_complexity()?;
+            if signal == HotspotSignal::Lines {
+                let mut lines: HashMap<&str, i64> = HashMap::new();
+                for m in &metrics {
+                    *lines.entry(m.file_path.as_str()).or_default() += m.complexity;
+                }
+                for fc in complexity.iter_mut() {
+                    fc.complexity = lines.get(fc.file_path.as_str()).copied().unwrap_or(0);
+                }
+            }
             let entries = score_hotspots(&churn, &complexity, min_churn, limit, restrict.as_ref());
             if json {
                 json::emit(
