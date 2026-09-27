@@ -116,7 +116,7 @@ duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
 # Phase 4: File watching for incremental updates
 notify = "8.2"
 notify-debouncer-mini = "0.7"
-dirs = "6.0.0"
+dirs = "7.0.0"
 
 # Secure randomized, exclusive temporary files for self-update staging and
 # backfill worktrees. This is runtime code, not only a test dependency.
