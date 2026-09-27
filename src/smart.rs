@@ -29,7 +29,7 @@ use crate::walker::FilePatternFilter;
 /// Configuration for smart context selection.
 #[derive(Debug, Clone)]
 pub struct SmartConfig {
-    /// Maximum tokens in output
+    /// Maximum tokens in selected file content.
     pub max_tokens: usize,
     /// Call graph expansion depth
     pub depth: i32,
@@ -255,10 +255,34 @@ pub fn smart_context_filtered(
     config: SmartConfig,
     filter: &FilePatternFilter,
 ) -> Result<SmartContext> {
+    smart_context_filtered_with_options(db, analytics, provider, task, config, filter, true)
+}
+
+/// Select files relevant to a task, with an explicit oversized-top policy.
+///
+/// The policy is separate from [`SmartConfig`] so adding this opt-in behavior
+/// does not break downstream callers that construct `SmartConfig` literals.
+pub fn smart_context_filtered_with_options(
+    db: &Database,
+    analytics: &Analytics,
+    provider: &dyn EmbeddingProvider,
+    task: &str,
+    config: SmartConfig,
+    filter: &FilePatternFilter,
+    include_oversized_top: bool,
+) -> Result<SmartContext> {
     // 1. Embed the task description
     let task_embedding = provider.embed(task)?;
 
-    smart_context_with_embedding_filtered(db, analytics, task, &task_embedding, config, filter)
+    smart_context_with_embedding_filtered_with_options(
+        db,
+        analytics,
+        task,
+        &task_embedding,
+        config,
+        filter,
+        include_oversized_top,
+    )
 }
 
 /// Select files relevant to a task using a pre-computed embedding.
@@ -274,9 +298,29 @@ pub fn smart_context_with_embedding(
     task_embedding: &Embedding,
     config: SmartConfig,
 ) -> Result<SmartContext> {
+    smart_context_with_embedding_with_options(db, analytics, task, task_embedding, config, true)
+}
+
+/// Pre-computed-embedding variant with an explicit oversized-top policy.
+pub fn smart_context_with_embedding_with_options(
+    db: &Database,
+    analytics: &Analytics,
+    task: &str,
+    task_embedding: &Embedding,
+    config: SmartConfig,
+    include_oversized_top: bool,
+) -> Result<SmartContext> {
     let root = std::env::current_dir().unwrap_or_default();
     let filter = FilePatternFilter::all(&root);
-    smart_context_with_embedding_filtered(db, analytics, task, task_embedding, config, &filter)
+    smart_context_with_embedding_filtered_with_options(
+        db,
+        analytics,
+        task,
+        task_embedding,
+        config,
+        &filter,
+        include_oversized_top,
+    )
 }
 
 /// Pre-computed-embedding variant of [`smart_context_filtered`].
@@ -287,6 +331,27 @@ pub fn smart_context_with_embedding_filtered(
     task_embedding: &Embedding,
     config: SmartConfig,
     filter: &FilePatternFilter,
+) -> Result<SmartContext> {
+    smart_context_with_embedding_filtered_with_options(
+        db,
+        analytics,
+        task,
+        task_embedding,
+        config,
+        filter,
+        true,
+    )
+}
+
+/// Pre-computed-embedding variant with an explicit oversized-top policy.
+pub fn smart_context_with_embedding_filtered_with_options(
+    db: &Database,
+    analytics: &Analytics,
+    task: &str,
+    task_embedding: &Embedding,
+    config: SmartConfig,
+    filter: &FilePatternFilter,
+    include_oversized_top: bool,
 ) -> Result<SmartContext> {
     // 2. Semantic search for matching symbols
     let matches = semantic_matches_in_scope(db, task_embedding, config.top, filter)?;
@@ -333,9 +398,14 @@ pub fn smart_context_with_embedding_filtered(
     // 5. Rank files by relevance
     rank_files(&mut selections);
 
-    // 6. Apply token limit, but never silently drop the single most-relevant file.
-    let (selected, total_tokens, omitted) =
-        select_with_guaranteed_top(selections, config.max_tokens);
+    // 6. Apply the content budget. The legacy oversized-top behavior is now
+    // explicit for callers that need it; the default is a strict content
+    // budget so callers can build a hard rendered-output budget on top.
+    let (selected, total_tokens, omitted) = if include_oversized_top {
+        select_with_guaranteed_top(selections, config.max_tokens)
+    } else {
+        select_by_token_budget(selections, config.max_tokens)
+    };
 
     Ok(SmartContext {
         task: task.to_string(),
