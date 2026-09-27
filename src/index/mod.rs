@@ -753,6 +753,29 @@ impl Indexer {
         compressed: &[u8],
         parse_result: &crate::db::ParseResult,
     ) -> io::Result<()> {
+        // All-or-nothing per file: if any step fails, nothing of this file's
+        // new state (including its content hash) is kept, so the next run
+        // sees the file as changed and retries instead of skipping it with
+        // partial data. It is also one WAL commit instead of one per row.
+        const SP: &str = "ctx_store_file";
+        self.db.savepoint(SP).map_err(db_error)?;
+        match self.store_file_inner(rel_path, content, hash, compressed, parse_result) {
+            Ok(()) => self.db.release_savepoint(SP).map_err(db_error),
+            Err(e) => {
+                let _ = self.db.rollback_savepoint(SP);
+                Err(e)
+            }
+        }
+    }
+
+    fn store_file_inner(
+        &self,
+        rel_path: &str,
+        content: &str,
+        hash: &str,
+        compressed: &[u8],
+        parse_result: &crate::db::ParseResult,
+    ) -> io::Result<()> {
         let file_record = FileRecord {
             path: rel_path.to_string(),
             content_hash: hash.to_string(),
@@ -770,10 +793,10 @@ impl Indexer {
             .map_err(db_error)?;
 
         // Build ID mapping and store symbols
-        let id_map = self.store_symbols(rel_path, &parse_result.symbols)?;
+        let (id_map, spans) = self.store_symbols(rel_path, &parse_result.symbols)?;
 
         // Store edges with rewritten IDs
-        self.store_edges(rel_path, &parse_result.edges, &id_map)?;
+        self.store_edges(rel_path, &parse_result.edges, &id_map, &spans)?;
 
         // Store module info
         if let Some(ref module) = parse_result.module {
@@ -808,22 +831,55 @@ impl Indexer {
     }
 
     /// Store symbols and build ID mapping from old to new IDs.
+    #[allow(clippy::type_complexity)]
     fn store_symbols(
         &self,
         rel_path: &str,
         symbols: &[crate::db::Symbol],
-    ) -> io::Result<std::collections::HashMap<String, String>> {
+    ) -> io::Result<(
+        std::collections::HashMap<String, String>,
+        std::collections::HashMap<String, Vec<(u32, u32, String)>>,
+    )> {
         let mut id_map = std::collections::HashMap::new();
+        // Parser ids carry no line, so two symbols can share one (Rust
+        // `impl Display`/`impl Debug` both defining `X::fmt`, a C `typedef
+        // struct jv {..} jv;`). Keep every stored symbol's span per parser id
+        // so edges are attributed to the symbol that actually contains them.
+        let mut spans: std::collections::HashMap<String, Vec<(u32, u32, String)>> =
+            std::collections::HashMap::new();
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for symbol in symbols {
             let parent_name = extract_parent_name(symbol.parent_id.as_deref());
-            let new_id = crate::db::Symbol::make_id_with_line(
+            let mut new_id = crate::db::Symbol::make_id_with_line(
                 rel_path,
                 &symbol.name,
                 parent_name,
                 symbol.line_start,
             );
-            id_map.insert(symbol.id.clone(), new_id.clone());
+            // Same name on the same line (struct + typedef, macro + function):
+            // disambiguate by kind, then by ordinal, instead of failing the
+            // whole file on symbols.id's UNIQUE constraint.
+            if used.contains(&new_id) {
+                let with_kind = format!("{new_id}#{}", symbol.kind.as_str());
+                new_id = if used.contains(&with_kind) {
+                    (2..)
+                        .map(|n| format!("{with_kind}{n}"))
+                        .find(|c| !used.contains(c))
+                        .unwrap_or(with_kind)
+                } else {
+                    with_kind
+                };
+            }
+            used.insert(new_id.clone());
+            id_map
+                .entry(symbol.id.clone())
+                .or_insert_with(|| new_id.clone());
+            spans.entry(symbol.id.clone()).or_default().push((
+                symbol.line_start,
+                symbol.line_end,
+                new_id.clone(),
+            ));
 
             let mut sym = symbol.clone();
             sym.file_path = rel_path.to_string();
@@ -836,7 +892,7 @@ impl Indexer {
             self.db.insert_symbol(&sym).map_err(db_error)?;
         }
 
-        Ok(id_map)
+        Ok((id_map, spans))
     }
 
     /// Store edges with rewritten source/target IDs.
@@ -845,10 +901,23 @@ impl Indexer {
         rel_path: &str,
         edges: &[crate::db::Edge],
         id_map: &std::collections::HashMap<String, String>,
+        spans: &std::collections::HashMap<String, Vec<(u32, u32, String)>>,
     ) -> io::Result<()> {
         for edge in edges {
             let mut e = edge.clone();
-            e.source_id = rewrite_id(&e.source_id, rel_path, id_map);
+            // An ambiguous parser id resolves to the symbol whose span holds
+            // the edge's line (innermost first).
+            let by_span = spans
+                .get(&e.source_id)
+                .filter(|v| v.len() > 1)
+                .and_then(|v| {
+                    let line = e.line?;
+                    v.iter()
+                        .filter(|(a, b, _)| *a <= line && line <= *b)
+                        .min_by_key(|(a, b, _)| b - a)
+                        .map(|(_, _, id)| id.clone())
+                });
+            e.source_id = by_span.unwrap_or_else(|| rewrite_id(&e.source_id, rel_path, id_map));
             if let Some(ref target_id) = edge.target_id {
                 e.target_id = Some(rewrite_id(target_id, rel_path, id_map));
             }
@@ -898,6 +967,31 @@ impl Indexer {
             Err(e) => {
                 if self.verbose {
                     eprintln!("Warning: edge resolution failed: {}", e);
+                }
+            }
+        }
+        match self.db.resolve_c_family_definitions() {
+            Ok(n) if self.verbose && n > 0 => {
+                eprintln!("Bound {} C/C++ calls to their unique definition", n)
+            }
+            Ok(_) => {}
+            Err(e) => {
+                if self.verbose {
+                    eprintln!("Warning: C/C++ definition binding failed: {}", e);
+                }
+            }
+        }
+        match self.db.unbind_rust_method_calls_to_free_functions() {
+            Ok(n) if self.verbose && n > 0 => {
+                eprintln!(
+                    "Unbound {} Rust method calls wrongly resolved to free functions",
+                    n
+                )
+            }
+            Ok(_) => {}
+            Err(e) => {
+                if self.verbose {
+                    eprintln!("Warning: method-call check failed: {}", e);
                 }
             }
         }
@@ -1220,6 +1314,101 @@ fn helper() -> i32 {
                 .len(),
             1,
             "a no-op parallel index must not resolve legacy unresolved edges"
+        );
+    }
+
+    #[test]
+    fn test_index_go_project_end_to_end() {
+        // Regression: Go import edges used the file path as source_id, which
+        // violates edges.source_id's foreign key; every Go file with an import
+        // failed to store, and the already-written hash hid the failure.
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("main.go"),
+            "package main\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\ntype A struct{}\ntype B struct{}\n\nfunc (A) String() string { return \"a\" }\nfunc (B) String() string { return \"b\" }\n\nfunc helper(s string) string { return strings.ToUpper(s) }\n\nfunc main() { fmt.Println(helper(A{}.String())) }\n",
+        )
+        .unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_failed, 0);
+        assert_eq!(result.files_indexed, 1);
+        let symbols = indexer.db.get_file_symbols("main.go").unwrap();
+        let strings: Vec<_> = symbols.iter().filter(|s| s.name == "String").collect();
+        assert_eq!(
+            strings.len(),
+            2,
+            "both String methods stored under distinct ids"
+        );
+        assert!(indexer.db.get_stats().unwrap().edges > 0);
+        let imports = indexer.db.get_file_imports().unwrap();
+        assert!(imports
+            .iter()
+            .any(|(f, i)| f == "main.go" && i.iter().any(|x| x.from == "fmt")));
+        // A second run must be a no-op (nothing half-stored to retry).
+        let again = indexer.index().unwrap();
+        assert_eq!(again.files_indexed, 0);
+        assert_eq!(again.files_failed, 0);
+    }
+
+    #[test]
+    fn test_same_name_same_line_symbols_do_not_fail_the_file() {
+        // `typedef struct jv {...} jv;` yields a struct and a typedef named
+        // `jv` on one line; that used to hit symbols.id's UNIQUE constraint and
+        // (with atomic per-file storage) drop the whole file.
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("jv.h"),
+            "typedef struct jv { int kind; } jv;\nint jv_kind(jv x);\n",
+        )
+        .unwrap();
+        fs::write(root.join("jv.c"), "#include \"jv.h\"\ntypedef struct jv2 { int k; } jv2;\nint jv_kind(jv x) { return x.kind; }\n").unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        let result = indexer.index().unwrap();
+        assert_eq!(result.files_failed, 0);
+        assert_eq!(result.files_indexed, 2);
+    }
+
+    #[test]
+    fn test_rust_method_call_is_not_bound_to_free_function() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("doctor.rs"),
+            "pub fn find(xs: &[u8]) -> Option<u8> { xs.first().copied() }\n",
+        )
+        .unwrap();
+        fs::write(
+            src.join("lib.rs"),
+            "mod doctor;\npub fn a(v: Vec<u8>) -> Option<u8> { v.iter().copied().find(|x| *x > 1) }\npub fn b(v: &[u8]) -> Option<u8> { doctor::find(v) }\n",
+        )
+        .unwrap();
+        let mut indexer = Indexer::with_config(root, false, WalkerConfig::default()).unwrap();
+        indexer.index().unwrap();
+        let find_id = indexer
+            .db
+            .get_file_symbols("src/doctor.rs")
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == "find")
+            .unwrap()
+            .id;
+        let incoming = indexer.db.get_incoming_edges("find").unwrap();
+        let bound: Vec<&str> = incoming
+            .iter()
+            .filter(|e| e.target_id.as_deref() == Some(find_id.as_str()))
+            .map(|e| e.source_id.as_str())
+            .collect();
+        assert!(
+            bound.iter().all(|s| !s.contains("::a@")),
+            "`.find(..)` is a method call: {bound:?}"
+        );
+        assert!(
+            bound.iter().any(|s| s.contains("::b@")),
+            "`doctor::find(..)` stays bound: {bound:?}"
         );
     }
 

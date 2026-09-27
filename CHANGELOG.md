@@ -16,8 +16,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint in a changed file instead of building every candidate pair in the
   repository and filtering afterwards. `score_3_changed` on the perf fixture
   drops from 5.5 s to 1.2 s with identical output (#23).
+### Added
+- `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
+  model (TypeSafe Jev). For each call whose name matches in-repo functions, the
+  model picks the real callee among the same-named candidates or `external`
+  (standard library / dependency). Answers are cached in a new `judgments`
+  table keyed by a hash of exactly what was sent, so re-indexing re-applies
+  them without network calls (`--offline`). `[judge] edges = true` in
+  `.ctx/config.toml` runs it after every `ctx index`. Against rust-analyzer on
+  ctx's own 4 082 call edges, call-graph accuracy goes from 0.83 to 0.99 and
+  links wrongly bound to in-repo functions from 390 to 7. The API key is read
+  only from `JEV_API_KEY`.
+- `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
+  for a language server to finish loading (default 300 s).
+
+### Changed
+- BREAKING: `ctx hotspots` now ranks by churn × size by default
+  (`--signal lines`); `--signal complexity` restores the old ranking. In a
+  time-split backtest on 10 repositories (Rust, Python, TypeScript, Go, C,
+  C++), size beat complexity at predicting which functions later got bug
+  fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
+  and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
 
 ### Fixed
+- C/C++: calls that name a function declared in a header and defined in one
+  `.c`/`.cc` file are now bound to the definition during indexing (previously
+  they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
+  no longer offers a header prototype next to its own definition, which split
+  the model's confidence between two equivalent answers.
+- Go files with an `import` were never stored: import edges used the file
+  path as `edges.source_id`, violating its foreign key, and the failure was
+  hidden behind an already-written content hash. Go imports now live in module
+  metadata like every other language; Go methods include their receiver in
+  their id and qualified name (`A.String` vs `B.String`), and Go symbols keep
+  their source (duplicates, `ctx symbol`, embeddings).
+- Symbols with the same name on the same line (C `typedef struct jv {..} jv;`,
+  a struct and its typedef) no longer fail the whole file on `symbols.id`'s
+  UNIQUE constraint (ids get a `#kind` suffix); edges from same-named symbols
+  (two `impl`s defining `fmt`) are attributed by span. jq and fmt: 21 files
+  that failed to store now index.
+- JavaScript/TypeScript: `var f = function () {}`, `const f = function () {}`
+  and property assignments (`res.send = function send() {}`,
+  `exports.parse = () => ...`, `X.prototype.use = function () {}`) are now
+  extracted. Express went from 123 to 228 symbols.
+- Storing a file is now all-or-nothing (one SAVEPOINT): a failure part-way no
+  longer leaves a "fresh" file record with partial data that later runs skip.
+- Rust method-call syntax (`x.find(..)`) is no longer bound to a same-named
+  free function. On ctx's own index this unbinds 154 links (92 of them
+  checked against rust-analyzer, all wrong); `harness::doctor::find` goes
+  from a fan-in of 141 to 24 (5 with `ctx judge edges`).
+- LSP hybrid mode now waits for the server to finish loading before asking
+  for definitions (`experimental/serverStatus` or `$/progress`). With
+  rust-analyzer it previously resolved nothing; on ctx it now resolves 367
+  edges.
+- DuckDB-backed commands no longer download the `sqlite_scanner` extension
+  from extensions.duckdb.org at runtime. If the extension is installed
+  locally the index is attached directly; otherwise it is copied into a
+  private read-only DuckDB file. `ctx sql`, `query`, `snapshot`, `smart`
+  and `diff` now work offline and behind egress allowlists.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name

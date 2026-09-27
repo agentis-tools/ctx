@@ -10,7 +10,7 @@ use std::io::BufRead;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lsp_types::{
     CallHierarchyItem, CallHierarchyOutgoingCall, DocumentSymbolResponse, GotoDefinitionResponse,
@@ -36,6 +36,8 @@ const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 /// One-time grace period for the first request after `initialize` (server
 /// warmup: many servers index the workspace before answering).
 const WARMUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default upper bound for waiting on workspace loading before Stage B.
+const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(300);
 /// Timeout for the `shutdown` request and for waiting on process exit.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 /// Consecutive request timeouts before the server is declared failed.
@@ -59,6 +61,10 @@ pub struct LspClient {
     /// The first request after `initialize` gets a longer warmup deadline
     /// (unless the timeout was configured explicitly).
     warmup_pending: bool,
+    /// Upper bound for [`LspClient::ensure_ready`].
+    ready_timeout: Duration,
+    /// Whether [`LspClient::ensure_ready`] already ran.
+    ready_checked: bool,
     shut_down: bool,
     /// Server-reported name from `initialize` (if any).
     pub server_name: Option<String>,
@@ -121,6 +127,8 @@ impl LspClient {
             failed: None,
             consecutive_timeouts: 0,
             warmup_pending: true,
+            ready_timeout: DEFAULT_READY_TIMEOUT,
+            ready_checked: false,
             shut_down: false,
             server_name: None,
             server_version: None,
@@ -165,6 +173,10 @@ impl LspClient {
                     "configuration": true,
                     "workspaceFolders": true,
                 },
+                // Ask servers to report their loading state so cross-file
+                // resolution can wait until answers are meaningful.
+                "window": { "workDoneProgress": true },
+                "experimental": { "serverStatusNotification": true },
             },
         });
         if let Some(options) = &config.initialization_options {
@@ -191,6 +203,73 @@ impl LspClient {
             .map_err(|e| format!("initialized notification failed: {e}"))?;
 
         Ok(())
+    }
+
+    /// Override how long [`Self::ensure_ready`] waits for the server to finish
+    /// loading (`[lsp.<language>] ready_timeout_ms`); `None` keeps the default.
+    pub(crate) fn set_ready_timeout(&mut self, ms: Option<u64>) {
+        if let Some(ms) = ms {
+            self.ready_timeout = Duration::from_millis(ms);
+        }
+    }
+
+    /// Block until the server reports it has finished loading the workspace,
+    /// or `max` elapses. Returns `true` when the server signalled readiness.
+    ///
+    /// - Servers that send `experimental/serverStatus` (rust-analyzer) are
+    ///   ready when `quiescent` is true.
+    /// - Otherwise, servers that report `$/progress` are ready once every
+    ///   begun progress token has ended and nothing new arrived for `settle`.
+    /// - Servers that report neither are assumed ready after `settle`.
+    pub fn wait_until_ready(&self, max: Duration) -> bool {
+        let settle = Duration::from_millis(1500);
+        let readiness = self.transport.readiness();
+        let (lock, cvar) = &*readiness;
+        let start = Instant::now();
+        let mut st = lock.lock().unwrap();
+        loop {
+            let now = Instant::now();
+            let idle = st.last_event.map_or(now - start, |t| now - t);
+            let ready = if st.status_seen {
+                st.quiescent
+            } else if st.progress_seen {
+                st.active_progress.is_empty() && idle >= settle
+            } else {
+                now - start >= settle
+            };
+            if ready {
+                return st.status_seen || st.progress_seen;
+            }
+            if now - start >= max || !self.transport.is_alive() {
+                return false;
+            }
+            let wait = settle
+                .min(max.saturating_sub(now - start))
+                .max(Duration::from_millis(50));
+            st = cvar.wait_timeout(st, wait).unwrap().0;
+        }
+    }
+
+    /// Wait (once per client) for the server to finish loading before the
+    /// first cross-file definition request; warns when it never signals.
+    pub fn ensure_ready(&mut self, verbose: bool) {
+        if self.ready_checked {
+            return;
+        }
+        self.ready_checked = true;
+        let t = Instant::now();
+        let signalled = self.wait_until_ready(self.ready_timeout);
+        if verbose {
+            eprintln!(
+                "lsp: server {} after {:.1}s",
+                if signalled {
+                    "reported ready"
+                } else {
+                    "did not report readiness; continuing"
+                },
+                t.elapsed().as_secs_f64()
+            );
+        }
     }
 
     /// Whether the server has been declared unusable, and why.
