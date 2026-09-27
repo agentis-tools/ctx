@@ -105,9 +105,10 @@ ctx smart "<task>" --max-tokens 8000
 ctx --encoding o200k_base --count-only    # o200k_base | cl100k_base | p50k_base
 ```
 
-On a real repo the difference is large: the ctx codebase is **502,856 tokens** as a full dump, but a
-task-scoped `ctx smart "..." --max-tokens 8000` returns about **8,700 tokens** — the same answer,
-~58× less to read and pay for.
+On a real repo the difference is large: measure the current file-content baseline with
+`ctx --count-only --encoding cl100k_base`, then use `ctx smart "..." --max-tokens 8000` to select
+whole files for the task. The budget applies to selected file content; formatter wrappers and the
+optional tree block add rendered-output tokens.
 
 ## Next steps
 
