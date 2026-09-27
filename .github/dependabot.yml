@@ -8,6 +8,13 @@ updates:
     groups:
       rust-runtime:
         dependency-type: production
+        # API-sensitive crates move one at a time (see the ignore note below).
+        exclude-patterns:
+          - "tree-sitter*"
+          - "rmcp"
+          - "rusqlite"
+          - "duckdb"
+          - "dirs"
       rust-development:
         dependency-type: development
     ignore:
@@ -18,12 +25,27 @@ updates:
       - dependency-name: fastembed
       - dependency-name: ort
       - dependency-name: ort-sys
+    # The parser stack, the MCP SDK, SQLite, DuckDB and dirs change APIs across
+    # releases (tree-sitter 0.27, rmcp 3, rusqlite 0.40, dirs 7) and need a
+    # porting PR, not a lockfile refresh. They are excluded from the
+    # rust-runtime group above, so Dependabot opens one PR per crate for them
+    # and one breaking crate cannot hold the whole group hostage.
 
   - package-ecosystem: cargo
     directory: "/perf"
     schedule:
       interval: weekly
       day: monday
+    # perf/ depends on the root crate by path, so Dependabot also rewrites the
+    # root Cargo.toml from this entry without updating the root Cargo.lock,
+    # which breaks every --locked job. Only the harness's own direct
+    # dependencies are updated here; everything else comes from the root
+    # entry above.
+    allow:
+      - dependency-name: serde
+      - dependency-name: serde_json
+      - dependency-name: libc
+      - dependency-name: criterion
     groups:
       perf-harness:
         patterns: ["*"]
