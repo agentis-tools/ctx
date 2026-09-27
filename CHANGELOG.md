@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Cold `ctx index` no longer builds a new parser (and recompiles every
+  language's queries) for each file in the parallel path; parsers are reused
+  per worker. On the 2,000-file perf fixture a cold index drops from 38 s to
+  11 s on a 2-core machine with identical symbols and edges (#96).
+- `ctx score --against` enumerates duplicate candidates only for pairs with an
+  endpoint in a changed file instead of building every candidate pair in the
+  repository and filtering afterwards. `score_3_changed` on the perf fixture
+  drops from 5.5 s to 1.2 s with identical output (#23).
+
 ### Fixed
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
