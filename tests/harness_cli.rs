@@ -233,11 +233,17 @@ fn stop_hook_repo(dir: &Path) -> (GitRepo, std::path::PathBuf) {
         .success());
     let hook = repo.root.join(".claude/hooks/ctx/stop.sh");
     assert!(hook.exists());
+    repo.write(
+        ".ctx/rules.toml",
+        "version = 1\n\n[[rules.limit]]\nmetric = \"file_symbols\"\nscope = \"file\"\nmax = 0\n",
+    );
     (repo, hook)
 }
 
-/// Trip the stop hook's quality gate: an uncommitted structural duplicate
-/// of `DUPE_A` makes `new_duplication > 0` against the default branch.
+/// Trip the stop hook's quality gate: the deliberately strict architecture
+/// rule makes `check_violations > 0` against the default branch. The source
+/// change also contains a duplicate so the test proves duplication remains
+/// advisory in the generated hook.
 #[cfg(unix)]
 fn trip_gate(repo: &GitRepo) {
     repo.write(
@@ -253,7 +259,8 @@ fn test_stop_hook_gate_failure_is_nonblocking_by_default() {
     let (repo, hook) = stop_hook_repo(temp.path());
     trip_gate(&repo);
 
-    // CTX_GATE_BLOCKING unset: the gate fires but the hook still exits 0.
+    // CTX_GATE_BLOCKING unset: the architecture gate fires but the hook still
+    // exits 0. The duplicate in the changed file is advisory only.
     let out = run_hook(&repo.root, &hook);
     assert_eq!(
         out.status.code(),
@@ -273,7 +280,8 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
     trip_gate(&repo);
 
     // CTX_GATE_BLOCKING=1: exit 2 (Claude Code's blocking stop) with the
-    // reason on stderr; CTX_GATE_LOG=1 makes `ctx score` record the gate.
+    // architecture-gate reason on stderr; CTX_GATE_LOG=1 makes `ctx score`
+    // record the gate.
     let out = run_hook_env(
         &repo.root,
         &hook,
@@ -302,7 +310,7 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|c| c == "new_duplication > 0"),
+            .any(|c| c == "check_violations > 0"),
         "record: {record}"
     );
 }
