@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decompression. Snapshot backfill now uses a randomized private RAII tempdir
   for historical worktrees.
 
+### Internal
+- Reviewed the `deny.toml` advisory exceptions that expired on 2026-09-30
+  against every release target (Linux x86_64, macOS x86_64/aarch64, Windows
+  x86_64) for both the root and `perf/` dependency graphs. Removed
+  RUSTSEC-2025-0009 (`ring`; the root graph already locks 0.17.14 and the
+  `perf/` lockfile now does too) and RUSTSEC-2026-0189 (`rmcp`; no longer
+  matched). Kept RUSTSEC-2024-0436 (`paste`) and RUSTSEC-2025-0119
+  (`number_prefix`), both unmaintained-crate notices reached through the
+  pinned fastembed 5.x line, with a new 2026-12-31 review deadline.
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
