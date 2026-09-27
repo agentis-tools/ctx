@@ -3,7 +3,9 @@
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{parse_params, schema_for, DefinitionParams, ReferencesParams, SearchParams};
+use super::{
+    parse_params, prefer_exact, schema_for, DefinitionParams, ReferencesParams, SearchParams,
+};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
@@ -112,6 +114,7 @@ pub async fn get_definition(
             )
         })
         .map_err(|e| internal_error(e.to_string()))?;
+    let symbols = prefer_exact(symbols, &params.symbol);
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -183,6 +186,7 @@ pub async fn find_references(
     let symbols = server
         .with_db(|db| db.find_symbols_filtered(&params.symbol, 100, params.file.as_deref(), None))
         .map_err(|e| internal_error(e.to_string()))?;
+    let symbols = prefer_exact(symbols, &params.symbol);
 
     if symbols.is_empty() {
         return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -191,33 +195,67 @@ pub async fn find_references(
         ))]));
     }
 
-    // Get incoming edges (places that reference this symbol)
-    let sym = &symbols[0];
-    let sym_name = sym.name.clone();
+    // References to the chosen definition: edges resolved to it, then edges
+    // by the same name that ctx left unbound (possible references). Edges
+    // resolved to a *different* same-named definition are not references here.
+    let sym = symbols[0].clone();
+    let others = symbols.len() - 1;
     let edges = server
-        .with_db(|db| db.get_incoming_edges(&sym_name))
+        .with_db(|db| {
+            db.get_incoming_edges(&sym.id).and_then(|mut by_id| {
+                by_id.extend(db.get_incoming_edges(&sym.name)?);
+                Ok(by_id)
+            })
+        })
         .map_err(|e| internal_error(e.to_string()))?;
-
-    if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "No references found for '{}'",
-            sym.name
-        ))]));
+    let mut seen = std::collections::HashSet::new();
+    let (mut resolved, mut unbound) = (Vec::new(), Vec::new());
+    for edge in edges {
+        if !seen.insert((edge.source_id.clone(), edge.line, edge.target_name.clone())) {
+            continue;
+        }
+        match edge.target_id.as_deref() {
+            Some(id) if id == sym.id => resolved.push(edge),
+            None if edge.target_name == sym.name => unbound.push(edge),
+            _ => {}
+        }
     }
 
-    let mut output = format!("Found {} references to '{}':\n\n", edges.len(), sym.name);
-
-    for edge in &edges {
-        let source_id = edge.source_id.clone();
-        if let Ok(Some(source_sym)) = server.with_db(|db| db.get_symbol(&source_id)) {
-            output.push_str(&format!(
-                "- {} ({}:{})\n",
-                source_sym.name,
-                source_sym.file_path,
-                edge.line.unwrap_or(source_sym.line_start)
-            ));
-            if let Some(ref ctx) = edge.context {
-                output.push_str(&format!("  Context: {}\n", ctx));
+    let mut output = format!(
+        "References to {} ({}) {}:{}{}\n\n",
+        sym.qualified_name.as_deref().unwrap_or(&sym.name),
+        sym.kind.as_str(),
+        sym.file_path,
+        sym.line_start,
+        if others > 0 {
+            format!(" -- {others} other definition(s) share this name; pass `file` to pick another")
+        } else {
+            String::new()
+        }
+    );
+    if resolved.is_empty() && unbound.is_empty() {
+        output.push_str("No references found\n");
+    }
+    for (title, list) in [
+        ("Resolved", &resolved),
+        ("Possible (same name, not bound to a definition)", &unbound),
+    ] {
+        if list.is_empty() {
+            continue;
+        }
+        output.push_str(&format!("{title} ({}):\n", list.len()));
+        for edge in list.iter().take(50) {
+            let source_id = edge.source_id.clone();
+            if let Ok(Some(source_sym)) = server.with_db(|db| db.get_symbol(&source_id)) {
+                output.push_str(&format!(
+                    "- {} ({}:{})\n",
+                    source_sym.name,
+                    source_sym.file_path,
+                    edge.line.unwrap_or(source_sym.line_start)
+                ));
+                if let Some(ref ctx) = edge.context {
+                    output.push_str(&format!("  Context: {}\n", ctx.trim()));
+                }
             }
         }
     }
@@ -426,5 +464,29 @@ impl Greeter {
 
         let err = result.unwrap_err();
         assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn definition_prefers_exact_names_over_substrings() {
+        let (_temp, server) = setup_test_project();
+        let args = json!({"symbol": "greet"});
+        let result = get_definition(&server, args.as_object()).await.unwrap();
+        let text = get_text_content(&result);
+        // `greet` (fn) and `Greeter::greet` (method) match exactly; the struct
+        // `Greeter` only matches as a substring and must not be offered.
+        assert!(text.contains("Found 2 symbols"), "{text}");
+        assert!(!text.contains("(struct)"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn references_use_resolved_edges() {
+        let (_temp, server) = setup_test_project();
+        let args = json!({"symbol": "hello_world"});
+        let result = find_references(&server, args.as_object()).await.unwrap();
+        let text = get_text_content(&result);
+        assert!(
+            text.contains("Resolved (1)") && text.contains("- greet (src/lib.rs:"),
+            "{text}"
+        );
     }
 }

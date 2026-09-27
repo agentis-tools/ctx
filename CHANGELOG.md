@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- MCP `get_callers`, `get_callees`, `find_references` and `get_definition`
+  now answer for the definition that was asked about. They took the first row
+  of a substring search, and the call-graph tools searched functions only, so
+  `get_callers getValue` on a Go method answered for `TestContextSetGetValues`
+  and `get_definition greet` also offered the struct `Greeter`. Exact name
+  matches now win, methods are included, and several same-named definitions
+  are listed (up to five) instead of silently picking one.
+- MCP `get_callers` and `find_references` follow resolved edges (`target_id`),
+  as `ctx callers` does, instead of every call with the same bare name, so
+  edges bound by the resolver, the LSP or `ctx judge edges` are no longer
+  mixed with calls to other same-named definitions. Unbound same-name calls
+  are listed separately as possible callers. `get_callers` honours `depth`
+  (default 3, max 5) and `get_callees` shows the definition each call
+  resolved to.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
