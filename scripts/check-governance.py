@@ -87,6 +87,7 @@ def structural_check() -> None:
         if "docs/" not in text and relative == "governance/guardrails.md":
             errors.append("guardrails.md must state the documentation boundary")
     errors.extend(cookbook_structure_errors(ROOT))
+    errors.extend(readme_contract_errors(ROOT))
     action_files = list((ROOT / ".github/workflows").glob("*.yml"))
     action_files += list((ROOT / ".github/workflows").glob("*.yaml"))
     action_files += list((ROOT / ".github/actions").glob("**/action.yml"))
@@ -128,6 +129,36 @@ def structural_check() -> None:
     if errors:
         raise GovernanceError("\n".join(errors))
     print("OK: governance files and agent instructions respect the docs boundary")
+
+
+def readme_contract_errors(root: Path) -> list[str]:
+    """Catch stale README dependency and release references."""
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    version = manifest_version((root / "Cargo.toml").read_text(encoding="utf-8"))
+    major_minor = ".".join(version.split(".")[:2])
+    errors: list[str] = []
+
+    # Dependency snippets: `agentis-ctx = "0.4"` and `agentis-ctx = { version = "0.4", ... }`.
+    for match in re.finditer(
+        r'agentis-ctx\s*=\s*(?:\{[^}\n]*?version\s*=\s*)?"(\d+\.\d+(?:\.\d+)?)"', readme
+    ):
+        declared = match.group(1)
+        if declared != major_minor and not declared.startswith(f"{major_minor}."):
+            errors.append(
+                f"README.md declares agentis-ctx {declared}, but Cargo.toml is {version}"
+            )
+
+    # Install/download references must follow the manifest. Prose that cites
+    # where a measurement was taken ("on the v0.4.0 tag") is historical and
+    # deliberately not checked, so a version bump does not invalidate it.
+    install_refs = re.findall(r"releases/download/v(\d+\.\d+\.\d+)/", readme)
+    install_refs += re.findall(r"-plugin-(\d+\.\d+\.\d+)\.zip", readme)
+    for declared in sorted(set(install_refs)):
+        if declared != version:
+            errors.append(
+                f"README.md install instructions reference v{declared}, but Cargo.toml is {version}"
+            )
+    return errors
 
 
 def unreleased_body(text: str) -> str:
