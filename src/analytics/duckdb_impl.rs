@@ -24,13 +24,34 @@ pub struct Analytics {
     _index_copy: Option<TempDbFile>,
 }
 
-/// A temporary database file removed on drop.
-pub(crate) struct TempDbFile(std::path::PathBuf);
+/// A private temporary DuckDB file, removed (with its WAL) on drop.
+///
+/// The file lives in its own randomly named, owner-only directory. A shared
+/// temp-dir name derived from the pid and the clock collided between engines
+/// opened in the same process within the clock's resolution (microseconds on
+/// macOS): two engines then copied into and read from one file, which aborted
+/// DuckDB (`FetchStringFromDict`) or returned another index's rows. A
+/// predictable name in a shared temp dir could also be pre-created by another
+/// local user.
+pub(crate) struct TempDbFile {
+    path: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
 
-impl Drop for TempDbFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-        let _ = std::fs::remove_file(self.0.with_extension("duckdb.wal"));
+impl TempDbFile {
+    fn new() -> Result<Self> {
+        let dir = tempfile::Builder::new()
+            .prefix("ctx-index-")
+            .tempdir()
+            .map_err(|e| duckdb::Error::ToSqlConversionFailure(Box::new(e)))?;
+        Ok(Self {
+            path: dir.path().join("index.duckdb"),
+            _dir: dir,
+        })
+    }
+
+    fn escaped_path(&self) -> String {
+        self.path.display().to_string().replace('\'', "''")
     }
 }
 
@@ -63,14 +84,8 @@ pub(crate) fn attach_index(conn: &Connection, sqlite_path: &Path) -> Result<Opti
     if attached {
         return Ok(None);
     }
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = TempDbFile(
-        std::env::temp_dir().join(format!("ctx-index-{}-{nanos}.duckdb", std::process::id())),
-    );
-    let escaped_tmp = tmp.0.display().to_string().replace('\'', "''");
+    let tmp = TempDbFile::new()?;
+    let escaped_tmp = tmp.escaped_path();
     conn.execute_batch(&format!("ATTACH '{escaped_tmp}' AS code_build;"))?;
     copy_index(conn, sqlite_path, "code_build")?;
     conn.execute_batch(&format!(
@@ -1093,10 +1108,8 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
 mod tests {
     /// Force the copy path (as when the sqlite extension is not installed).
     fn attach_index_copy_only(conn: &Connection, sqlite_path: &Path) -> TempDbFile {
-        let tmp = TempDbFile(
-            std::env::temp_dir().join(format!("ctx-index-test-{}.duckdb", std::process::id())),
-        );
-        let p = tmp.0.display().to_string();
+        let tmp = TempDbFile::new().unwrap();
+        let p = tmp.escaped_path();
         conn.execute_batch(&format!("ATTACH '{p}' AS code_build;"))
             .unwrap();
         copy_index(conn, sqlite_path, "code_build").unwrap();
@@ -1105,6 +1118,16 @@ mod tests {
         ))
         .unwrap();
         tmp
+    }
+
+    #[test]
+    fn index_copies_never_share_a_file() {
+        let copies: Vec<TempDbFile> = (0..64).map(|_| TempDbFile::new().unwrap()).collect();
+        let unique: std::collections::HashSet<_> = copies.iter().map(|c| c.path.clone()).collect();
+        assert_eq!(unique.len(), copies.len());
+        let dir = copies[0].path.parent().unwrap().to_path_buf();
+        drop(copies);
+        assert!(!dir.exists(), "the private directory is removed on drop");
     }
 
     #[test]
