@@ -392,6 +392,7 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 ```json
 {
   "against": "main",
+  "baseline": "0123456789abcdef0123456789abcdef01234567",
   "files_changed": 1,
   "metrics": {
     "complexity_delta": 3,
