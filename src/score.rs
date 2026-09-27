@@ -353,8 +353,20 @@ fn new_duplication(
     reference: &str,
     changed: &HashSet<String>,
 ) -> Result<i64> {
-    let pairs =
-        fingerprint::find_near_duplicates(db, DUP_THRESHOLD, DUP_MIN_TOKENS, Some(changed))?;
+    let search = fingerprint::find_near_duplicates_limited(
+        db,
+        DUP_THRESHOLD,
+        DUP_MIN_TOKENS,
+        Some(changed),
+        fingerprint::DEFAULT_RESULT_LIMIT,
+    )?;
+    if search.truncated {
+        return Err(CtxError::Other(format!(
+            "duplicate search exceeded its bounded result budget of {}; refusing to undercount new_duplication",
+            fingerprint::DEFAULT_RESULT_LIMIT
+        )));
+    }
+    let pairs = search.pairs;
     if pairs.is_empty() {
         return Ok(0);
     }
