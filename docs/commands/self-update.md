@@ -18,6 +18,18 @@ ctx --version --check
 3. Download the release's aggregated `SHA256SUMS` file and the artifact, and verify the artifact's sha256 against it. **On mismatch the update aborts with exit code 2 and the installed binary is untouched.**
 4. Extract the `ctx` binary, write it to a temp file *in the same directory as the current executable*, set executable permissions, and `rename` it over the current binary (atomic on the same filesystem).
 
+Self-update bounds release metadata to 1 MiB, the checksum manifest to 4 MiB,
+the compressed archive to 256 MiB, the decompressed archive stream to 512 MiB,
+and the extracted binary to 128 MiB. Staging and writability probes use
+exclusive randomized temporary files, so a predictable pre-created symlink
+cannot redirect an update write.
+
+The checksum manifest and archive are fetched from the same release channel.
+The SHA-256 check therefore detects corruption or tampering in transit but is
+not an independent release-signing or publisher-provenance check. For
+high-assurance deployments, verify the release provenance outside `ctx` before
+running self-update.
+
 If nothing newer exists, it prints `ctx <version> is already up to date` and exits 0. On success it prints the transition:
 
 ```text
