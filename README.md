@@ -203,8 +203,8 @@ This scaffolds three hooks and a starter `.ctx/rules.toml`:
 - **SessionStart** → `ctx map` primes the agent with a codebase map before it does anything.
 - **PostToolUse** (on Edit/Write) → `ctx index` reindexes, then `ctx check --against HEAD` flags any
   architecture violation the edit just introduced.
-- **Stop** → `ctx score --fail-on "check_violations>0,new_duplication>0"`: a quality scorecard on
-  the whole change before the agent calls it done.
+- **Stop** → the generated hook runs `ctx score --fail-on "check_violations>0"` and shows
+  duplication in the scorecard for calibration before making it blocking.
 
 The generated permissions let the agent run `ctx *` but **deny** `ctx self-update` and edits to the
 rules, hooks, and settings, so an agent can't weaken the policy that governs it. `ctx harness
