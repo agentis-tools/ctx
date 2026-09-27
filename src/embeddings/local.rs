@@ -59,6 +59,10 @@ impl EmbeddingProvider for LocalProvider {
         LOCAL_EMBEDDING_DIM
     }
 
+    fn model(&self) -> &str {
+        &self.model_name
+    }
+
     fn embed(&self, text: &str) -> Result<Embedding> {
         let mut model = self
             .model

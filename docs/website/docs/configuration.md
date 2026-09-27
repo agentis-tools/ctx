@@ -578,8 +578,9 @@ OLLAMA_HOST=http://gpu-box:11434 ctx embed --provider ollama
 ```
 
 > Embeddings from different providers/models occupy different vector spaces, so
-> switching providers requires re-embedding (`ctx embed --provider … --force`).
-> ctx warns when the query provider/dimension doesn't match the index.
+> switching providers or models requires re-embedding (`ctx embed --provider … --force`).
+> Semantic commands fail with exit code 2 when the query provider/model/dimension
+> doesn't match the index.
 
 `--openai` is still accepted as a deprecated alias for `--provider openai`.
 
