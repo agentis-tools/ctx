@@ -490,28 +490,33 @@ impl Indexer {
         // Parallel parse phase: parse all files that need updating
         let parsed_files: Vec<ParsedFile> = ts_files
             .par_iter()
-            .filter_map(|(entry, rel_path, content, hash, _)| {
-                // Create thread-local parser
-                let mut parser = CodeParser::new();
+            // One parser per rayon work split, reused across its files.
+            // `CodeParser::new` builds a parser and compiles the queries for
+            // every supported language; doing that per file made it the
+            // dominant cost of a cold index (#96).
+            .map_init(
+                CodeParser::new,
+                |parser, (entry, rel_path, content, hash, _)| {
+                    if verbose {
+                        eprintln!("Indexing: {}", rel_path);
+                    }
 
-                if verbose {
-                    eprintln!("Indexing: {}", rel_path);
-                }
+                    // Parse the file
+                    let parse_result = parser.parse(&entry.absolute_path, content)?;
 
-                // Parse the file
-                let parse_result = parser.parse(&entry.absolute_path, content)?;
+                    // Compress content
+                    let compressed = compress_source(content);
 
-                // Compress content
-                let compressed = compress_source(content);
-
-                Some(ParsedFile {
-                    rel_path: rel_path.clone(),
-                    content: content.clone(),
-                    hash: hash.clone(),
-                    compressed,
-                    parse_result,
-                })
-            })
+                    Some(ParsedFile {
+                        rel_path: rel_path.clone(),
+                        content: content.clone(),
+                        hash: hash.clone(),
+                        compressed,
+                        parse_result,
+                    })
+                },
+            )
+            .flatten()
             .collect();
 
         // Sequential store phase: batch insert into database
