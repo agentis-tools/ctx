@@ -323,9 +323,18 @@ fn run(args: Args) -> Result<Outcome> {
             since,
             limit,
             by,
+            signal,
             min_churn,
             against,
-        }) => commands::run_hotspots(&since, limit, by, min_churn, against.as_deref(), json),
+        }) => commands::run_hotspots(
+            &since,
+            limit,
+            by,
+            signal,
+            min_churn,
+            against.as_deref(),
+            json,
+        ),
         Some(Command::Check {
             rules,
             against,
@@ -358,6 +367,9 @@ fn run(args: Args) -> Result<Outcome> {
             // Harness command: returns its own Outcome (doctor exits 1 on
             // problems; compat exits 3 on version mismatch).
             return commands::run_harness(cmd, json);
+        }
+        Some(Command::Judge { cmd }) => {
+            return commands::run_judge(cmd, json);
         }
         Some(Command::Lsp { cmd }) => {
             // LSP registry command: returns its own Outcome (doctor exits 1

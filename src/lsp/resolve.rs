@@ -89,6 +89,9 @@ pub fn resolve_edges_with_lsp(
             let Some(client) = mgr.client_for_stage_b(&language) else {
                 break; // server unusable: skip the rest of this language
             };
+            // Servers such as rust-analyzer answer `null` to every definition
+            // request until the workspace is loaded; wait for their signal.
+            client.ensure_ready(verbose);
             if client.did_open(&uri, &language, &text).is_err() {
                 break;
             }

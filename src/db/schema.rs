@@ -490,11 +490,17 @@ impl Database {
     /// Insert multiple symbols in a transaction (batch insert for parallel indexing).
     #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_symbols_batch(&self, symbols: &[Symbol]) -> Result<usize> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         let mut count = 0;
 
         for symbol in symbols {
-            tx.execute(
+            self.conn.execute(
                 r#"
                 INSERT INTO symbols (
                     id, file_path, name, qualified_name, kind, visibility,
@@ -523,18 +529,26 @@ impl Database {
             count += 1;
         }
 
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(count)
     }
 
     /// Insert multiple edges in a transaction (batch insert for parallel indexing).
     #[allow(dead_code)] // Useful for future batch operations
     pub fn insert_edges_batch(&self, edges: &[Edge]) -> Result<usize> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         let mut count = 0;
 
         for edge in edges {
-            tx.execute(
+            self.conn.execute(
                 r#"
                 INSERT INTO edges (source_id, target_id, target_name, kind, line, col, context)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -552,7 +566,9 @@ impl Database {
             count += 1;
         }
 
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(count)
     }
 
@@ -1006,15 +1022,26 @@ impl Database {
     /// Bulk-store PageRank scores in a single transaction, replacing any
     /// existing cache.
     pub fn store_symbol_ranks(&self, ranks: &[(String, f64)]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM symbol_rank", [])?;
+        // Nesting-safe: inside an enclosing transaction/savepoint (e.g. the
+        // per-file store), write directly; otherwise batch in our own.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
+        self.conn.execute("DELETE FROM symbol_rank", [])?;
         {
-            let mut stmt = tx.prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
+            let mut stmt = self
+                .conn
+                .prepare("INSERT INTO symbol_rank (symbol_id, rank) VALUES (?, ?)")?;
             for (id, rank) in ranks {
                 stmt.execute(params![id, rank])?;
             }
         }
-        tx.commit()
+        match tx {
+            Some(tx) => tx.commit(),
+            None => Ok(()),
+        }
     }
 
     /// Load all cached PageRank scores.
@@ -1962,9 +1989,14 @@ impl Database {
         if fingerprints.is_empty() {
             return Ok(0);
         }
-        let tx = self.conn.unchecked_transaction()?;
+        // Nesting-safe: inside the per-file store savepoint, write directly.
+        let tx = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 r#"
                 INSERT OR REPLACE INTO symbol_fingerprints (symbol_id, file_path, minhash, token_count)
                 VALUES (?, ?, ?, ?)
@@ -1979,7 +2011,9 @@ impl Database {
                 ])?;
             }
         }
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(fingerprints.len())
     }
 
@@ -2263,6 +2297,310 @@ impl<T> ResultExt<T> for Result<T> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+// ============================================================================
+// Judgments: cached answers from an external decision model (see src/judge.rs)
+// ============================================================================
+
+/// A call edge considered for model-assisted resolution.
+#[derive(Debug, Clone)]
+pub struct JudgeEdge {
+    pub edge_id: i64,
+    pub source_id: String,
+    pub source_file: String,
+    pub target_name: String,
+    pub target_id: Option<String>,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// A same-named in-repo function/method that a call could resolve to.
+#[derive(Debug, Clone)]
+pub struct JudgeCandidate {
+    pub id: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub kind: String,
+    pub file_path: String,
+    pub signature: Option<String>,
+}
+
+/// A cached judgment row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Judgment {
+    pub answer: String,
+    pub p: f64,
+    pub model_version: String,
+}
+
+impl Database {
+    /// Create the `judgments` cache table if needed. Idempotent; the table is
+    /// independent of symbols so re-indexing never discards paid-for answers:
+    /// rows are keyed by a hash of exactly what the model was shown.
+    pub fn ensure_judgments_table(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS judgments (
+                key           TEXT PRIMARY KEY,   -- sha256(question + state + model)
+                subject       TEXT NOT NULL,      -- e.g. 'edge:<source_id>:<line>:<name>'
+                question_id   TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                answer        TEXT NOT NULL,
+                p             REAL NOT NULL,
+                probabilities TEXT,
+                asked_at      INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_judgments_subject ON judgments(subject, question_id);
+            "#,
+        )
+    }
+
+    pub fn get_judgment(&self, key: &str) -> Result<Option<Judgment>> {
+        self.conn
+            .query_row(
+                "SELECT answer, p, model_version FROM judgments WHERE key = ?",
+                params![key],
+                |row| {
+                    Ok(Judgment {
+                        answer: row.get(0)?,
+                        p: row.get(1)?,
+                        model_version: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn put_judgment(
+        &self,
+        key: &str,
+        subject: &str,
+        question_id: &str,
+        model_version: &str,
+        answer: &str,
+        p: f64,
+        probabilities: Option<&str>,
+        asked_at: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO judgments VALUES (?,?,?,?,?,?,?,?)",
+            params![
+                key,
+                subject,
+                question_id,
+                model_version,
+                answer,
+                p,
+                probabilities,
+                asked_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// All call edges (resolved or not) with a location, for judging.
+    pub fn call_edges_for_judging(&self) -> Result<Vec<JudgeEdge>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.id, e.source_id, s.file_path, e.target_name, e.target_id,
+                   e.line, COALESCE(e.col, 0)
+            FROM edges e JOIN symbols s ON s.id = e.source_id
+            WHERE e.kind = 'calls' AND e.line IS NOT NULL
+            ORDER BY s.file_path, e.line
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(JudgeEdge {
+                edge_id: row.get(0)?,
+                source_id: row.get(1)?,
+                source_file: row.get(2)?,
+                target_name: row.get(3)?,
+                target_id: row.get(4)?,
+                line: row.get(5)?,
+                col: row.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Every function/method, for candidate lookup by bare name.
+    pub fn callable_candidates(&self) -> Result<Vec<JudgeCandidate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, qualified_name, kind, file_path, signature FROM symbols WHERE kind IN ('function','method')",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(JudgeCandidate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                qualified_name: row.get(2)?,
+                kind: row.get(3)?,
+                file_path: row.get(4)?,
+                signature: row.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Source text of a symbol (decompressed column is stored as plain text).
+    pub fn symbol_source(&self, id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT source FROM symbols WHERE id = ?",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|o| o.flatten())
+    }
+
+    /// Overwrite an edge's target: `Some(id)` binds it, `None` marks it as
+    /// resolving outside the repository. Returns whether the row changed.
+    pub fn retarget_edge(&self, edge_id: i64, target_id: Option<&str>) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE edges SET target_id = ? WHERE id = ? AND target_id IS NOT ?",
+            params![target_id, edge_id, target_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Undo a class of wrong bindings that name matching makes in Rust:
+    /// `x.find(..)` is method-call syntax, so it can never call a free
+    /// function (`fn find` at module level); binding it to one (typically the
+    /// standard library's `Iterator::find` / `str::find` bound to a same-named
+    /// repo function) inflates that function's fan-in and invents
+    /// cross-module dependencies. Calls whose callee position itself is the
+    /// name (`find(..)`, `path::find(..)`) are left alone. Returns the number
+    /// of edges unbound.
+    pub fn unbind_rust_method_calls_to_free_functions(&self) -> Result<usize> {
+        self.conn.execute(
+            r#"
+            UPDATE edges SET target_id = NULL
+            WHERE kind = 'calls' AND target_id IS NOT NULL AND context IS NOT NULL
+              AND (instr(context, '.' || target_name || '(') > 0
+                   OR instr(context, '.' || target_name || '::<') > 0)
+              AND substr(context, 1, length(target_name) + 1) <> target_name || '('
+              AND instr(context, '::' || target_name || '(') = 0
+              AND target_id IN (SELECT id FROM symbols WHERE kind = 'function' AND parent_id IS NULL)
+              AND source_id IN (SELECT id FROM symbols WHERE file_path LIKE '%.rs')
+            "#,
+            [],
+        )
+    }
+
+    /// C/C++: a call to `f` usually has two same-named candidates — the
+    /// prototype in a header and the definition in a `.c`/`.cc` file — so
+    /// name matching treated it as ambiguous and left it unresolved (on jq,
+    /// 69 % of in-repo calls). Bind such calls to the definition when exactly
+    /// one non-header function/method of that name exists. Returns the number
+    /// of edges bound.
+    pub fn resolve_c_family_definitions(&self) -> Result<usize> {
+        self.conn.execute(
+            r#"
+            WITH defs AS MATERIALIZED (
+                SELECT name, MIN(id) AS id, COUNT(*) AS n
+                FROM symbols
+                WHERE kind IN ('function', 'method')
+                  AND (file_path LIKE '%.c' OR file_path LIKE '%.cc' OR file_path LIKE '%.cpp'
+                       OR file_path LIKE '%.cxx')
+                GROUP BY name
+            )
+            UPDATE edges SET target_id = (SELECT id FROM defs WHERE defs.name = edges.target_name)
+            WHERE kind = 'calls' AND target_id IS NULL
+              AND target_name IN (SELECT name FROM defs WHERE n = 1)
+              AND source_id IN (
+                  SELECT id FROM symbols
+                  WHERE file_path LIKE '%.c' OR file_path LIKE '%.h' OR file_path LIKE '%.cc'
+                     OR file_path LIKE '%.cpp' OR file_path LIKE '%.cxx' OR file_path LIKE '%.hpp'
+                     OR file_path LIKE '%.hh')
+            "#,
+            [],
+        )
+    }
+
+    /// Open a named SAVEPOINT (nests inside any enclosing transaction).
+    pub fn savepoint(&self, name: &str) -> Result<()> {
+        self.conn.execute_batch(&format!("SAVEPOINT {name}"))
+    }
+
+    /// Commit a SAVEPOINT opened with [`Database::savepoint`].
+    pub fn release_savepoint(&self, name: &str) -> Result<()> {
+        self.conn.execute_batch(&format!("RELEASE {name}"))
+    }
+
+    /// Undo everything since the SAVEPOINT and close it.
+    pub fn rollback_savepoint(&self, name: &str) -> Result<()> {
+        self.conn
+            .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))
+    }
+
+    /// Run `f` inside one transaction (one WAL commit for a batch of updates).
+    pub fn in_transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.conn.execute_batch("BEGIN")?;
+        match f() {
+            Ok(v) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod judgment_tests {
+    use super::*;
+
+    fn db() -> Database {
+        Database::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn savepoint_rollback_discards_file_row() {
+        let d = db();
+        d.savepoint("sp").unwrap();
+        d.upsert_file(
+            &FileRecord {
+                path: "a.rs".into(),
+                content_hash: "h".into(),
+                size_bytes: 1,
+                language: Some("rust".into()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        d.rollback_savepoint("sp").unwrap();
+        assert_eq!(d.get_file_hash("a.rs").unwrap(), None);
+    }
+
+    #[test]
+    fn judgments_roundtrip_and_replace() {
+        let d = db();
+        d.ensure_judgments_table().unwrap();
+        d.ensure_judgments_table().unwrap(); // idempotent
+        assert_eq!(d.get_judgment("k").unwrap(), None);
+        d.put_judgment("k", "edge:a:1:f", "callee", "jev-1", "c0", 0.9, None, 1)
+            .unwrap();
+        d.put_judgment(
+            "k",
+            "edge:a:1:f",
+            "callee",
+            "jev-1",
+            "external",
+            0.8,
+            Some("{}"),
+            2,
+        )
+        .unwrap();
+        let j = d.get_judgment("k").unwrap().unwrap();
+        assert_eq!(j.answer, "external");
+        assert!((j.p - 0.8).abs() < 1e-9);
     }
 }
 

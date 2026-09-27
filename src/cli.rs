@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::commands::hotspots::HotspotBy;
+use crate::commands::hotspots::{HotspotBy, HotspotSignal};
 use ctx::embeddings::Provider;
 
 /// CLI output format (with clap integration).
@@ -603,6 +603,10 @@ EXIT CODES:
         #[arg(long, value_enum, default_value_t = HotspotBy::File)]
         by: HotspotBy,
 
+        /// Structural signal multiplied with churn: lines (default) or complexity
+        #[arg(long, value_enum, default_value_t = HotspotSignal::Lines)]
+        signal: HotspotSignal,
+
         /// Minimum number of commits for a file to be analyzed
         #[arg(long, default_value = "2")]
         min_churn: u32,
@@ -820,6 +824,31 @@ EXAMPLES:
         cmd: LspCommand,
     },
 
+    /// Model-assisted judgments over the index (opt-in, uses TypeSafe Jev)
+    ///
+    /// `ctx judge edges` re-resolves call edges whose name matches in-repo
+    /// functions: the model picks the real callee among same-named candidates,
+    /// or `external` for standard-library / dependency calls. Answers are cached
+    /// in the index, so unchanged code is never asked twice.
+    #[command(after_help = r#"EXIT CODES (ctx-wide convention):
+    0    edges judged (or nothing to judge)
+    2    operational error (no index, JEV_API_KEY missing, API failure)
+
+PRIVACY:
+    Sends, per ambiguous call: the calling function's source (<= 3000 chars),
+    its file's import lines, the call-site line and candidate names, paths and
+    signatures. Use --offline to apply cached answers without any network call.
+
+EXAMPLES:
+    JEV_API_KEY=... ctx judge edges           # resolve and cache
+    ctx judge edges --offline                 # re-apply cached answers after a reindex
+    ctx judge edges --dry-run --json          # what would change
+"#)]
+    Judge {
+        #[command(subcommand)]
+        cmd: JudgeCommand,
+    },
+
     /// Update ctx to the latest GitHub release (or a pinned version)
     ///
     /// Downloads the release artifact for this platform, verifies its
@@ -973,6 +1002,28 @@ pub enum HarnessCommand {
     /// Exit codes: 0 = healthy (info-level notes only), 1 = problems found
     /// (errors or warnings), 2 = operational error.
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JudgeCommand {
+    /// Re-resolve ambiguous call edges with the decision model
+    Edges {
+        /// Apply cached answers only; never call the model
+        #[arg(long)]
+        offline: bool,
+        /// Report what would change without rewriting edges
+        #[arg(long)]
+        dry_run: bool,
+        /// Stop after this many new model calls (0 = no limit)
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+        /// Minimum confidence for an answer to change an edge
+        #[arg(long)]
+        min_confidence: Option<f64>,
+        /// Parallel requests
+        #[arg(long, default_value_t = 8)]
+        concurrency: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]
