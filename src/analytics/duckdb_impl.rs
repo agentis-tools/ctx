@@ -30,14 +30,7 @@ impl Analytics {
         // Create in-memory DuckDB and attach SQLite
         let conn = Connection::open_in_memory()?;
 
-        // Attach SQLite database with properly escaped path
-        // DuckDB uses single quotes for strings, so we need to escape any single quotes in the path
-        let path_str = sqlite_path.display().to_string();
-        let escaped_path = path_str.replace('\'', "''");
-        conn.execute(
-            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
-            [],
-        )?;
+        attach_sqlite(&conn, &sqlite_path)?;
 
         // Create materialized views for better performance
         let analytics = Self { conn };
@@ -671,13 +664,7 @@ impl Analytics {
 
         let conn = Connection::open_in_memory()?;
 
-        // Attach the SQLite index read-only (single-quote-escape the path).
-        let path_str = sqlite_path.display().to_string();
-        let escaped_path = path_str.replace('\'', "''");
-        conn.execute(
-            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
-            [],
-        )?;
+        attach_sqlite(&conn, &sqlite_path)?;
 
         let analytics = Self { conn };
 
@@ -860,6 +847,59 @@ impl Analytics {
             truncated,
         })
     }
+}
+
+/// Configure DuckDB's extension loading and attach the SQLite index.
+///
+/// Normal runs preserve DuckDB's automatic extension behavior. Setting
+/// `CTX_DUCKDB_OFFLINE=1` disables network installation and explicitly loads
+/// the staged `sqlite_scanner` extension, turning a missing artifact into a
+/// useful operational error instead of a network attempt.
+fn attach_sqlite(conn: &Connection, sqlite_path: &Path) -> Result<()> {
+    let offline = std::env::var("CTX_DUCKDB_OFFLINE").ok().as_deref() == Some("1");
+    let extension_directory =
+        std::env::var_os("CTX_DUCKDB_EXTENSION_DIRECTORY").map(std::path::PathBuf::from);
+    configure_extensions(conn, offline, extension_directory.as_deref())?;
+
+    let path_str = sqlite_path.display().to_string();
+    let escaped_path = path_str.replace('\'', "''");
+    conn.execute(
+        &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
+        [],
+    )
+    .map(|_| ())
+}
+
+fn configure_extensions(
+    conn: &Connection,
+    offline: bool,
+    extension_directory: Option<&Path>,
+) -> Result<()> {
+    if let Some(directory) = extension_directory {
+        let directory = directory.to_string_lossy().replace('\'', "''");
+        conn.execute(&format!("SET extension_directory = '{}'", directory), [])?;
+    }
+
+    if offline {
+        let extension_result = conn.execute_batch(
+            "SET autoload_known_extensions = false;\n\
+             SET autoinstall_known_extensions = false;\n\
+             LOAD sqlite_scanner;",
+        );
+        if let Err(err) = extension_result {
+            return Err(duckdb::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!(
+                        "offline DuckDB mode needs a staged sqlite_scanner extension; \
+                         set CTX_DUCKDB_EXTENSION_DIRECTORY or unset CTX_DUCKDB_OFFLINE \
+                         to allow installation ({err})"
+                    ),
+                ),
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A column in a `ctx sql` result: its name and DuckDB type name.
@@ -1185,5 +1225,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_offline_extension_failure_is_actionable() {
+        let conn = Connection::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let err = configure_extensions(&conn, true, Some(temp.path())).unwrap_err();
+        assert!(err.to_string().contains("offline DuckDB mode"));
+        assert!(err.to_string().contains("sqlite_scanner"));
     }
 }

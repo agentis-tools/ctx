@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after file changes or deletions. The resolver also has the qualified-name
   lookup index identified by profiling of its hot path (#96).
 
+### Documentation
+- Added offline staging guidance for fastembed model caches and DuckDB's
+  `sqlite_scanner` extension; offline mode now suppresses passive network checks
+  and no-DuckDB builds fail clearly instead of returning empty analytics (#100).
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
