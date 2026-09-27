@@ -6,19 +6,14 @@ exclude-dev = false
 version = 2
 yanked = "deny"
 ignore = [
-  # Transitive through fastembed/image; no maintained replacement is selectable.
-  # Reassess with the next fastembed update, no later than 2026-09-30.
+  # paste (unmaintained, no known vulnerability) is a build-time proc-macro
+  # reached through fastembed -> tokenizers -> macro_rules_attribute on every
+  # release target. fastembed stays on the 5.x line for Intel macOS ONNX Runtime
+  # support (#91); reassess with the fastembed 6 port, no later than 2026-12-31.
   "RUSTSEC-2024-0436",
-  # ring's affected QUIC/large single-buffer AES paths are not used by ctx. A
-  # fixed ring currently conflicts with the tree-sitter 0.20 cc constraint.
-  # Remove after the parser stack moves, no later than 2026-09-30.
-  "RUSTSEC-2025-0009",
-  # ctx enables rmcp's stdio transport only; the vulnerable Streamable HTTP
-  # server transport is neither enabled nor exposed. Upgrade rmcp by 2026-09-30.
-  "RUSTSEC-2026-0189",
-  # number_prefix is unmaintained but has no reported vulnerability; it is
-  # transitive through the Intel-compatible fastembed line. Remove when Intel
-  # macOS can move to a maintained ORT distribution, no later than 2026-09-30.
+  # number_prefix (unmaintained, no known vulnerability) is reached through
+  # fastembed -> hf-hub 0.4 -> indicatif 0.17 on every release target. Same
+  # fastembed 5.x constraint as above; no later than 2026-12-31.
   "RUSTSEC-2025-0119",
 ]
 
