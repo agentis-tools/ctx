@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C++), size beat complexity at predicting which functions later got bug
   fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
   and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
+- BREAKING: `ctx smart --max-tokens` is now a hard limit on the complete rendered
+  context, including tree and format wrappers. A top-ranked file larger than the
+  budget is no longer included by default; `--include-oversized-top` restores
+  the previous behavior. The MCP `smart_context` tool applies the same limit,
+  and the global `--max-tokens` flag is now rejected with an error on commands that do
+  not take a token budget instead of being ignored (#102).
 
 ### Fixed
 - C/C++: calls that name a function declared in a header and defined in one
