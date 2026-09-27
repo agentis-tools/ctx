@@ -177,7 +177,7 @@ fn run(args: Args) -> Result<Outcome> {
         }) => {
             let provider = resolve_embed_provider(provider, openai);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, provider, serial)
+                commands::run_embed_watch(force, verbose, batch_size, provider, serial)
             } else {
                 commands::run_embed(force, verbose, batch_size, provider, serial)
             }
@@ -266,6 +266,7 @@ fn run(args: Args) -> Result<Outcome> {
             no_tree,
         }) => {
             let provider = resolve_embed_provider(provider, openai);
+            let format = if json { OutputFormat::Json } else { format };
             commands::run_smart(
                 &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
                 no_tree, &patterns, count_only, &encoding, stats,

@@ -310,6 +310,10 @@ impl EmbeddingProvider for OpenAIProvider {
         OPENAI_EMBEDDING_DIM
     }
 
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     fn embed(&self, text: &str) -> Result<Embedding> {
         let mut results = self.request(&[text])?;
         results
