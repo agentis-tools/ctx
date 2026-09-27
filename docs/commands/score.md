@@ -10,7 +10,7 @@ ctx score [--against <REF>] [--fail-on <EXPR>] [--json]
 
 ## Description
 
-The `score` command compares the working tree (plus commits since the merge base with REF) against REF and prints a compact scorecard. It answers "did this change make the code better or worse?" with numbers:
+The `score` command compares the working tree (plus commits since the merge base with REF) against REF and prints a compact scorecard. It answers "did this change make the code better or worse?" with numbers. Score resolves the merge base once and uses that commit consistently for changed paths, baseline file contents, duplication, and architecture checks. The resolved commit is shown in human output and emitted as `data.baseline` in JSON.
 
 - **Complexity and fan-out deltas** - per changed file, baseline vs. current
 - **New duplication** - near-duplicate function pairs that did not exist at REF
@@ -59,7 +59,7 @@ ctx score
 
 Output:
 ```
-Score vs HEAD (1 file changed)
+Score vs HEAD (baseline 0123456) (1 file changed)
 
   complexity_delta        3 → 6      ▲ +3
   fan_out_delta           1 → 2      ▲ +1
@@ -98,6 +98,7 @@ ctx score --against main --json
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
     "against": "main",
+    "baseline": "0123456789abcdef0123456789abcdef01234567",
     "files_changed": 1,
     "metrics": {
       "complexity_delta": 3,

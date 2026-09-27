@@ -84,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for historical worktrees.
 - Release checksum generation no longer includes `SHA256SUMS` in its own
   manifest, and release validation rejects self-referential entries (#103).
+- `ctx score` now resolves its merge base once and uses that commit for every
+  baseline input, avoiding inconsistent results when the target branch moved
+  after a feature branch diverged (#99).
 
 ## [0.4.0] - 2026-07-24
 

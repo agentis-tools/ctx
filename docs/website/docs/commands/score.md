@@ -104,6 +104,7 @@ ctx score --against main --json
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
     "against": "main",
+    "baseline": "0123456789abcdef0123456789abcdef01234567",
     "files_changed": 1,
     "metrics": {
       "complexity_delta": 3,
