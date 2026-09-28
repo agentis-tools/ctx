@@ -1,0 +1,59 @@
+{
+  "name": "@agentis-tools/pi-ctx",
+  "version": "0.4.0",
+  "description": "ctx for the pi coding agent: Jev-routed, token-budgeted codebase context and quality gates, built so small local models code like large ones.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "author": "agentis-tools",
+  "homepage": "https://docs.agentis.tools",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentis-tools/ctx.git",
+    "directory": "plugins/pi"
+  },
+  "bugs": {
+    "url": "https://github.com/agentis-tools/ctx/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "ctx",
+    "code-intelligence",
+    "local-models",
+    "typesafe",
+    "jev"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@types/node": "^22.0.0",
+    "typebox": "^1.3.27",
+    "typescript": "^5.9.0"
+  }
+}

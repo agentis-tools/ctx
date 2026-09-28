@@ -1,0 +1,56 @@
+{
+  "repo": "https://github.com/agentis-tools/ctx.git",
+  "commit": "493835df0a38769400b6c18c9128f7fea7453b2c",
+  "notes": "Answers verified against the pinned commit. Q&A tasks grade the final answer with case-insensitive regexes (all must match). Edit tasks grade the working tree with a shell command (exit 0 = pass). `slow_verify` runs only with --full.",
+  "tasks": [
+    {
+      "id": "locate-duplicates-cmd",
+      "kind": "locate",
+      "prompt": "Which function implements the `ctx duplicates` command, and in which file is it defined? Answer with the function name and file path.",
+      "expect": ["run_duplicates", "src/commands/duplicates\\.rs"]
+    },
+    {
+      "id": "locate-fail-on-parser",
+      "kind": "locate",
+      "prompt": "Where is the `--fail-on` expression of `ctx score` parsed? Give the function name and the file.",
+      "expect": ["parse_fail_on", "src/score\\.rs"]
+    },
+    {
+      "id": "locate-near-duplicates",
+      "kind": "locate",
+      "prompt": "Which function finds near-duplicate function pairs, and in which file is it defined?",
+      "expect": ["find_near_duplicates", "fingerprint\\.rs"]
+    },
+    {
+      "id": "impact-index-file",
+      "kind": "impact",
+      "prompt": "Which functions call `Indexer::index_file`? List the caller function names.",
+      "expect": ["watch_and_index"]
+    },
+    {
+      "id": "reuse-changed-files",
+      "kind": "reuse",
+      "prompt": "I want to write a Rust helper that returns the set of files changed since a git reference. Does such a helper already exist in this repository? If so, give its name and file.",
+      "expect": ["changed_files_against", "gitutil\\.rs"]
+    },
+    {
+      "id": "locate-judge-env",
+      "kind": "locate",
+      "prompt": "Which environment variable does `ctx judge` read its TypeSafe API key from?",
+      "expect": ["JEV_API_KEY"]
+    },
+    {
+      "id": "control-no-code",
+      "kind": "control",
+      "prompt": "In one sentence, what is the Jaccard similarity of two sets?",
+      "expect": ["intersection", "union"]
+    },
+    {
+      "id": "edit-rename-private-fn",
+      "kind": "edit",
+      "prompt": "Rename the private function `print_human` in src/commands/duplicates.rs to `print_duplicate_pairs` and update its callers. Only change that file.",
+      "verify": "grep -q 'fn print_duplicate_pairs' src/commands/duplicates.rs && ! grep -q 'print_human' src/commands/duplicates.rs && test \"$(git diff --name-only)\" = src/commands/duplicates.rs",
+      "slow_verify": "cargo check --quiet --no-default-features"
+    }
+  ]
+}

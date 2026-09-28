@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository and filtering afterwards. `score_3_changed` on the perf fixture
   drops from 5.5 s to 1.2 s with identical output (#23).
 ### Added
+- pi integration (`plugins/pi`, npm package `@agentis-tools/pi-ctx`): a pi
+  extension that routes each prompt with TypeSafe Jev (or an offline keyword
+  router, or the model itself with `--ctx-routing model`) to one of eight ctx
+  workflows. It runs the workflow's ctx commands and injects a plain-text brief
+  sized to the model's free context window, which suits small local models. It
+  also registers five single-parameter tools (`ctx_find`, `ctx_source`,
+  `ctx_impact`, `ctx_similar`, `ctx_check`). After every edit it reindexes and
+  runs `ctx check`, and at the end of a run it runs a `ctx score` gate in
+  report or block mode. Semantic steps fall back to keyword search when
+  embeddings are missing, and the agent cannot write `.ctx/rules.toml`. The
+  Jev key is read from `JEV_API_KEY` (or `TYPESAFE_API_KEY`). Jev receives the
+  prompt and repository counts, never source code. Includes an eval harness
+  that compares pass rate, tokens and tool calls with and without the
+  extension on any pi model.
 - `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
   model (TypeSafe Jev). For each call whose name matches in-repo functions, the
   model picks the real callee among the same-named candidates or `external`
