@@ -36,6 +36,23 @@ fn schema_for<T: JsonSchema>() -> Arc<serde_json::Map<String, serde_json::Value>
 }
 
 /// Get all available tools.
+/// Narrow a substring search (`find_symbols_filtered`) to the symbols whose
+/// name, or qualified-name suffix, equals `name`. When none does, the substring
+/// matches are returned unchanged, so partial names still find something.
+pub fn prefer_exact(symbols: Vec<crate::db::Symbol>, name: &str) -> Vec<crate::db::Symbol> {
+    let is_exact = |s: &crate::db::Symbol| {
+        s.name == name
+            || s.qualified_name.as_deref().is_some_and(|q| {
+                q == name || q.ends_with(&format!("::{name}")) || q.ends_with(&format!(".{name}"))
+            })
+    };
+    if symbols.iter().any(is_exact) {
+        symbols.into_iter().filter(is_exact).collect()
+    } else {
+        symbols
+    }
+}
+
 pub fn get_all_tools() -> Vec<Tool> {
     vec![
         // Search tools

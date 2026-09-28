@@ -3,7 +3,10 @@
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
-use super::{parse_params, schema_for, CallGraphParams, SmartContextParams};
+use std::collections::{HashSet, VecDeque};
+
+use super::{parse_params, prefer_exact, schema_for, CallGraphParams, SmartContextParams};
+use crate::db::{Database, EdgeKind, Symbol, SymbolKind};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
@@ -15,8 +18,9 @@ fn internal_error(msg: impl Into<String>) -> rmcp::ErrorData {
 pub fn get_callers_tool() -> Tool {
     Tool::new(
         "get_callers",
-        "Find all functions that call a given function. \
-         Useful for understanding the impact of changes and the call hierarchy.",
+        "Find the functions and methods that call a given function or method, following \
+         resolved call edges up to `depth` levels (default 3). Calls ctx could not bind \
+         to a definition are listed separately as possible callers.",
         schema_for::<CallGraphParams>(),
     )
 }
@@ -25,8 +29,8 @@ pub fn get_callers_tool() -> Tool {
 pub fn get_callees_tool() -> Tool {
     Tool::new(
         "get_callees",
-        "Find all functions called by a given function. \
-         Useful for understanding dependencies and what a function relies on.",
+        "List the calls a function or method makes and the definition each call \
+         resolves to (or 'unresolved or external').",
         schema_for::<CallGraphParams>(),
     )
 }
@@ -42,65 +46,189 @@ pub fn smart_context_tool() -> Tool {
     )
 }
 
+/// At most this many same-named definitions are expanded in one answer.
+const MAX_TARGETS: usize = 5;
+
+/// Resolve a function name to its definitions: functions *and* methods, exact
+/// name (or qualified-name suffix) matches first, substring matches only when
+/// nothing matches exactly. `find_symbols_filtered` is a substring search, so
+/// taking its first row answered `getValue` with `TestContextSetGetValues`.
+fn resolve_functions(
+    db: &Database,
+    name: &str,
+    file: Option<&str>,
+) -> crate::error::Result<Vec<Symbol>> {
+    let candidates: Vec<Symbol> = db
+        .find_symbols_filtered(name, 200, file, None)?
+        .into_iter()
+        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method))
+        .collect();
+    Ok(prefer_exact(candidates, name))
+}
+
+fn describe(sym: &Symbol) -> String {
+    format!(
+        "{} [{}] ({}:{})",
+        sym.qualified_name.as_deref().unwrap_or(&sym.name),
+        sym.kind.as_str(),
+        sym.file_path,
+        sym.line_start
+    )
+}
+
+/// Callers of one definition: breadth-first over *resolved* call edges
+/// (`target_id` = the definition), so edges that indexing, the LSP or
+/// `ctx judge edges` bound elsewhere are not reported here. Same-named calls
+/// the resolver left unbound are listed separately as possible callers.
+fn callers_of(db: &Database, sym: &Symbol, depth: u32) -> crate::error::Result<String> {
+    let mut out = String::new();
+    let mut visited = HashSet::from([sym.id.clone()]);
+    let mut queue = VecDeque::from([(sym.id.clone(), 0_u32)]);
+    let mut found = 0;
+    while let Some((target, dist)) = queue.pop_front() {
+        if dist >= depth {
+            continue;
+        }
+        let mut edges: Vec<_> = db
+            .get_incoming_edges(&target)?
+            .into_iter()
+            .filter(|e| {
+                e.kind == EdgeKind::Calls && e.target_id.as_deref() == Some(target.as_str())
+            })
+            .collect();
+        edges.sort_by(|a, b| a.source_id.cmp(&b.source_id).then(a.line.cmp(&b.line)));
+        for edge in edges {
+            if !visited.insert(edge.source_id.clone()) {
+                continue;
+            }
+            if let Some(caller) = db.get_symbol(&edge.source_id)? {
+                found += 1;
+                out.push_str(&format!(
+                    "{}- {} ({}:{})\n",
+                    "  ".repeat(dist as usize),
+                    caller.qualified_name.as_deref().unwrap_or(&caller.name),
+                    caller.file_path,
+                    edge.line.unwrap_or(caller.line_start)
+                ));
+                if let Some(ref c) = edge.context {
+                    out.push_str(&format!(
+                        "{}  Call: {}\n",
+                        "  ".repeat(dist as usize),
+                        c.trim()
+                    ));
+                }
+                queue.push_back((caller.id.clone(), dist + 1));
+            }
+        }
+    }
+    if found == 0 {
+        out.push_str("(no resolved callers)\n");
+    }
+    let mut unresolved: Vec<_> = db
+        .get_incoming_edges(&sym.name)?
+        .into_iter()
+        .filter(|e| e.kind == EdgeKind::Calls && e.target_id.is_none() && e.target_name == sym.name)
+        .collect();
+    unresolved.sort_by(|a, b| a.source_id.cmp(&b.source_id).then(a.line.cmp(&b.line)));
+    if !unresolved.is_empty() {
+        out.push_str(&format!(
+            "Possible callers (call by this name that ctx could not bind to a definition, {}):\n",
+            unresolved.len()
+        ));
+        for edge in unresolved.iter().take(20) {
+            if let Some(caller) = db.get_symbol(&edge.source_id)? {
+                out.push_str(&format!(
+                    "- {} ({}:{})\n",
+                    caller.qualified_name.as_deref().unwrap_or(&caller.name),
+                    caller.file_path,
+                    edge.line.unwrap_or(caller.line_start)
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Calls made by one definition, with the definition each resolved to.
+fn callees_of(db: &Database, sym: &Symbol) -> crate::error::Result<String> {
+    let edges: Vec<_> = db
+        .get_outgoing_edges(&sym.id)?
+        .into_iter()
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .collect();
+    if edges.is_empty() {
+        return Ok("(no calls)\n".into());
+    }
+    let mut out = String::new();
+    for edge in &edges {
+        let target = match edge.target_id.as_deref() {
+            Some(id) => db.get_symbol(id)?.map(|t| describe(&t)),
+            None => None,
+        };
+        out.push_str(&format!(
+            "- {} (line {}) -> {}\n",
+            edge.target_name,
+            edge.line.unwrap_or(0),
+            target.unwrap_or_else(|| "unresolved or external".into())
+        ));
+    }
+    Ok(out)
+}
+
+fn call_graph_answer(
+    server: &CtxServer,
+    params: &CallGraphParams,
+    per_target: impl Fn(&Database, &Symbol) -> crate::error::Result<String>,
+    heading: &str,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let text = server
+        .with_db(|db| -> crate::error::Result<String> {
+            let targets = resolve_functions(db, &params.function, params.file.as_deref())?;
+            if targets.is_empty() {
+                return Ok(format!(
+                    "Function or method '{}' not found",
+                    params.function
+                ));
+            }
+            let mut out = String::new();
+            if targets.len() > 1 {
+                out.push_str(&format!(
+                    "{} definitions match '{}'{}; pass `file` to pick one.\n\n",
+                    targets.len(),
+                    params.function,
+                    if targets.len() > MAX_TARGETS {
+                        format!(" (showing {MAX_TARGETS})")
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            for sym in targets.iter().take(MAX_TARGETS) {
+                out.push_str(&format!("{heading} {}:\n", describe(sym)));
+                out.push_str(&per_target(db, sym)?);
+                out.push('\n');
+            }
+            Ok(out)
+        })
+        .map_err(|e| internal_error(e.to_string()))?;
+    Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+}
+
 /// Execute the get_callers tool.
 pub async fn get_callers(
     server: &CtxServer,
     args: Option<&serde_json::Map<String, Value>>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: CallGraphParams = parse_params(args)?;
-
-    // Find the function first
-    let symbols = server
-        .with_db(|db| {
-            db.find_symbols_filtered(
-                &params.function,
-                100,
-                params.file.as_deref(),
-                Some("function"),
-            )
-        })
-        .map_err(|e| internal_error(e.to_string()))?;
-
-    if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "Function '{}' not found",
-            params.function
-        ))]));
-    }
-
-    let sym = &symbols[0];
-    let sym_name = sym.name.clone();
-
-    // Get incoming edges (callers)
-    let edges = server
-        .with_db(|db| db.get_incoming_edges(&sym_name))
-        .map_err(|e| internal_error(e.to_string()))?;
-
-    if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "No callers found for '{}'",
-            sym.name
-        ))]));
-    }
-
-    let mut output = format!("Functions that call '{}' ({}):\n\n", sym.name, edges.len());
-
-    for edge in &edges {
-        let source_id = edge.source_id.clone();
-        if let Ok(Some(caller)) = server.with_db(|db| db.get_symbol(&source_id)) {
-            output.push_str(&format!(
-                "- {} ({}:{})\n",
-                caller.name,
-                caller.file_path,
-                edge.line.unwrap_or(caller.line_start)
-            ));
-            if let Some(ref ctx) = edge.context {
-                output.push_str(&format!("  Call: {}\n", ctx));
-            }
-        }
-    }
-
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    let depth = u32::try_from(params.depth.unwrap_or(3))
+        .unwrap_or(0)
+        .clamp(1, 5);
+    call_graph_answer(
+        server,
+        &params,
+        |db, sym| callers_of(db, sym, depth),
+        "Callers of",
+    )
 }
 
 /// Execute the get_callees tool.
@@ -109,53 +237,7 @@ pub async fn get_callees(
     args: Option<&serde_json::Map<String, Value>>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: CallGraphParams = parse_params(args)?;
-
-    // Find the function first
-    let symbols = server
-        .with_db(|db| {
-            db.find_symbols_filtered(
-                &params.function,
-                100,
-                params.file.as_deref(),
-                Some("function"),
-            )
-        })
-        .map_err(|e| internal_error(e.to_string()))?;
-
-    if symbols.is_empty() {
-        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "Function '{}' not found",
-            params.function
-        ))]));
-    }
-
-    let sym = &symbols[0];
-    let sym_id = sym.id.clone();
-
-    // Get outgoing edges (callees)
-    let edges = server
-        .with_db(|db| db.get_outgoing_edges(&sym_id))
-        .map_err(|e| internal_error(e.to_string()))?;
-
-    if edges.is_empty() {
-        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "No function calls found in '{}'",
-            sym.name
-        ))]));
-    }
-
-    let mut output = format!("Functions called by '{}' ({}):\n\n", sym.name, edges.len());
-
-    for edge in &edges {
-        output.push_str(&format!(
-            "- {} [{}] (line {})\n",
-            edge.target_name,
-            edge.kind.as_str(),
-            edge.line.unwrap_or(0)
-        ));
-    }
-
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    call_graph_answer(server, &params, callees_of, "Calls made by")
 }
 
 /// Execute the smart_context tool.
@@ -343,5 +425,109 @@ mod tests {
         let tool = smart_context_tool();
         assert_eq!(tool.name.as_ref(), "smart_context");
         assert!(tool.description.is_some());
+    }
+
+    fn project(src: &str) -> (tempfile::TempDir, CtxServer) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), src).unwrap();
+        let mut indexer = crate::index::Indexer::with_config(
+            dir.path(),
+            false,
+            crate::walker::WalkerConfig::default(),
+        )
+        .unwrap();
+        indexer.index().unwrap();
+        let server = CtxServer::new(dir.path().to_path_buf()).unwrap();
+        (dir, server)
+    }
+
+    fn text(result: &CallToolResult) -> String {
+        match &result.content[0] {
+            ContentBlock::Text(t) => t.text.clone(),
+            _ => panic!("expected text"),
+        }
+    }
+
+    fn args(v: serde_json::Value) -> serde_json::Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    const SRC: &str = r#"
+pub struct Node;
+impl Node {
+    pub fn get_value(&self) -> u32 { 1 }
+}
+pub fn lookup(n: &Node) -> u32 { n.get_value() }
+pub fn outer(n: &Node) -> u32 { lookup(n) }
+pub fn test_node_get_value_twice(n: &Node) -> u32 { 2 }
+"#;
+
+    #[tokio::test]
+    async fn callers_find_methods_and_prefer_exact_names() {
+        let (_d, server) = project(SRC);
+        let out = text(
+            &get_callers(
+                &server,
+                Some(&args(serde_json::json!({"function": "get_value"}))),
+            )
+            .await
+            .unwrap(),
+        );
+        // The method is found (kind filter used to exclude methods) and the
+        // substring match `test_node_get_value_twice` is not chosen instead.
+        assert!(
+            out.contains("Callers of") && out.contains("get_value [method]"),
+            "{out}"
+        );
+        assert!(!out.contains("test_node_get_value_twice"), "{out}");
+        assert!(out.contains("lookup"), "{out}");
+        // depth: outer calls lookup, which calls get_value
+        assert!(out.contains("outer"), "{out}");
+        let shallow = text(
+            &get_callers(
+                &server,
+                Some(&args(
+                    serde_json::json!({"function": "get_value", "depth": 1}),
+                )),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(
+            shallow.contains("lookup") && !shallow.contains("outer"),
+            "{shallow}"
+        );
+    }
+
+    #[tokio::test]
+    async fn callees_report_the_resolved_definition() {
+        let (_d, server) = project(SRC);
+        let out = text(
+            &get_callees(
+                &server,
+                Some(&args(serde_json::json!({"function": "lookup"}))),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(
+            out.contains("get_value") && out.contains("[method] (src/lib.rs:"),
+            "{out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_function_is_reported() {
+        let (_d, server) = project(SRC);
+        let out = text(
+            &get_callers(
+                &server,
+                Some(&args(serde_json::json!({"function": "nope_nothing"}))),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(out.contains("not found"), "{out}");
     }
 }
