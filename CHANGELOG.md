@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ctx scip import <index.scip>` applies a SCIP index (scip-go, scip-python,
+  scip-typescript, `rust-analyzer scip`, scip-clang) to the call graph. Calls
+  are bound to the definition the compiler-backed indexer resolved, and calls
+  that leave the repository are unbound. Answered edges get provenance `scip`:
+  `ctx judge edges` skips them, and `ctx index` re-applies them while the
+  calling and target files are unchanged. `ctx scip status` counts call edges
+  by resolver. The SCIP reader is built in and adds no dependency.
+- `[[rules.structural]]` in `.ctx/rules.toml`: ast-grep patterns over ctx's
+  own grammars (Rust, Go, Python, C, C++, TypeScript, TSX, JavaScript), for
+  code-shape rules the dependency rules cannot express. Under
+  `ctx check --against`, only matches on changed lines are reported.
 - `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
   model (TypeSafe Jev). For each call whose name matches in-repo functions, the
   model picks the real callee among the same-named candidates or `external`

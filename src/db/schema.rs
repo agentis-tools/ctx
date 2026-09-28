@@ -2301,6 +2301,212 @@ impl<T> ResultExt<T> for Result<T> {
 }
 
 // ============================================================================
+// Edge provenance and precise (SCIP) edges (see src/scip.rs)
+// ============================================================================
+
+/// Where an edge's current target came from. Only edges a precise or
+/// model-assisted pass has touched get a row; everything else is `name`
+/// (tree-sitter extraction + name resolution).
+pub const PROVENANCE_SCIP: &str = "scip";
+pub const PROVENANCE_JEV: &str = "jev";
+
+/// A function or method with its line span, for mapping a definition position
+/// back to a symbol.
+#[derive(Debug, Clone)]
+pub struct CallableSpan {
+    pub id: String,
+    pub name: String,
+    pub file_path: String,
+    pub line_start: u32,
+    pub line_end: u32,
+}
+
+/// One call edge's answer from a SCIP index, cached so that a re-index can
+/// re-apply it while both the calling file and the target file are unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScipEdge {
+    pub file_path: String,
+    pub file_hash: String,
+    pub line: u32,
+    pub col: u32,
+    pub target_name: String,
+    /// `None`: the call resolves outside the repository.
+    pub target_file: Option<String>,
+    pub target_file_hash: Option<String>,
+    /// 1-based line of the target's definition.
+    pub target_line: Option<u32>,
+}
+
+impl Database {
+    /// Create the provenance and SCIP cache tables if needed. Idempotent and
+    /// additive, like `judgments`: an index without them is still valid.
+    pub fn ensure_scip_tables(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS edge_provenance (
+                edge_id INTEGER PRIMARY KEY REFERENCES edges(id) ON DELETE CASCADE,
+                source TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS scip_edges (
+                file_path TEXT NOT NULL,
+                file_hash TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                col INTEGER NOT NULL,
+                target_name TEXT NOT NULL,
+                target_file TEXT,
+                target_file_hash TEXT,
+                target_line INTEGER,
+                PRIMARY KEY (file_path, line, col, target_name)
+            );
+            "#,
+        )?;
+        Ok(())
+    }
+
+    fn has_table(&self, name: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                params![name],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false))
+    }
+
+    /// Record where edges' targets came from (replaces earlier provenance).
+    pub fn set_edge_provenance(&self, edge_ids: &[i64], source: &str) -> Result<()> {
+        self.ensure_scip_tables()?;
+        let mut stmt = self.conn.prepare_cached(
+            "INSERT OR REPLACE INTO edge_provenance (edge_id, source) VALUES (?, ?)",
+        )?;
+        for id in edge_ids {
+            stmt.execute(params![id, source])?;
+        }
+        Ok(())
+    }
+
+    /// Edge ids whose target was set by `source`.
+    pub fn edges_with_provenance(&self, source: &str) -> Result<std::collections::HashSet<i64>> {
+        if !self.has_table("edge_provenance")? {
+            return Ok(Default::default());
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT edge_id FROM edge_provenance WHERE source = ?")?;
+        let rows = stmt.query_map(params![source], |r| r.get(0))?;
+        rows.collect()
+    }
+
+    /// Count of call edges per provenance (`name` for edges without a row).
+    pub fn call_edge_provenance_counts(&self) -> Result<Vec<(String, i64)>> {
+        let sql = if self.has_table("edge_provenance")? {
+            "SELECT COALESCE(p.source, 'name'), COUNT(*) FROM edges e
+             LEFT JOIN edge_provenance p ON p.edge_id = e.id
+             WHERE e.kind = 'calls' GROUP BY 1 ORDER BY 1"
+        } else {
+            "SELECT 'name', COUNT(*) FROM edges WHERE kind = 'calls'"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// For call edges whose recorded call expression spans several lines: edge
+    /// id -> number of lines after the first.
+    pub fn call_edge_extra_lines(&self) -> Result<std::collections::HashMap<i64, u32>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, context FROM edges WHERE kind = 'calls' AND context LIKE '%' || char(10) || '%'",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let ctx: String = r.get(1)?;
+            Ok((r.get(0)?, ctx.matches('\n').count() as u32))
+        })?;
+        rows.collect()
+    }
+
+    /// Language of every indexed file.
+    pub fn file_languages(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, language FROM files WHERE language IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Content hash of every indexed file.
+    pub fn file_hashes(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self.conn.prepare("SELECT path, content_hash FROM files")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Every function and method with its line span.
+    pub fn callable_spans(&self) -> Result<Vec<CallableSpan>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, file_path, COALESCE(line_start, 0), COALESCE(line_end, 0)
+             FROM symbols WHERE kind IN ('function', 'method')",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(CallableSpan {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                file_path: r.get(2)?,
+                line_start: r.get(3)?,
+                line_end: r.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Replace the SCIP cache with `edges` (one import = one snapshot).
+    pub fn replace_scip_edges(&self, edges: &[ScipEdge]) -> Result<()> {
+        self.ensure_scip_tables()?;
+        self.conn.execute("DELETE FROM scip_edges", [])?;
+        let mut stmt = self
+            .conn
+            .prepare_cached("INSERT OR REPLACE INTO scip_edges VALUES (?, ?, ?, ?, ?, ?, ?, ?)")?;
+        for e in edges {
+            stmt.execute(params![
+                e.file_path,
+                e.file_hash,
+                e.line,
+                e.col,
+                e.target_name,
+                e.target_file,
+                e.target_file_hash,
+                e.target_line
+            ])?;
+        }
+        Ok(())
+    }
+
+    /// The cached SCIP answers (empty when no import has run).
+    pub fn scip_edges(&self) -> Result<Vec<ScipEdge>> {
+        if !self.has_table("scip_edges")? {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, file_hash, line, col, target_name, target_file, target_file_hash, target_line FROM scip_edges",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ScipEdge {
+                file_path: r.get(0)?,
+                file_hash: r.get(1)?,
+                line: r.get(2)?,
+                col: r.get(3)?,
+                target_name: r.get(4)?,
+                target_file: r.get(5)?,
+                target_file_hash: r.get(6)?,
+                target_line: r.get(7)?,
+            })
+        })?;
+        rows.collect()
+    }
+}
+
+// ============================================================================
 // Judgments: cached answers from an external decision model (see src/judge.rs)
 // ============================================================================
 

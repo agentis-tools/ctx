@@ -68,6 +68,27 @@ pub struct RuleGroups {
 
     #[serde(default)]
     pub no_new_dependents: Vec<NoNewDependentsRule>,
+
+    #[serde(default)]
+    pub structural: Vec<StructuralRule>,
+}
+
+/// `[[rules.structural]]`: an ast-grep pattern that must not match (see
+/// `crate::structural`). With `--against`, only matches on changed lines count.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralRule {
+    pub id: String,
+    /// ctx language name: rust, go, python, c, cpp, typescript, tsx, javascript.
+    pub language: String,
+    pub pattern: String,
+    /// Files the rule applies to (default: every indexed file of the language).
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// `[[rules.forbidden]]`: dependencies from `from` to `to` are violations.
@@ -169,6 +190,8 @@ pub struct CompiledRules {
     limit_excludes: Vec<GlobSet>,
     /// Compiled `paths` globs, parallel to `file.rules.no_new_dependents`.
     frozen_paths: Vec<GlobSet>,
+    /// Compiled structural rules: pattern, `paths` (None = all), `exclude`.
+    pub(crate) structural: Vec<(crate::structural::CompiledPattern, Option<GlobSet>, GlobSet)>,
 }
 
 impl CompiledRules {
@@ -205,11 +228,30 @@ impl CompiledRules {
             )?);
         }
 
+        let mut structural = Vec::new();
+        for (i, rule) in file.rules.structural.iter().enumerate() {
+            let pattern = crate::structural::CompiledPattern::new(&rule.language, &rule.pattern)
+                .map_err(|e| {
+                    CtxError::Other(format!("rules.structural[{i}] ({}): {e}", rule.id))
+                })?;
+            let paths = if rule.paths.is_empty() {
+                None
+            } else {
+                Some(build_globset(
+                    &rule.paths,
+                    &format!("rules.structural[{i}].paths"),
+                )?)
+            };
+            let exclude = build_globset(&rule.exclude, &format!("rules.structural[{i}].exclude"))?;
+            structural.push((pattern, paths, exclude));
+        }
+
         Ok(CompiledRules {
             file,
             layer_globs,
             limit_excludes,
             frozen_paths,
+            structural,
         })
     }
 
@@ -370,6 +412,7 @@ pub enum RuleKind {
     AllowedDependents,
     Limit,
     NoNewDependents,
+    Structural,
 }
 
 impl RuleKind {
@@ -379,6 +422,7 @@ impl RuleKind {
             RuleKind::AllowedDependents => "allowed_dependents",
             RuleKind::Limit => "limit",
             RuleKind::NoNewDependents => "no_new_dependents",
+            RuleKind::Structural => "structural",
         }
     }
 }

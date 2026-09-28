@@ -142,6 +142,8 @@ pub mod judge;
 pub mod lsp;
 pub mod parser;
 pub mod rank;
+pub mod scip;
+pub mod structural;
 pub mod tokens;
 pub mod walker;
 

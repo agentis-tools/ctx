@@ -86,13 +86,132 @@ pub fn collect_violations(
     let symbol_metrics = context.db.symbol_metrics()?;
     let file_complexity = context.db.file_complexity()?;
 
-    Ok(rules::evaluate(
+    let mut violations = rules::evaluate(
         &context.compiled,
         &deps,
         &symbol_metrics,
         &file_complexity,
         changed.as_ref(),
+    );
+    if !context.compiled.structural.is_empty() {
+        let changed_lines = match against {
+            Some(reference) => Some(changed_lines_against(root, reference)?),
+            None => None,
+        };
+        violations.extend(structural_violations(
+            root,
+            context,
+            changed_lines.as_ref(),
+        )?);
+    }
+    Ok(violations)
+}
+
+/// Added/changed lines per file relative to `reference` (paths relative to `root`).
+fn changed_lines_against(root: &Path, reference: &str) -> Result<crate::structural::ChangedLines> {
+    let out = std::process::Command::new("git")
+        .args([
+            "diff",
+            "-U0",
+            "--no-color",
+            "--relative",
+            "--no-ext-diff",
+            reference,
+        ])
+        .current_dir(root)
+        .output()?;
+    if !out.status.success() {
+        return Err(CtxError::Other(format!(
+            "git diff {reference} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(crate::structural::parse_changed_lines(
+        &String::from_utf8_lossy(&out.stdout),
     ))
+}
+
+/// Evaluate `[[rules.structural]]` over the indexed files of each rule's
+/// language. Each file is parsed once and every rule for its language is
+/// matched on that tree; files are processed in parallel. With `changed_lines`,
+/// only matches overlapping a changed line are reported.
+fn structural_violations(
+    root: &Path,
+    context: &CheckContext,
+    changed_lines: Option<&crate::structural::ChangedLines>,
+) -> Result<Vec<Violation>> {
+    use rayon::prelude::*;
+    let languages = context.db.file_languages()?;
+    let rules: Vec<_> = context
+        .compiled
+        .file
+        .rules
+        .structural
+        .iter()
+        .zip(&context.compiled.structural)
+        .collect();
+    let mut out: Vec<Violation> = context
+        .indexed
+        .par_iter()
+        .flat_map_iter(|file| {
+            let mut found = Vec::new();
+            let Some(lang) = languages.get(file) else {
+                return found;
+            };
+            let applicable: Vec<_> = rules
+                .iter()
+                .filter(|(rule, (_, paths, exclude))| {
+                    &rule.language == lang
+                        && paths.as_ref().is_none_or(|p| p.is_match(file))
+                        && !exclude.is_match(file)
+                })
+                .collect();
+            if applicable.is_empty() {
+                return found;
+            }
+            let ranges = match changed_lines {
+                Some(c) => match c.get(file) {
+                    Some(r) => Some(r.as_slice()),
+                    None => return found,
+                },
+                None => None,
+            };
+            let Ok(source) = fs::read_to_string(root.join(file)) else {
+                return found;
+            };
+            let Some(tree) = crate::structural::parse(lang, &source) else {
+                return found;
+            };
+            for (rule, (pattern, _, _)) in applicable {
+                for m in pattern.find_in(&tree) {
+                    if ranges.is_some_and(|r| !crate::structural::overlaps(&m, r)) {
+                        continue;
+                    }
+                    found.push(Violation {
+                        rule: rules::RuleKind::Structural,
+                        rule_id: format!("structural: {}", rule.id),
+                        reason: rule
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| format!("matches `{}`", rule.pattern)),
+                        message: format!("{}:{}: {}", file, m.line_start, m.snippet),
+                        file: file.clone(),
+                        line: Some(i64::from(m.line_start)),
+                        from: None,
+                        to: None,
+                        subject: None,
+                        metric: None,
+                        scope: None,
+                        value: None,
+                        max: None,
+                    });
+                }
+            }
+            found
+        })
+        .collect();
+    out.sort_by(|a, b| (&a.rule_id, &a.file, a.line).cmp(&(&b.rule_id, &b.file, b.line)));
+    Ok(out)
 }
 
 // ============================================================================
@@ -860,5 +979,95 @@ mod tests {
         assert_eq!(deps[1].from.file(), "src/b.rs");
         assert_eq!(deps[1].to.file(), "src/a.rs");
         assert!(matches!(deps[1].from, Endpoint::File { .. }));
+    }
+
+    // ---------- structural rules ----------
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn structural_rules_report_matches_and_scope_to_changed_lines() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src/handlers")).unwrap();
+        std::fs::create_dir_all(root.join(".ctx")).unwrap();
+        std::fs::write(
+            root.join("src/handlers/a.rs"),
+            "pub fn a(x: Option<u8>) -> u8 {\n    x.unwrap()\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn b(x: Option<u8>) -> u8 {\n    x.unwrap()\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".ctx/rules.toml"),
+            "version = 1\n[[rules.structural]]\nid = \"no-unwrap\"\nlanguage = \"rust\"\npattern = \"$X.unwrap()\"\npaths = [\"src/handlers/**\"]\nreason = \"handlers return errors\"\n",
+        )
+        .unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        let mut ix =
+            crate::index::Indexer::with_config(root, false, crate::walker::WalkerConfig::default())
+                .unwrap();
+        ix.index().unwrap();
+        drop(ix);
+
+        let ctx = load_context(root, None).unwrap();
+        let all = collect_violations(root, &ctx, None).unwrap();
+        // only the handler matches (paths), with the rule's id and reason
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0].rule, RuleKind::Structural);
+        assert_eq!(all[0].rule_id, "structural: no-unwrap");
+        assert_eq!(
+            (all[0].file.as_str(), all[0].line),
+            ("src/handlers/a.rs", Some(2))
+        );
+        assert_eq!(all[0].reason, "handlers return errors");
+
+        // a change elsewhere in the same file: the old match is not reported
+        std::fs::write(
+            root.join("src/handlers/a.rs"),
+            "pub fn a(x: Option<u8>) -> u8 {\n    x.unwrap()\n}\npub fn c() {}\n",
+        )
+        .unwrap();
+        assert!(collect_violations(root, &ctx, Some("HEAD"))
+            .unwrap()
+            .is_empty());
+        // a new match on a changed line is
+        std::fs::write(
+            root.join("src/handlers/a.rs"),
+            "pub fn a(x: Option<u8>) -> u8 {\n    x.unwrap()\n}\npub fn c(y: Option<u8>) -> u8 {\n    y.unwrap()\n}\n",
+        )
+        .unwrap();
+        let scoped = collect_violations(root, &ctx, Some("HEAD")).unwrap();
+        assert_eq!(scoped.len(), 1, "{scoped:?}");
+        assert_eq!(scoped[0].line, Some(5));
+    }
+
+    #[test]
+    fn invalid_structural_rules_are_configuration_errors() {
+        for (lang, pattern) in [("cobol", "x"), ("rust", "")] {
+            let parsed: RulesFile = toml::from_str(&format!(
+                "version = 1\n[[rules.structural]]\nid = \"r\"\nlanguage = \"{lang}\"\npattern = \"{pattern}\"\n"
+            ))
+            .unwrap();
+            let err = CompiledRules::compile(parsed).unwrap_err().to_string();
+            assert!(err.contains("rules.structural[0] (r)"), "{err}");
+        }
     }
 }

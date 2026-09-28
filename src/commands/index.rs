@@ -130,6 +130,15 @@ pub fn run_index(config: IndexConfig) -> Result<()> {
     eprintln!("  Traits:    {}", stats.traits);
     eprintln!("  Edges:     {}", stats.edges);
 
+    // Precise edges from an earlier `ctx scip import`: re-applied for files that
+    // are unchanged since the import, before the judge runs, so the judge only
+    // considers what SCIP did not answer. No-op without an import.
+    match ctx::scip::replay(indexer.database()) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("  SCIP:      {n} call edges re-applied from the last import"),
+        Err(e) => eprintln!("Warning: SCIP edges not re-applied: {e}"),
+    }
+
     // Opt-in model-assisted edge resolution (`[judge] edges = true`): asks only
     // about edges not already answered; without JEV_API_KEY it re-applies the
     // cached answers offline so a reindex never silently loses them.

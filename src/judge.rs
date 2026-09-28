@@ -127,6 +127,8 @@ pub struct JudgeReport {
     pub asked: usize,
     pub failed: usize,
     pub skipped_uncached: usize,
+    /// Edges not considered because a SCIP index already answered them.
+    pub skipped_precise: usize,
     pub low_confidence: usize,
     pub bound: usize,
     pub rebound: usize,
@@ -390,10 +392,18 @@ pub fn judge_edges(root: &Path, db: &Database, opts: &JudgeOptions) -> Result<Ju
     for c in &all {
         by_name.entry(c.name.as_str()).or_default().push(c);
     }
-    let edges = db.call_edges_for_judging()?;
+    // Edges a SCIP index answered came from a type checker; don't second-guess
+    // them (and don't pay for them).
+    let precise = db.edges_with_provenance(crate::db::PROVENANCE_SCIP)?;
+    let edges: Vec<_> = db
+        .call_edges_for_judging()?
+        .into_iter()
+        .filter(|e| !precise.contains(&e.edge_id))
+        .collect();
     let prepared = prepare(db, root, edges, &by_name, &opts.model)?;
     let mut report = JudgeReport {
         considered: prepared.len(),
+        skipped_precise: precise.len(),
         ..Default::default()
     };
 
@@ -524,6 +534,8 @@ pub fn judge_edges(root: &Path, db: &Database, opts: &JudgeOptions) -> Result<Ju
             for (edge_id, _, target) in &changes {
                 db.retarget_edge(*edge_id, target.as_deref())?;
             }
+            let ids: Vec<i64> = changes.iter().map(|(id, _, _)| *id).collect();
+            db.set_edge_provenance(&ids, crate::db::PROVENANCE_JEV)?;
             Ok(())
         })?;
     }

@@ -10,6 +10,7 @@ pub mod models;
 pub mod schema;
 
 pub use models::*;
+pub use schema::{CallableSpan, ScipEdge, PROVENANCE_JEV, PROVENANCE_SCIP};
 pub use schema::{
     CrossFileEdge, Database, EdgeSymbol, FileComplexity, JudgeCandidate, JudgeEdge, Judgment,
     MapSymbolRow, SymbolMetrics, UnresolvedEdgeLocation, SCHEMA_VERSION,

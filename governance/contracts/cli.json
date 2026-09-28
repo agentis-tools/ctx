@@ -35,6 +35,7 @@
         "map",
         "query",
         "review",
+        "scip",
         "score",
         "search",
         "self-update",
@@ -694,6 +695,64 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
         "--summary": "--summary Include change summary"
+      },
+      "subcommands": []
+    },
+    "ctx scip": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": [
+        "import",
+        "status"
+      ]
+    },
+    "ctx scip import": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--dry-run": "--dry-run Report what would change without rewriting edges",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": []
+    },
+    "ctx scip status": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens to include in output (omits files to fit budget, does not truncate file contents)",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--stats": "--stats Print stats (file count, total size, time taken)"
       },
       "subcommands": []
     },

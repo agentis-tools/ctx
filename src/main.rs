@@ -371,6 +371,9 @@ fn run(args: Args) -> Result<Outcome> {
         Some(Command::Judge { cmd }) => {
             return commands::run_judge(cmd, json);
         }
+        Some(Command::Scip { cmd }) => {
+            return commands::run_scip(cmd, json);
+        }
         Some(Command::Lsp { cmd }) => {
             // LSP registry command: returns its own Outcome (doctor exits 1
             // when a configured server fails its health probe).

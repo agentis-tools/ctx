@@ -55,7 +55,17 @@ exclude = ["src/core/**"]
 [[rules.no_new_dependents]]                # frozen paths
 paths  = ["src/legacy/**"]
 reason = "Legacy module is frozen; do not add new callers"
+
+[[rules.structural]]                       # code shape: an ast-grep pattern that must not match
+id       = "no-unwrap-in-handlers"
+language = "rust"                          # rust | go | python | c | cpp | typescript | tsx | javascript
+pattern  = "$X.unwrap()"
+paths    = ["src/handlers/**"]             # optional (default: every file of the language)
+exclude  = ["src/handlers/tests/**"]
+reason   = "Handlers return errors; they do not panic"
 ```
+
+Structural rules use [ast-grep](https://ast-grep.github.io/) pattern syntax (`$X` matches one node, `$$$` any sequence) on ctx's own grammars. With `--against`, a structural match is reported only when it overlaps a line the diff added or changed, so pre-existing matches in a touched file are not blamed on the change. As with the ast-grep CLI, a bare call pattern with `$$$` parses as a declaration in C/C++; name the arguments there (`strcpy($A, $B)`).
 
 Layers must not overlap: a file matching two layers' globs is a configuration error.
 
@@ -64,7 +74,7 @@ Layers must not overlap: a file matching two layers' globs is a configuration er
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--rules <PATH>` | Path to the rules file | `.ctx/rules.toml` |
-| `--against <REF>` | Only report violations where at least one endpoint's file changed since REF (for `no_new_dependents`: where the new dependent changed) | none |
+| `--against <REF>` | Only report violations where at least one endpoint's file changed since REF (for `no_new_dependents`: where the new dependent changed; for `structural`: matches on changed lines) | none |
 | `--list` | Print the parsed rules and layer membership counts, then exit 0 | false |
 | `--json` | Machine-readable output (global flag) | false |
 

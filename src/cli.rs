@@ -849,6 +849,34 @@ EXAMPLES:
         cmd: JudgeCommand,
     },
 
+    /// Precise call edges from a SCIP index (opt-in)
+    ///
+    /// `ctx scip import` reads an index produced by a compiler-backed SCIP
+    /// indexer and rebinds each call edge to the definition the indexer
+    /// resolved, or unbinds it when the call leaves the repository. Answered
+    /// edges get provenance `scip`: `ctx judge edges` skips them, and `ctx index`
+    /// re-applies them while the calling and target files are unchanged.
+    #[command(after_help = r#"EXIT CODES (ctx-wide convention):
+    0    index imported (or status printed)
+    2    operational error (no index, unreadable or invalid SCIP file)
+
+INDEXERS (run in the project root, on the same tree ctx indexed):
+    Go          scip-go
+    Python      scip-python index . --project-name NAME
+    TypeScript  scip-typescript index            (JavaScript: --infer-tsconfig)
+    Rust        rust-analyzer scip .
+    C/C++       scip-clang --compdb-path=compile_commands.json
+
+EXAMPLES:
+    scip-go && ctx scip import index.scip
+    ctx scip import index.scip --dry-run --json
+    ctx scip status                              # call edges by provenance
+"#)]
+    Scip {
+        #[command(subcommand)]
+        cmd: ScipCommand,
+    },
+
     /// Update ctx to the latest GitHub release (or a pinned version)
     ///
     /// Downloads the release artifact for this platform, verifies its
@@ -1024,6 +1052,20 @@ pub enum JudgeCommand {
         #[arg(long, default_value_t = 8)]
         concurrency: usize,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ScipCommand {
+    /// Apply a SCIP index's call resolutions to the ctx index
+    Import {
+        /// Path to the SCIP index (usually index.scip)
+        path: std::path::PathBuf,
+        /// Report what would change without rewriting edges
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show how many call edges each resolver (name, scip, jev) answered
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
