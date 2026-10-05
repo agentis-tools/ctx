@@ -133,6 +133,7 @@ does two jobs: it feeds the model the right context going *in*, and guardrails w
 | [`ctx map`](https://docs.agentis.tools/docs/commands/map) | Token-budgeted architectural overview (PageRank over the symbol graph) |
 | [`ctx diff`](https://docs.agentis.tools/docs/commands/diff) | Context for git changes, with automatic dependency expansion |
 | [`ctx similar "<description>"`](https://docs.agentis.tools/docs/commands/similar) | Find existing functions before writing new ones (with fan-in) |
+| [`ctx grep <pattern>`](https://docs.agentis.tools/docs/commands/grep) | ripgrep-style text search with every match tagged from the index (`def`, `ref`, `unresolved`, `unlinked`, `stale`, `unindexed`) |
 | `ctx search` / `ctx semantic` | Keyword (FTS5) and embedding-based symbol search |
 | `ctx query impact / callers / deps / graph` | Walk the call graph: blast radius, callers, dependencies |
 
@@ -243,6 +244,7 @@ The full flag reference for every command lives at
 | | `map` | Token-budgeted architectural overview |
 | | `diff` / `review` | Context for git changes / a GitHub PR |
 | | `similar` | Find existing functions before writing new ones |
+| | `grep` | Text search with ripgrep's recall, annotated with what the index knows |
 | | `search` / `semantic` / `query` / `source` / `explain` | Search and navigate the model |
 | **Govern** | `check` | Enforce architecture rules from `.ctx/rules.toml` |
 | | `score` | Composite quality gate for a change vs a git ref |

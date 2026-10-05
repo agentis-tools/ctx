@@ -27,7 +27,7 @@ use crate::error::Result;
 ///
 /// This is the canonical shape used everywhere a symbol appears in `--json`
 /// payloads.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SymbolRef {
     pub name: String,
     pub qualified_name: Option<String>,

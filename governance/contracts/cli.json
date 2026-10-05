@@ -27,6 +27,7 @@
         "embed",
         "explain",
         "graph",
+        "grep",
         "harness",
         "hotspots",
         "index",
@@ -219,6 +220,33 @@
         "--output": "--output <OUTPUT> Output format (dot, mermaid, json) [default: dot]",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)"
+      },
+      "subcommands": []
+    },
+    "ctx grep": {
+      "options": {
+        "--count-only": "--count-only Only count tokens, don't output file contents",
+        "--encoding": "--encoding <ENCODING> Tokenizer encoding to use (cl100k_base, o200k_base, p50k_base) [default: cl100k_base]",
+        "--fixed-strings": "-F, --fixed-strings Treat the pattern as a literal string",
+        "--format": "-f, --format <FORMAT> Output format Possible values: - xml - markdown - md - plain - text: Plain text (used by `ctx map`; alias for plain elsewhere) - json [default: xml]",
+        "--glob": "-g, --glob <GLOBS> Include or exclude files matching a glob (prefix with ! to exclude; repeatable)",
+        "--help": "-h, --help Print help (see a summary with '-h')",
+        "--hidden": "--hidden Search hidden files and directories",
+        "--ignore": "-i, --ignore <IGNORE_PATTERNS> Additional ignore patterns (can be repeated)",
+        "--ignore-case": "--ignore-case Search case-insensitively",
+        "--json": "--json Emit machine-readable JSON to stdout (see docs/json-output.md)",
+        "--max-results": "--max-results <MAX_RESULTS> Stop after this many matching lines (the summary reports truncation)",
+        "--max-tokens": "--max-tokens <MAX_TOKENS> Maximum tokens for plain context output; smart, diff, and review accept their own command-specific token budget options",
+        "--no-annotate": "--no-annotate Do not consult the index: print plain `path:line:text` like `rg -n`",
+        "--no-default-ignores": "--no-default-ignores Disable built-in ignore patterns",
+        "--no-gitignore": "--no-gitignore Disable .gitignore pattern matching",
+        "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
+        "--no-tree": "--no-tree Disable project tree in output",
+        "--show-sizes": "--show-sizes Show file sizes in project tree",
+        "--smart-case": "-S, --smart-case Search case-insensitively unless the pattern has an uppercase letter",
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--type": "-t, --type <TYPES> Only search files of this ripgrep file type, e.g. rust, py, ts (repeatable)",
+        "--word-regexp": "-w, --word-regexp Only show matches surrounded by word boundaries"
       },
       "subcommands": []
     },

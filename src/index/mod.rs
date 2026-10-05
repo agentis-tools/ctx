@@ -1011,7 +1011,7 @@ fn degraded_hash(hash: &str) -> String {
 }
 
 /// Compute SHA256 hash of content.
-fn compute_hash(content: &str) -> String {
+pub(crate) fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();

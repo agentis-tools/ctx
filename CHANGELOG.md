@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository and filtering afterwards. `score_3_changed` on the perf fixture
   drops from 5.5 s to 1.2 s with identical output (#23).
 ### Added
+- `ctx grep <PATTERN> [PATHS]...`: ripgrep-style text search (built on
+  ripgrep's own `grep-searcher`/`grep-regex`/`ignore` crates) that tags every
+  match with what the index knows about it: `def`, `ref` (with the resolved
+  target and edge kind), `unresolved` (with the number of same-named
+  candidates), `unlinked`, `stale`, or `unindexed`, plus the trait/interface
+  `family` a target belongs to. No match is ever dropped: the set of matching
+  lines is identical to `rg -n`, and `--no-annotate` prints exactly that. A
+  summary line counts tags and lists the symbols the pattern resolved to.
+  `--json` emits the matches, tags, and counts (`command: "grep"`). Supports
+  `-F`, `-w`, `-S`, `--ignore-case`, `-g`, `-t`, `--hidden`, and
+  `--max-results`; `-i` remains ctx's global `--ignore` and excludes files.
+  Exits 0 with or without matches.
 - `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
   model (TypeSafe Jev). For each call whose name matches in-repo functions, the
   model picks the real callee among the same-named candidates or `external`
