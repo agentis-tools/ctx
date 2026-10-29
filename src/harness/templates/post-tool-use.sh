@@ -29,18 +29,28 @@ ctx index > /dev/null 2>&1 || {
 
 # Architecture rules, scoped to the current change set. Findings (exit 1) are
 # expected feedback for the model, not a hook failure.
-result=$(ctx check --against HEAD --json)
+# The compact plain report, cut at line boundaries to stay under Claude Code's
+# 10,000-character additionalContext limit (beyond it the model only sees a
+# short preview).
+result=$(ctx check --against HEAD --format plain)
 check_status=$?
 if [ "$check_status" -eq 1 ]; then
+    # Byte-wise locale: every transform below is ASCII-only, and BSD tools
+    # reject invalid UTF-8 under a UTF-8 locale.
+    LC_ALL=C
+    export LC_ALL
     # JSON-escape portably (POSIX tr/sed/awk; no GNU-only escapes): tabs and
     # CRs become spaces, other control characters are dropped, backslashes and
-    # quotes are escaped, and lines are joined with a literal \n.
-    escaped=$(printf '%s' "$result" \
+    # quotes are escaped. awk then joins lines with a literal \n, keeping whole
+    # lines while the escaped text stays under 9,000 characters.
+    escaped=$(printf '%s\n' "$result" \
         | tr '\t\r' '  ' \
         | tr -d '\000-\010\013\014\016-\037' \
         | sed 's/\\/\\\\/g; s/"/\\"/g' \
-        | awk 'BEGIN { ORS = "\\n" } { print }')
-    printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ctx check found architecture rule violations in the current change set (ctx check --against HEAD --json):\\n%s"}}\n' "$escaped"
+        | awk -v max=9000 'BEGIN { ORS = "\\n" }
+            { if (n + length($0) + 2 <= max) { print; n += length($0) + 2 } else dropped++ }
+            END { if (dropped) print "... " dropped " more line(s) not shown; run: ctx check --against HEAD" }')
+    printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ctx check found architecture rule violations in the current change set (ctx check --against HEAD):\\n%s"}}\n' "$escaped"
 elif [ "$check_status" -ne 0 ]; then
     echo "ctx hooks: 'ctx check' failed (status $check_status); no architecture feedback for this edit." >&2
 fi

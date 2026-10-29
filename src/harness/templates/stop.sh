@@ -22,8 +22,8 @@ fi
 # Consume the hook's JSON payload on stdin.
 cat > /dev/null 2>&1 || true
 
-# Quality scorecard vs the default branch (stdout; stderr in blocking mode). Exit 1 means a gate
-# condition fired.
+# Quality scorecard vs the default branch, on stdout (on stderr when a gate
+# fails in blocking mode). Exit 1 means a gate condition fired.
 #
 # Environment knobs:
 #   CTX_GATE_BLOCKING=1 -- turn gate failures into exit 2, Claude Code's
@@ -42,7 +42,7 @@ if [ "$score_status" -eq 1 ] && [ "${CTX_GATE_BLOCKING:-0}" = "1" ]; then
     echo "ctx hooks: quality gates failed (blocking mode); fix the failed conditions in the scorecard above before stopping." >&2
     exit 2
 fi
-printf '%s\n' "$scorecard"
+[ -z "$scorecard" ] || printf '%s\n' "$scorecard"
 if [ "$score_status" -eq 1 ]; then
     echo "ctx hooks: quality gates reported findings (non-blocking); see the scorecard above." >&2
 fi

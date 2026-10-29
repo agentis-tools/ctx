@@ -51,11 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PostToolUse runs, 0 delivered). The `post-tool-use.sh` template now emits
   violations as `hookSpecificOutput.additionalContext` JSON, which Claude
   Code shows next to the tool result, and prints nothing for a clean check.
+  The report is `ctx check --format plain`, cut at whole lines below Claude
+  Code's 10,000-character context limit with a count of the lines left out.
   In blocking mode (`CTX_GATE_BLOCKING=1`) `stop.sh` now puts the scorecard
   on stderr with the failure line, since an exit-2 Stop hook shows the model
   stderr only (before, it was told to fix "the scorecard above" without
-  seeing it). Rerun `ctx harness init` to regenerate local hooks; the
-  committed Claude plugin is regenerated.
+  seeing it). The Claude Code reference wiring in the quality-gates docs now
+  points at the generated hooks. Rerun `ctx harness init` to regenerate local
+  hooks; the committed Claude plugin is regenerated.
 - C/C++: calls that name a function declared in a header and defined in one
   `.c`/`.cc` file are now bound to the definition during indexing (previously
   they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
