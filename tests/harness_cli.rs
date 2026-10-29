@@ -360,6 +360,23 @@ fn test_post_tool_use_hook_caps_large_reports() {
     assert!(context.contains("src/m0.rs: file_symbols 12 exceeds max 0 \"x\""));
 }
 
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_cap_stops_at_first_overflow() {
+    // A long line in the middle ends the report there: later short lines are
+    // not printed out of context.
+    let report = format!(
+        "rule A\nfinding 1\n{}\nrule B\nfinding 2\n",
+        "x".repeat(9500)
+    );
+    let context = additional_context(&post_tool_use_with_stub_report(report.as_bytes()));
+    let body = context.split_once('\n').unwrap().1;
+    assert_eq!(
+        body, "rule A\nfinding 1\n... 3 more line(s) not shown; run: ctx check --against HEAD\n",
+        "{context:?}"
+    );
+}
+
 // ============================================================================
 // (1b) stop hook: gate outcome mapping (non-blocking / blocking / clean)
 // ============================================================================

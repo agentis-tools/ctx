@@ -41,14 +41,15 @@ if [ "$check_status" -eq 1 ]; then
     export LC_ALL
     # JSON-escape portably (POSIX tr/sed/awk; no GNU-only escapes): tabs and
     # CRs become spaces, other control characters are dropped, backslashes and
-    # quotes are escaped. awk then joins lines with a literal \n, keeping whole
-    # lines while the escaped text stays under 9,000 characters.
+    # quotes are escaped. awk then joins lines with a literal \n and stops at the
+    # first line that would take the escaped text over 9,000 characters (no
+    # skipping: a dropped rule header would mislabel the findings after it).
     escaped=$(printf '%s\n' "$result" \
         | tr '\t\r' '  ' \
         | tr -d '\000-\010\013\014\016-\037' \
         | sed 's/\\/\\\\/g; s/"/\\"/g' \
         | awk -v max=9000 'BEGIN { ORS = "\\n" }
-            { if (n + length($0) + 2 <= max) { print; n += length($0) + 2 } else dropped++ }
+            { if (!full && n + length($0) + 2 <= max) { print; n += length($0) + 2 } else { full = 1; dropped++ } }
             END { if (dropped) print "... " dropped " more line(s) not shown; run: ctx check --against HEAD" }')
     printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ctx check found architecture rule violations in the current change set (ctx check --against HEAD):\\n%s"}}\n' "$escaped"
 elif [ "$check_status" -ne 0 ]; then

@@ -52,8 +52,8 @@ This is the reference wiring for [Claude Code](https://docs.anthropic.com/en/doc
   "permissions": { "allow": ["Bash(ctx *)"] },
   "hooks": {
     "SessionStart": [ { "hooks": [{ "type": "command", "command": "ctx map --budget 2000" }] } ],
-    "PostToolUse": [ { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": ".claude/hooks/ctx/post-tool-use.sh" }] } ],
-    "Stop": [ { "hooks": [{ "type": "command", "command": ".claude/hooks/ctx/stop.sh" }] } ]
+    "PostToolUse": [ { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ctx/post-tool-use.sh" }] } ],
+    "Stop": [ { "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ctx/stop.sh" }] } ]
   }
 }
 ```
