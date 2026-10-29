@@ -207,12 +207,71 @@ fn test_local_init_post_tool_use_hook_runs_end_to_end() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // A clean check says nothing: Claude Code would only log plain stdout anyway.
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("\"command\": \"check\""),
+        stdout.trim().is_empty(),
         "stdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+// ============================================================================
+// (1a) post-tool-use hook: findings reach the model as additionalContext
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_delivers_findings_as_additional_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = GitRepo::init(temp.path());
+    let root = &repo.root;
+    repo.commit_file("src/lib.rs", SOURCE, "initial");
+    assert!(ctx(root, &["index"]).status.success());
+    assert!(ctx(root, &["harness", "init", "--mode", "local"])
+        .status
+        .success());
+    // A rule every changed file breaks, then an uncommitted edit (the hook
+    // runs right after an Edit/Write, before any commit).
+    repo.write(
+        ".ctx/rules.toml",
+        "version = 1\n\n[[rules.limit]]\nmetric = \"file_symbols\"\nscope = \"file\"\nmax = 0\n",
+    );
+    repo.write(
+        "src/lib.rs",
+        &format!("{SOURCE}\npub fn added_by_agent() -> &'static str {{ \"quote \\\" and backslash \\\\\" }}\n"),
+    );
+
+    let hook = root.join(".claude/hooks/ctx/post-tool-use.sh");
+    let out = run_hook(root, &hook);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 1, "one JSON line: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("hook output is not JSON ({e}): {stdout}"));
+    let hso = &value["hookSpecificOutput"];
+    assert_eq!(hso["hookEventName"], "PostToolUse");
+    let context = hso["additionalContext"]
+        .as_str()
+        .expect("additionalContext");
+    assert!(
+        context.starts_with("ctx check found architecture rule violations"),
+        "{context}"
+    );
+    // The embedded report is the real `ctx check --json` document.
+    let report = context
+        .split_once('\n')
+        .expect("report after the first line")
+        .1;
+    let report: serde_json::Value = serde_json::from_str(report)
+        .unwrap_or_else(|e| panic!("embedded report is not JSON ({e}): {report}"));
+    assert_eq!(report["command"], "check", "{report}");
+    assert!(value.get("decision").is_none(), "non-blocking: {value}");
 }
 
 // ============================================================================
@@ -295,6 +354,17 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("blocking"), "stderr: {stderr}");
+    // Exit 2 shows the model stderr only: the scorecard must be there, and
+    // nothing on stdout (Claude Code would only log it).
+    assert!(
+        stderr.contains("Score vs main"),
+        "scorecard on stderr: {stderr}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 
     let content = fs::read_to_string(repo.root.join(".ctx/gate-log.jsonl")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
