@@ -1927,7 +1927,17 @@ impl Database {
                 WHERE name = edges.target_name
                   AND kind IN ('function', 'method')
               ) = 1
+              -- The receiver/path guards below are Rust-specific: in Go or
+              -- Python `pkg.Func(` is the normal way to call a free function.
               AND (
+                COALESCE((
+                    SELECT f.language
+                    FROM symbols s
+                    JOIN files f ON f.path = s.file_path
+                    WHERE s.id = edges.source_id
+                ), '') != 'rust'
+                OR (
+              (
                 context IS NULL
                 OR (
                     context NOT LIKE '%::' || target_name || '(%'
@@ -1961,6 +1971,35 @@ impl Database {
                       ) || '(') - 1, 1) NOT GLOB '[A-Za-z0-9_:]'
                     )
                 )
+                -- A module path to a free function (`doctor::find(..)`) whose
+                -- last segment names the candidate's module file
+                -- (`doctor.rs`, or `doctor/mod.rs`).
+                OR EXISTS (
+                    SELECT 1
+                    FROM symbols t
+                    WHERE t.name = edges.target_name
+                      AND t.kind = 'function'
+                      AND (
+                        context LIKE '%' || REPLACE(
+                            REPLACE(t.file_path, RTRIM(t.file_path, REPLACE(t.file_path, '/', '')), ''),
+                            '.rs', ''
+                        ) || '::' || edges.target_name || '(%'
+                        OR (
+                          t.file_path LIKE '%/mod.rs'
+                          AND context LIKE '%' || REPLACE(
+                              REPLACE(
+                                  SUBSTR(t.file_path, 1, LENGTH(t.file_path) - 7),
+                                  RTRIM(
+                                      SUBSTR(t.file_path, 1, LENGTH(t.file_path) - 7),
+                                      REPLACE(SUBSTR(t.file_path, 1, LENGTH(t.file_path) - 7), '/', '')
+                                  ),
+                                  ''
+                              ),
+                              '.rs', ''
+                          ) || '::' || edges.target_name || '(%'
+                        )
+                      )
+                )
               )
               -- A call that reads as bare (`helper()`) cannot reach an `impl`
               -- method: methods need a receiver or a path. When the context
@@ -1979,6 +2018,8 @@ impl Database {
                       AND t.kind IN ('function', 'method')
                     LIMIT 1
                   ) = 'function'
+              )
+                )
               )
             "#,
             [],
@@ -3165,6 +3206,55 @@ mod tests {
             .pop()
             .expect("call edge");
         assert_eq!(edge.target_id, None, "bare call must not bind a method");
+    }
+
+    /// The receiver/path guard is Rust-only: in Go a call to a free function in
+    /// another package reads `pkg.Func(..)`, and that must still bind.
+    #[test]
+    fn go_package_qualified_calls_still_bind_a_unique_function() {
+        let db = Database::open_in_memory().unwrap();
+        for path in ["cmd/main.go", "util/util.go"] {
+            db.upsert_file(
+                &FileRecord {
+                    path: path.to_string(),
+                    content_hash: path.to_string(),
+                    size_bytes: 100,
+                    language: Some("go".to_string()),
+                    last_indexed: 0,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        db.insert_symbol(&make_fn_symbol(
+            "cmd/main.go::main",
+            "main",
+            "cmd/main.go",
+            1,
+        ))
+        .unwrap();
+        db.insert_symbol(&make_qualified_symbol(
+            "util/util.go::Normalize",
+            "Normalize",
+            "Normalize",
+            "util/util.go",
+            SymbolKind::Function,
+        ))
+        .unwrap();
+        db.insert_edge(&call_edge_with_context(
+            "cmd/main.go::main",
+            "Normalize",
+            "out := util.Normalize(in)",
+        ))
+        .unwrap();
+
+        db.resolve_edge_targets().unwrap();
+        let edge = db
+            .get_outgoing_edges("cmd/main.go::main")
+            .unwrap()
+            .pop()
+            .expect("call edge");
+        assert_eq!(edge.target_id.as_deref(), Some("util/util.go::Normalize"));
     }
 
     /// The complement: a bare call to a globally unique free *function* still
