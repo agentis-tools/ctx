@@ -59,6 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seeing it). The Claude Code reference wiring in the quality-gates docs now
   points at the generated hooks. Rerun `ctx harness init` to regenerate local
   hooks; the committed Claude plugin is regenerated.
+- The Claude Code `stop.sh` hook no longer blocks a second time when the
+  Stop payload has `stop_hook_active: true`. In blocking mode a gate the model
+  could not clear made every Stop exit 2, so the session never ended; it now
+  reports the still-failing gate on stderr and lets the session stop.
 - C/C++: calls that name a function declared in a header and defined in one
   `.c`/`.cc` file are now bound to the definition during indexing (previously
   they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`

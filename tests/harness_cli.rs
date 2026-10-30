@@ -488,6 +488,48 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
     );
 }
 
+/// A second Stop after a blocked one carries `stop_hook_active: true`.
+/// Blocking again would loop for as long as the gate keeps failing, so the
+/// hook reports the findings and lets the session stop.
+#[cfg(unix)]
+#[test]
+fn test_stop_hook_does_not_block_twice() {
+    use std::io::Write;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (repo, hook) = stop_hook_repo(temp.path());
+    trip_gate(&repo);
+
+    let bin_dir = Path::new(env!("CARGO_BIN_EXE_ctx")).parent().unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut child = Command::new("sh")
+        .arg(&hook)
+        .current_dir(&repo.root)
+        .env("PATH", path)
+        .env_remove("CTX_GATE_LOG")
+        .env("CTX_GATE_BLOCKING", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run hook script");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"hook_event_name":"Stop","stop_hook_active":true}"#)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stderr.contains("not blocking again"), "stderr: {stderr}");
+}
+
 #[cfg(unix)]
 #[test]
 fn test_stop_hook_blocking_mode_with_clean_state_exits_zero() {
