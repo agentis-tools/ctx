@@ -42,15 +42,23 @@ pub fn run_embed(
 
     // Optionally clear existing embeddings
     if force {
-        let deleted = db.delete_embeddings(provider.name(), None)?;
+        let deleted = db.delete_all_embeddings()?;
         if verbose {
-            println!("Deleted {} existing embeddings", deleted);
+            println!(
+                "Deleted {} existing embeddings before rebuilding the {} corpus",
+                deleted,
+                provider.name()
+            );
         }
     }
 
     // Check current state
     let total_symbols = db.get_stats()?.symbols;
     let existing_embeddings = db.count_embeddings()?;
+
+    if existing_embeddings > 0 && !force {
+        embeddings::ensure_index_compatible(&db, provider.as_ref())?;
+    }
 
     if verbose {
         println!("Total symbols: {}", total_symbols);
@@ -99,6 +107,7 @@ pub fn run_embed(
 
 /// Watch for index changes and auto-embed new symbols.
 pub fn run_embed_watch(
+    force: bool,
     verbose: bool,
     batch_size: usize,
     provider: Provider,
@@ -126,10 +135,24 @@ pub fn run_embed_watch(
     // Do initial embedding
     {
         let db = index::open_database(&root)?;
+        if force {
+            let deleted = db.delete_all_embeddings()?;
+            if verbose {
+                println!(
+                    "Deleted {} existing embeddings before rebuilding the {} corpus",
+                    deleted,
+                    provider.name()
+                );
+            }
+        }
         let total_symbols = db.get_stats()?.symbols;
         let existing = db.count_embeddings()?;
 
-        if existing < total_symbols {
+        if existing > 0 && !force {
+            embeddings::ensure_index_compatible(&db, provider.as_ref())?;
+        }
+
+        if force || existing < total_symbols {
             println!(
                 "Initial embedding: {} symbols missing embeddings...",
                 total_symbols - existing
@@ -252,8 +275,8 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, provider: Provider)
     let provider =
         embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
 
-    // Warn if the query provider/dimension differs from the index.
-    embeddings::warn_index_mismatch(&db, provider.as_ref());
+    // Do not query an embedding corpus from another provider or dimension.
+    embeddings::ensure_index_compatible(&db, provider.as_ref())?;
 
     // Embed the query
     let query_embedding = provider.embed(query)?;
