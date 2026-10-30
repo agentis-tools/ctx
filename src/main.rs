@@ -86,8 +86,23 @@ fn run(args: Args) -> Result<Outcome> {
     let json = args.json;
     let patterns = args.patterns.clone();
     let count_only = args.count_only;
+    let global_max_tokens = args.max_tokens;
     let encoding = args.encoding.clone();
     let stats = args.stats;
+
+    if global_max_tokens.is_some()
+        && args.command.as_ref().is_some_and(|command| {
+            !matches!(
+                command,
+                Command::Smart { .. } | Command::Diff { .. } | Command::Review { .. }
+            )
+        })
+    {
+        return Err(ctx::error::CtxError::Other(
+            "--max-tokens is only supported for context, smart, diff, and review commands"
+                .to_string(),
+        ));
+    }
 
     // Custom --version handling: clap's auto flag is disabled (it would
     // exit before `--check` could run). `ctx --version` prints the same
@@ -177,7 +192,7 @@ fn run(args: Args) -> Result<Outcome> {
         }) => {
             let provider = resolve_embed_provider(provider, openai);
             if watch {
-                commands::run_embed_watch(verbose, batch_size, provider, serial)
+                commands::run_embed_watch(force, verbose, batch_size, provider, serial)
             } else {
                 commands::run_embed(force, verbose, batch_size, provider, serial)
             }
@@ -255,6 +270,7 @@ fn run(args: Args) -> Result<Outcome> {
         Some(Command::Smart {
             task,
             max_tokens,
+            include_oversized_top,
             depth,
             top,
             explain,
@@ -265,10 +281,25 @@ fn run(args: Args) -> Result<Outcome> {
             show_sizes,
             no_tree,
         }) => {
+            let max_tokens = global_max_tokens.unwrap_or(max_tokens);
             let provider = resolve_embed_provider(provider, openai);
+            let format = if json { OutputFormat::Json } else { format };
             commands::run_smart(
-                &task, max_tokens, depth, top, explain, dry_run, provider, format, show_sizes,
-                no_tree, &patterns, count_only, &encoding, stats,
+                &task,
+                max_tokens,
+                include_oversized_top,
+                depth,
+                top,
+                explain,
+                dry_run,
+                provider,
+                format,
+                show_sizes,
+                no_tree,
+                &patterns,
+                count_only,
+                &encoding,
+                stats,
             )
         }
         Some(Command::Diff {
@@ -281,21 +312,24 @@ fn run(args: Args) -> Result<Outcome> {
             format,
             show_sizes,
             no_tree,
-        }) => commands::run_diff(
-            &revision,
-            max_tokens,
-            depth,
-            changes_only,
-            staged,
-            summary,
-            format,
-            show_sizes,
-            no_tree,
-            &patterns,
-            count_only,
-            &encoding,
-            stats,
-        ),
+        }) => {
+            let max_tokens = global_max_tokens.unwrap_or(max_tokens);
+            commands::run_diff(
+                &revision,
+                max_tokens,
+                depth,
+                changes_only,
+                staged,
+                summary,
+                format,
+                show_sizes,
+                no_tree,
+                &patterns,
+                count_only,
+                &encoding,
+                stats,
+            )
+        }
         Some(Command::Review {
             pr,
             repo,
@@ -307,25 +341,37 @@ fn run(args: Args) -> Result<Outcome> {
             format,
             show_sizes,
             no_tree,
-        }) => commands::run_review(
-            &pr,
-            repo.as_deref(),
-            include_comments,
-            max_tokens,
-            depth,
-            changes_only,
-            summary,
-            format,
-            show_sizes,
-            no_tree,
-        ),
+        }) => {
+            let max_tokens = global_max_tokens.unwrap_or(max_tokens);
+            commands::run_review(
+                &pr,
+                repo.as_deref(),
+                include_comments,
+                max_tokens,
+                depth,
+                changes_only,
+                summary,
+                format,
+                show_sizes,
+                no_tree,
+            )
+        }
         Some(Command::Hotspots {
             since,
             limit,
             by,
+            signal,
             min_churn,
             against,
-        }) => commands::run_hotspots(&since, limit, by, min_churn, against.as_deref(), json),
+        }) => commands::run_hotspots(
+            &since,
+            limit,
+            by,
+            signal,
+            min_churn,
+            against.as_deref(),
+            json,
+        ),
         Some(Command::Check {
             rules,
             against,
@@ -358,6 +404,9 @@ fn run(args: Args) -> Result<Outcome> {
             // Harness command: returns its own Outcome (doctor exits 1 on
             // problems; compat exits 3 on version mismatch).
             return commands::run_harness(cmd, json);
+        }
+        Some(Command::Judge { cmd }) => {
+            return commands::run_judge(cmd, json);
         }
         Some(Command::Lsp { cmd }) => {
             // LSP registry command: returns its own Outcome (doctor exits 1

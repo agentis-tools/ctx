@@ -7,16 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Cold `ctx index` no longer builds a new parser (and recompiles every
+  language's queries) for each file in the parallel path; parsers are reused
+  per worker. On the 2,000-file perf fixture a cold index drops from 38 s to
+  11 s on a 2-core machine with identical symbols and edges (#96).
+- `ctx score --against` enumerates duplicate candidates only for pairs with an
+  endpoint in a changed file instead of building every candidate pair in the
+  repository and filtering afterwards. `score_3_changed` on the perf fixture
+  drops from 5.5 s to 1.2 s with identical output (#23).
+### Added
+- `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
+  model (TypeSafe Jev). For each call whose name matches in-repo functions, the
+  model picks the real callee among the same-named candidates or `external`
+  (standard library / dependency). Answers are cached in a new `judgments`
+  table keyed by a hash of exactly what was sent, so re-indexing re-applies
+  them without network calls (`--offline`). `[judge] edges = true` in
+  `.ctx/config.toml` runs it after every `ctx index`. Against rust-analyzer on
+  ctx's own 4 082 call edges, call-graph accuracy goes from 0.83 to 0.99 and
+  links wrongly bound to in-repo functions from 390 to 7. The API key is read
+  only from `JEV_API_KEY`.
+- `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
+  for a language server to finish loading (default 300 s).
+
+### Changed
+- BREAKING: `ctx hotspots` now ranks by churn × size by default
+  (`--signal lines`); `--signal complexity` restores the old ranking. In a
+  time-split backtest on 10 repositories (Rust, Python, TypeScript, Go, C,
+  C++), size beat complexity at predicting which functions later got bug
+  fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
+  and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
+- BREAKING: `ctx smart --max-tokens` is now a hard limit on the complete rendered
+  context, including tree and format wrappers. A top-ranked file larger than the
+  budget is no longer included by default; `--include-oversized-top` restores
+  the previous behavior. The MCP `smart_context` tool applies the same limit,
+  and the global `--max-tokens` flag is now rejected with an error on commands that do
+  not take a token budget instead of being ignored (#102).
+
 ### Fixed
+- C/C++: calls that name a function declared in a header and defined in one
+  `.c`/`.cc` file are now bound to the definition during indexing (previously
+  they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
+  no longer offers a header prototype next to its own definition, which split
+  the model's confidence between two equivalent answers.
+- Go files with an `import` were never stored: import edges used the file
+  path as `edges.source_id`, violating its foreign key, and the failure was
+  hidden behind an already-written content hash. Go imports now live in module
+  metadata like every other language; Go methods include their receiver in
+  their id and qualified name (`A.String` vs `B.String`), and Go symbols keep
+  their source (duplicates, `ctx symbol`, embeddings).
+- Symbols with the same name on the same line (C `typedef struct jv {..} jv;`,
+  a struct and its typedef) no longer fail the whole file on `symbols.id`'s
+  UNIQUE constraint (ids get a `#kind` suffix); edges from same-named symbols
+  (two `impl`s defining `fmt`) are attributed by span. jq and fmt: 21 files
+  that failed to store now index.
+- JavaScript/TypeScript: `var f = function () {}`, `const f = function () {}`
+  and property assignments (`res.send = function send() {}`,
+  `exports.parse = () => ...`, `X.prototype.use = function () {}`) are now
+  extracted. Express went from 123 to 228 symbols.
+- Storing a file is now all-or-nothing (one SAVEPOINT): a failure part-way no
+  longer leaves a "fresh" file record with partial data that later runs skip.
+- Rust method-call syntax (`x.find(..)`) is no longer bound to a same-named
+  free function. On ctx's own index this unbinds 154 links (92 of them
+  checked against rust-analyzer, all wrong); `harness::doctor::find` goes
+  from a fan-in of 141 to 24 (5 with `ctx judge edges`).
+- LSP hybrid mode now waits for the server to finish loading before asking
+  for definitions (`experimental/serverStatus` or `$/progress`). With
+  rust-analyzer it previously resolved nothing; on ctx it now resolves 367
+  edges.
+- DuckDB-backed commands no longer download the `sqlite_scanner` extension
+  from extensions.duckdb.org at runtime. If the extension is installed
+  locally the index is attached directly; otherwise it is copied into a
+  private read-only DuckDB file. `ctx sql`, `query`, `snapshot`, `smart`
+  and `diff` now work offline and behind egress allowlists.
+- MCP `get_callers`, `get_callees`, `find_references` and `get_definition`
+  now answer for the definition that was asked about. They took the first row
+  of a substring search, and the call-graph tools searched functions only, so
+  `get_callers getValue` on a Go method answered for `TestContextSetGetValues`
+  and `get_definition greet` also offered the struct `Greeter`. Exact name
+  matches now win, methods are included, and several same-named definitions
+  are listed (up to five) instead of silently picking one.
+- MCP `get_callers` and `find_references` follow resolved edges (`target_id`),
+  as `ctx callers` does, instead of every call with the same bare name, so
+  edges bound by the resolver, the LSP or `ctx judge edges` are no longer
+  mixed with calls to other same-named definitions. Unbound same-name calls
+  are listed separately as possible callers. `get_callers` honours `depth`
+  (default 3, max 5) and `get_callees` shows the definition each call
+  resolved to.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
   lookup index identified by profiling of its hot path (#96).
+- Hardened self-update staging and writability probes with exclusive randomized
+  temporary files, bounded release/archive/member reads, and bounded
+  decompression. Snapshot backfill now uses a randomized private RAII tempdir
+  for historical worktrees.
+- Release checksum generation no longer includes `SHA256SUMS` in its own
+  manifest, and release validation rejects self-referential entries (#103).
+- `ctx score` now resolves its merge base once and uses that commit for every
+  baseline input, avoiding inconsistent results when the target branch moved
+  after a feature branch diverged (#99).
+- Generated Claude Code and Codex Stop hooks now block only on architecture
+  check violations by default; duplication remains visible for calibration,
+  and `ctx harness init`/`doctor` warn before a customized blocking hook uses
+  `new_duplication` (#105).
 
 ### Documentation
-- Added offline staging guidance for fastembed model caches and DuckDB's
-  `sqlite_scanner` extension; offline mode now suppresses passive network checks
-  and no-DuckDB builds fail clearly instead of returning empty analytics (#100).
+- Refreshed README measurements, token-budget wording, LSP guidance, and
+  library version examples; governance now checks README version references
+  against the manifest (#101).
+- BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
+
+### Documentation
+- Added an offline operation guide: staging the fastembed model cache, and an
+  optional staged `sqlite_scanner` extension (`CTX_DUCKDB_EXTENSION_DIRECTORY`)
+  for a zero-copy index attach. `CTX_OFFLINE=1` suppresses the passive update
+  check, and no-DuckDB builds fail clearly instead of returning empty
+  analytics (#100).
 
 ## [0.4.0] - 2026-07-24
 
@@ -133,6 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed the first cookbook set with a release-health reporting workflow that combines immutable comparisons, provenance, normalized metrics, focused investigations, uncertainty, and owned actions.
 
 ### Internal
+- Updated both Cargo lockfiles through Cargo tooling to move `h2` and `rustls`
+  past their current security advisories.
 - Refreshed the root and performance-harness dependency locks together, including
   the bundled SQLite runtime, so both independently locked Cargo packages resolve
   the same reviewed dependency set.

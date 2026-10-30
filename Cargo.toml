@@ -118,6 +118,10 @@ notify = "8.2"
 notify-debouncer-mini = "0.7"
 dirs = "6.0.0"
 
+# Secure randomized, exclusive temporary files for self-update staging and
+# backfill worktrees. This is runtime code, not only a test dependency.
+tempfile = "3"
+
 # Language Server Protocol types for the pluggable LSP extraction backend
 # (types only; the JSON-RPC stdio transport is hand-rolled in src/lsp/)
 lsp-types = "0.97"
@@ -144,7 +148,6 @@ duckdb = ["dep:duckdb"]
 mcp = ["rmcp", "schemars", "async-trait"]
 
 [dev-dependencies]
-tempfile = "3"
 tokio-test = "0.4"
 assert_cmd = "2"
 predicates = "3"

@@ -56,9 +56,10 @@ relationships. And almost nothing checks a model's change against the structure 
 ctx builds the world model once (`ctx index`), then uses it to both ground and govern:
 
 **Ground — the right context, in:**
-- **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, fit to a token
-  budget. On this repo: **~8,700 tokens instead of 502,856 — about 58× smaller.**
-- **Token control** — `--count-only`, `--max-tokens`, `--encoding` to budget any model's window.
+- **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, then fits
+  whole files to a token budget.
+- **Token control** — `--count-only --encoding cl100k_base` measures file content; `--max-tokens`
+  budgets selected content, while rendered wrappers and the optional tree add output tokens.
 
 **Govern — guardrails, on what changes:**
 - **Architecture rules** — `ctx check` enforces `.ctx/rules.toml` (layers, forbidden deps, limits)
@@ -72,8 +73,9 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
 - *Forthcoming (not yet shipped): `ctx sql` repo-committed SQL gates (`.ctx/gates/*.sql`), trend snapshots.*
 
 **Agent-native** — `ctx serve --mcp` exposes the whole world model as MCP tools; `--output json`
-everywhere. **Local & fast** — Rust, one SQLite file, local embeddings; indexes 870 symbols and
-5,463 edges in **0.36s**, offline, code never leaves your machine.
+everywhere. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
+indexed 2,701 symbols and 18,730 extracted edges in this repository. Configured providers may
+have their own local or network dependencies.
 
 ## Audience
 
@@ -93,11 +95,14 @@ everywhere. **Local & fast** — Rust, one SQLite file, local embeddings; indexe
 **The line:** *a queryable world model — grounds the model's input, governs its output. Structural +
 semantic, agent-first, local.*
 
-## Proof points (REAL — ctx v0.2.1 on the ctx repo; see scratchpad/proof.md)
+## Proof points (ctx v0.4.0 tag on the ctx repo; see the reproducible commands below)
 
-- **Ground:** whole repo = **502,856 tokens** (`ctx --count-only`); `ctx smart "..." --max-tokens 8000`
-  = **4 files, ~8,700 tokens** — **≈58× smaller**.
-- **World model / speed:** `ctx index` builds it in **0.36 s** — 53 files, **870 symbols, 5,463 edges**.
+- **Ground:** the v0.4.0 tag at `1425cfc5a5ba96802a7adf7a9271bd1f1c3c1dda` reports **502,856
+  file-content tokens** from
+  `ctx --count-only --encoding cl100k_base` at the repository root; wrappers and the tree are
+  excluded.
+- **World model:** the same tag's default `ctx index` run reports **2,701 symbols and 18,730
+  extracted edges**; timing is machine-dependent and intentionally not claimed here.
 - **Govern:** `ctx query impact discover_files` shows a change ripples through `index`, `run_context`,
   `run` (the CLI entry point) and the MCP server across 5 hops.
 

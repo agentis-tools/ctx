@@ -83,7 +83,9 @@ If the installed binary is older than the templates (exit code 3), the script pr
 
 ## Blocking gates (`CTX_GATE_BLOCKING`)
 
-The generated Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0,new_duplication>0"`. By default a failed gate only prints the scorecard and a stderr note — the session stops normally. Set `CTX_GATE_BLOCKING=1` (exactly `1`) in the environment Claude Code runs in to turn gate failures into a **blocking stop**: the hook exits 2, which Claude Code treats as "keep working", so the session continues until the failed conditions in the scorecard are addressed.
+The generated Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0"`. Duplication remains visible in the scorecard, but the heuristic is advisory until you calibrate it against your repository. By default a failed gate only prints the scorecard and a stderr note — the session stops normally. Set `CTX_GATE_BLOCKING=1` (exactly `1`) in the environment Claude Code runs in to turn gate failures into a **blocking stop**: the hook exits 2, which Claude Code treats as "keep working", so the session continues until the failed conditions in the scorecard are addressed.
+
+If you customize a Stop hook to include `new_duplication` while blocking mode is enabled, `ctx harness init` and `ctx harness doctor` warn before that heuristic can hold a session open. This makes adoption safer: first run `ctx score --against <default branch>` informally, review repeated findings in the scorecard, and only then add a calibrated duplication threshold to an explicitly blocking gate.
 
 Only a genuine gate failure ever blocks. Everything else fails open:
 
@@ -96,7 +98,7 @@ Only a genuine gate failure ever blocks. Everything else fails open:
 
 Pair it with `CTX_GATE_LOG` (consumed by `ctx score` itself, not the hook) to record every gate evaluation — including whether blocking mode was on — in a local JSONL log; see [ctx score — Gate logging](./score.md#gate-logging).
 
-> **Upgrading:** hook scripts are generated files. If your `.claude/hooks/ctx/stop.sh` predates `CTX_GATE_BLOCKING`, re-run `ctx harness init` after updating ctx to regenerate it (`ctx harness doctor`'s `templates_stale` check tells you when this is due).
+> **Upgrading:** hook scripts are generated files. If your `.claude/hooks/ctx/stop.sh` predates the current gate defaults, re-run `ctx harness init` after updating ctx to regenerate it (`ctx harness doctor`'s `templates_stale` check tells you when this is due).
 
 ## `compat --require <SEMVER>`
 

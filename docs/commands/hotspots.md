@@ -1,6 +1,6 @@
 # ctx hotspots
 
-Rank files and symbols by churn x complexity to find refactoring hotspots.
+Rank files and symbols by churn × size (default) or churn × complexity (`--signal complexity`) to find refactoring hotspots.
 
 ## Synopsis
 
