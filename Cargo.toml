@@ -127,9 +127,9 @@ tempfile = "3"
 lsp-types = "0.97"
 
 # Windows release artifacts are .zip (see .github/workflows/release.yml);
-# zip is already in the dependency graph transitively via libduckdb-sys
+# (only the self-updater reads them, member by member; never ZipArchive::extract)
 [target.'cfg(windows)'.dependencies]
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
+  0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
+  decompression, ServerHello downgrade, distrusted intermediates),
+  webpki-roots / webpki-root-certs 1.0.11 (distrusted emSign roots), tokio
+  1.54.1 (`AsyncFd` I/O safety), zip 9 for the Windows self-updater and
+  DuckDB 1.10506.1, whose build no longer pulls zip 6 (symlink and SUID
+  extraction advisories; ctx never calls `ZipArchive::extract`), and the
+  yanked clipboard-win 5.4.1. The ring and rmcp advisory exceptions are
+  removed: the locked versions are no longer affected.
 - C/C++: calls that name a function declared in a header and defined in one
   `.c`/`.cc` file are now bound to the definition during indexing (previously
   they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
