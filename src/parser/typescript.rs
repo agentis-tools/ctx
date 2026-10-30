@@ -106,11 +106,28 @@ impl TypeScriptParser {
                     name: (identifier) @func.name
                 ) @func.def
 
-                ; Arrow functions assigned to variables
+                ; Arrow functions / function expressions assigned to variables
                 (lexical_declaration
                     (variable_declarator
                         name: (identifier) @arrow.name
-                        value: (arrow_function)
+                        value: [(arrow_function) (function_expression)]
+                    )
+                ) @arrow.def
+
+                ; ... also with `var` (common in CommonJS code)
+                (variable_declaration
+                    (variable_declarator
+                        name: (identifier) @arrow.name
+                        value: [(arrow_function) (function_expression)]
+                    )
+                ) @arrow.def
+
+                ; Functions assigned to properties: `res.send = function send() {}`,
+                ; `exports.parse = (s) => ...`, `Router.prototype.use = function () {}`
+                (expression_statement
+                    (assignment_expression
+                        left: (member_expression property: (property_identifier) @arrow.name)
+                        right: [(arrow_function) (function_expression)]
                     )
                 ) @arrow.def
 
@@ -159,11 +176,28 @@ impl TypeScriptParser {
                     name: (identifier) @func.name
                 ) @func.def
 
-                ; Arrow functions assigned to variables
+                ; Arrow functions / function expressions assigned to variables
                 (lexical_declaration
                     (variable_declarator
                         name: (identifier) @arrow.name
-                        value: (arrow_function)
+                        value: [(arrow_function) (function_expression)]
+                    )
+                ) @arrow.def
+
+                ; ... also with `var` (common in CommonJS code)
+                (variable_declaration
+                    (variable_declarator
+                        name: (identifier) @arrow.name
+                        value: [(arrow_function) (function_expression)]
+                    )
+                ) @arrow.def
+
+                ; Functions assigned to properties: `res.send = function send() {}`,
+                ; `exports.parse = (s) => ...`, `Router.prototype.use = function () {}`
+                (expression_statement
+                    (assignment_expression
+                        left: (member_expression property: (property_identifier) @arrow.name)
+                        right: [(arrow_function) (function_expression)]
                     )
                 ) @arrow.def
 
@@ -848,6 +882,17 @@ interface User {
         let interface = result.symbols.iter().find(|s| s.name == "User");
         assert!(interface.is_some());
         assert_eq!(interface.unwrap().kind, SymbolKind::Interface);
+    }
+
+    #[test]
+    fn test_parse_commonjs_function_forms() {
+        let mut parser = TypeScriptParser::new();
+        let source = "var send = function send(body) { return body; };\nres.status = function status(code) { this.statusCode = code; return this; };\nexports.parse = (s) => s.trim();\nRouter.prototype.use = function () {};\n";
+        let result = parser.parse("r.js", source, JsVariant::JavaScript).unwrap();
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        for want in ["send", "status", "parse", "use"] {
+            assert!(names.contains(&want), "missing {want}: {names:?}");
+        }
     }
 
     #[test]

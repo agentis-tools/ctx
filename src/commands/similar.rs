@@ -53,7 +53,7 @@ pub fn run_similar(
             &ctx::config::CtxConfig::load(&root).embedding,
             trust_project,
         )?;
-        embeddings::warn_index_mismatch(&db, provider.as_ref());
+        embeddings::ensure_index_compatible(&db, provider.as_ref())?;
         let query_embedding = provider.embed(query)?;
         (
             semantic_hits(&db, &query_embedding, limit, &filter)?,
