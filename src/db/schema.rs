@@ -1971,6 +1971,23 @@ impl Database {
                       ) || '(') - 1, 1) NOT GLOB '[A-Za-z0-9_:]'
                     )
                 )
+                -- A receiver call (`n.get_value()`) to the sole method of that
+                -- name *in the caller's own file*: the type is local, so the
+                -- binding is not a cross-file or cross-crate guess.
+                OR (
+                    (
+                      context LIKE '%.' || edges.target_name || '(%'
+                      OR context LIKE '%->' || edges.target_name || '(%'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM symbols t
+                        JOIN symbols s ON s.id = edges.source_id
+                        WHERE t.name = edges.target_name
+                          AND t.kind = 'method'
+                          AND t.file_path = s.file_path
+                    )
+                )
                 -- A module path to a free function (`doctor::find(..)`) whose
                 -- last segment names the candidate's module file
                 -- (`doctor.rs`, or `doctor/mod.rs`).

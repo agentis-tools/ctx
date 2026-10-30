@@ -124,9 +124,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     local `Map::new`. The match is now anchored at an identifier boundary.
   - Global name uniqueness was accepted as evidence for calls that carry a
     receiver or path qualifier (`out.push(v)`, `Type::from(x)`), and for bare
-    calls whose only candidate is an `impl` method. Uniqueness now applies only
-    to bare calls resolving to a free function, matching the guard the
-    same-file resolution step already used.
+    calls whose only candidate is an `impl` method. For Rust callers,
+    uniqueness now applies to bare calls resolving to a free function, to a
+    module path naming the function's file (`doctor::find(..)`), and to a
+    receiver call whose only same-named method is in the caller's own file.
+    Go, Python and other languages keep the previous behavior, where
+    `pkg.Func(..)` is the normal call to a free function.
 
   A bare call shadowed by a local closure binding can still resolve to an
   unrelated same-named free function; that case needs the Cargo dependency
