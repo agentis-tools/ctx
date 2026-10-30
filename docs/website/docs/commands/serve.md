@@ -47,6 +47,7 @@ The `serve` command runs ctx as an MCP server over stdio, enabling AI assistants
 | Option | Description |
 |--------|-------------|
 | `--mcp` | Run as MCP server over stdio |
+| `--trust-project` | Trust provider, model, and Ollama host defaults from the committed `.ctx/config.toml` |
 
 ## Available MCP Tools
 
@@ -191,6 +192,14 @@ Check that:
 - No code execution or file modification capabilities
 - Access limited to the configured project directory
 - Consider using read-only filesystem permissions in production
+
+Project configuration is untrusted by default. The MCP server does not use a
+committed `[embedding] provider`, `model`, or `host` unless it was launched with
+`ctx serve --mcp --trust-project`. Review `.ctx/config.toml` before enabling
+that option. Explicit environment settings such as `OLLAMA_HOST` remain the
+user-selected authority, but are still credential-bound: when
+`OLLAMA_API_KEY` is present, remote Ollama endpoints must use HTTPS (strict
+loopback HTTP remains valid for local development).
 
 ## See Also
 

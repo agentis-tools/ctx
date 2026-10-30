@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use crate::index::CTX_DIR;
+use crate::walker::write_project_file_with_mode;
 
 use super::client::LspClient;
 use super::config::{self, LspServerConfig};
@@ -54,8 +55,6 @@ struct StatusDocument<'a> {
 /// Write the sidecar for this run (best effort; callers treat errors as
 /// warnings).
 pub(crate) fn write_status_file(root: &Path, entries: &[LspStatusEntry]) -> std::io::Result<()> {
-    let ctx_dir = root.join(CTX_DIR);
-    std::fs::create_dir_all(&ctx_dir)?;
     let doc = StatusDocument {
         generated_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -64,7 +63,8 @@ pub(crate) fn write_status_file(root: &Path, entries: &[LspStatusEntry]) -> std:
         servers: entries,
     };
     let text = serde_json::to_string_pretty(&doc).map_err(std::io::Error::other)?;
-    std::fs::write(ctx_dir.join(STATUS_FILE), text)
+    let relative = Path::new(CTX_DIR).join(STATUS_FILE);
+    write_project_file_with_mode(root, &relative, text.as_bytes(), Some(0o600)).map(|_| ())
 }
 
 /// Result of probing one configured server (consumed by `ctx lsp doctor`).

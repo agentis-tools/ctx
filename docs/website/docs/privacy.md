@@ -52,11 +52,17 @@ explicitly configure:
   relevant source-code or query text, to OpenAI's API. OpenAI handles that data
   under its own terms and privacy policy.
 - **Ollama or another configured endpoint:** ctx sends embedding inputs to the
-  endpoint you configure. A local Ollama endpoint keeps that traffic local;
-  a remote endpoint is governed by its operator.
+  endpoint you configure. A committed `.ctx/config.toml` does not select an
+  Ollama provider, model, or host by default; review it and pass `--trust-project` before
+  enabling project-controlled settings. Choosing an explicit provider avoids the
+  project provider default, but does not trust its model or host settings.
+  `OLLAMA_HOST` supplied by the process environment is the user-selected
+  authority, but is still subject to the HTTPS requirement when a bearer token
+  is present. A local Ollama endpoint keeps that traffic local; remote
+  authenticated Ollama endpoints are governed by their operator.
 - **Local embedding model download:** the local embedding provider may download
-  model files from its model host on first use. This downloads model data; it
-  does not upload your repository for embedding.
+  model files from its model host on first use into your per-user ctx cache.
+  This downloads model data; it does not upload your repository for embedding.
 - **MCP and host applications:** if you enable the optional MCP feature, ctx
   returns requested codebase information to the MCP client you configured.
   That client and any model provider it uses handle the returned information

@@ -34,6 +34,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CtxError, Result};
+use crate::walker::{secure_file_path, validate_project_path, write_project_file_with_mode};
 use checksum::{content_checksum, finalize, recorded_checksum, style_for_path};
 
 /// Relative path of the harness manifest.
@@ -145,7 +146,8 @@ fn default_lock_version() -> u32 {
 /// Read and parse the manifest; `None` when missing or unparseable
 /// (a broken manifest falls back to in-file checksum verification).
 pub fn read_lock(root: &Path) -> Option<LockFile> {
-    let content = fs::read_to_string(root.join(LOCK_PATH)).ok()?;
+    let path = secure_file_path(root, Path::new(LOCK_PATH)).ok()?;
+    let content = fs::read_to_string(path).ok()?;
     toml::from_str(&content).ok()
 }
 
@@ -153,11 +155,7 @@ fn write_lock(root: &Path, lock: &LockFile) -> Result<()> {
     let body = toml::to_string_pretty(lock)
         .map_err(|e| CtxError::Other(format!("failed to serialize {LOCK_PATH}: {e}")))?;
     let content = finalize(&body, checksum::HeaderStyle::Toml, templates::CTX_VERSION);
-    let path = root.join(LOCK_PATH);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, content)?;
+    write_project_file_with_mode(root, Path::new(LOCK_PATH), content.as_bytes(), Some(0o600))?;
     Ok(())
 }
 
@@ -363,16 +361,25 @@ pub fn wire_local_settings(root: &Path) -> Result<SettingsWireAction> {
     let snippet = render_settings_snippet();
     let snippet_value: serde_json::Value = serde_json::from_str(&snippet)
         .map_err(|e| CtxError::Other(format!("settings snippet is not valid JSON: {e}")))?;
-    let path = root.join(".claude/settings.json");
+    let relative_path = Path::new(".claude/settings.json");
+    let path = validate_project_path(root, relative_path, true)?;
 
-    let Ok(existing_raw) = fs::read_to_string(&path) else {
-        // Missing (or unreadable): write the snippet fresh.
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+    let existing_raw = match fs::read_to_string(&path) {
+        Ok(raw) => Some(raw),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+
+    let Some(existing_raw) = existing_raw else {
+        // Missing: create the file through the no-symlink project writer.
         let body = serde_json::to_string_pretty(&snippet_value)
             .map_err(|e| CtxError::Other(format!("failed to serialize settings: {e}")))?;
-        fs::write(&path, format!("{body}\n"))?;
+        write_project_file_with_mode(
+            root,
+            relative_path,
+            format!("{body}\n").as_bytes(),
+            Some(0o600),
+        )?;
         return Ok(SettingsWireAction::Created);
     };
 
@@ -392,7 +399,12 @@ pub fn wire_local_settings(root: &Path) -> Result<SettingsWireAction> {
 
     let body = serde_json::to_string_pretty(&serde_json::Value::Object(merged))
         .map_err(|e| CtxError::Other(format!("failed to serialize settings: {e}")))?;
-    fs::write(&path, format!("{body}\n"))?;
+    write_project_file_with_mode(
+        root,
+        relative_path,
+        format!("{body}\n").as_bytes(),
+        Some(0o600),
+    )?;
     Ok(SettingsWireAction::Merged)
 }
 
@@ -490,6 +502,15 @@ enum Ownership {
 /// Classify one on-disk file. Manifest entry wins; in-file `ctx:checksum`
 /// is the fallback; anything else that exists is foreign.
 fn classify(path: &Path, lock_entry: Option<&LockEntry>) -> Ownership {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ownership::Missing;
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        // Treat symlinks and special files as foreign.  In particular, force
+        // mode must never turn a generated-file write into a symlink target
+        // write.
+        return Ownership::Foreign;
+    }
     if !path.exists() {
         return Ownership::Missing;
     }
@@ -524,16 +545,12 @@ fn classify(path: &Path, lock_entry: Option<&LockEntry>) -> Ownership {
 }
 
 fn write_file(root: &Path, file: &GeneratedFile) -> Result<()> {
-    let path = root.join(&file.rel_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&path, &file.content)?;
-    #[cfg(unix)]
-    if file.executable {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
-    }
+    write_project_file_with_mode(
+        root,
+        Path::new(&file.rel_path),
+        file.content.as_bytes(),
+        Some(if file.executable { 0o755 } else { 0o644 }),
+    )?;
     Ok(())
 }
 
@@ -554,16 +571,21 @@ pub fn write_plan(
 
     for file in plan {
         let path = root.join(&file.rel_path);
+        let safe_target = validate_project_path(root, Path::new(&file.rel_path), true).is_ok();
         let ownership = classify(&path, lock.files.get(&file.rel_path));
 
-        let action = match ownership {
-            Ownership::Missing => FileAction::Created,
-            _ if file.never_overwrite => FileAction::SkippedPolicy,
-            Ownership::OwnedUnmodified => FileAction::Regenerated,
-            Ownership::OwnedModified if force => FileAction::Overwritten,
-            Ownership::OwnedModified => FileAction::SkippedModified,
-            Ownership::Foreign if force => FileAction::Overwritten,
-            Ownership::Foreign => FileAction::SkippedForeign,
+        let action = if !safe_target {
+            FileAction::SkippedForeign
+        } else {
+            match ownership {
+                Ownership::Missing => FileAction::Created,
+                _ if file.never_overwrite => FileAction::SkippedPolicy,
+                Ownership::OwnedUnmodified => FileAction::Regenerated,
+                Ownership::OwnedModified if force => FileAction::Overwritten,
+                Ownership::OwnedModified => FileAction::SkippedModified,
+                Ownership::Foreign if force => FileAction::Overwritten,
+                Ownership::Foreign => FileAction::SkippedForeign,
+            }
         };
 
         if action.wrote() {
@@ -774,6 +796,30 @@ mod tests {
         assert_eq!(action_for(&actions, rel), FileAction::Overwritten);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_symlinked_generated_file_is_never_followed() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("stop.sh");
+        fs::write(&outside_file, "#!/bin/sh\necho outside\n").unwrap();
+        let path = temp.path().join(".claude/hooks/ctx/stop.sh");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(&outside_file, &path).unwrap();
+
+        let actions = plan_and_write(temp.path(), true);
+        assert_eq!(
+            action_for(&actions, ".claude/hooks/ctx/stop.sh"),
+            FileAction::SkippedForeign
+        );
+        assert_eq!(
+            fs::read_to_string(outside_file).unwrap(),
+            "#!/bin/sh\necho outside\n"
+        );
+    }
+
     #[test]
     fn test_lock_tracks_json_files_in_plugin_mode() {
         let temp = TempDir::new().unwrap();
@@ -889,6 +935,26 @@ mod tests {
         let action = wire_local_settings(root).unwrap();
         assert_eq!(action, SettingsWireAction::SkippedInvalid);
         assert_eq!(fs::read_to_string(&path).unwrap(), "{not json");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_wire_rejects_symlinked_settings() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("settings.json");
+        fs::write(&outside_file, "{\"owned\":true}\n").unwrap();
+        let path = temp.path().join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(&outside_file, &path).unwrap();
+
+        assert!(wire_local_settings(temp.path()).is_err());
+        assert_eq!(
+            fs::read_to_string(outside_file).unwrap(),
+            "{\"owned\":true}\n"
+        );
     }
 
     #[test]

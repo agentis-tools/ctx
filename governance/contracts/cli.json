@@ -16,6 +16,7 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--version": "With --version: also query GitHub for a newer release"
       },
       "subcommands": [
@@ -65,7 +66,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--output": "-o, --output <OUTPUT_FORMAT> Output format (text, json, markdown) [default: text]",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -86,7 +88,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--rules": "--rules <RULES> Path to the rules file (default: .ctx/rules.toml)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -107,6 +110,7 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
         "--threshold": "--threshold <THRESHOLD> Fan-out threshold (default: 10, flag > 50 as critical) [default: 10]",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--warnings-only": "-w, --warnings-only Only show functions exceeding threshold"
       },
       "subcommands": []
@@ -129,7 +133,8 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--staged": "--staged Include staged changes only",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--summary": "--summary Include change summary"
+        "--summary": "--summary Include change summary",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -151,7 +156,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--threshold": "--threshold <THRESHOLD> Jaccard similarity threshold (0.0-1.0) over normalized token shingles. Breaking change from the old percent-based, line-oriented threshold: 0.85 means 85% of 5-token shingles are shared, not that 85% of lines match. Values below 0.5 are clamped to 0.5 [default: 0.85]"
+        "--threshold": "--threshold <THRESHOLD> Jaccard similarity threshold (0.0-1.0) over normalized token shingles. Breaking change from the old percent-based, line-oriented threshold: 0.85 means 85% of 5-token shingles are shared, not that 85% of lines match. Values below 0.5 are clamped to 0.5 [default: 0.85]",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -175,6 +181,7 @@
         "--serial": "--serial Disable parallel embedding (single-threaded)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--verbose": "-v, --verbose Show verbose output",
         "--watch": "-w, --watch Watch for index changes and auto-embed new symbols"
       },
@@ -196,7 +203,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -218,7 +226,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--output": "--output <OUTPUT> Output format (dot, mermaid, json) [default: dot]",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -236,7 +245,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": [
         "compat",
@@ -259,7 +269,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--require": "--require <SEMVER> Required version: a bare version (\"0.2\" means \"at least 0.2.0\") or a semver requirement expression (\"^0.2\", \">=0.2, <0.4\")",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -277,7 +288,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -298,7 +310,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--target": "--target <TARGET> Harness to target (unknown values exit 2 listing supported targets) Possible values: - claude: Claude Code (hooks, settings, skills, plugin manifest) - codex: Codex (project hooks, AGENTS.md guidance, skills, plugin manifest) [default: claude]"
+        "--target": "--target <TARGET> Harness to target (unknown values exit 2 listing supported targets) Possible values: - claude: Claude Code (hooks, settings, skills, plugin manifest) - codex: Codex (project hooks, AGENTS.md guidance, skills, plugin manifest) [default: claude]",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -322,7 +335,8 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--signal": "--signal <SIGNAL> Structural signal multiplied with churn: lines (default) or complexity Possible values: - complexity: Cyclomatic-style complexity from the index (the pre-0.5 default) - lines: Size in lines (per symbol: its span; per file: the sum of its symbols' spans). Default: in time-split backtests on 10 repositories in 7 languages, size predicted which functions later received bug fixes better than complexity in every repository (mean \u0394AUC +0.031, 95 % CI [+0.012, +0.049]); churn \u00d7 size beat churn \u00d7 complexity in 9/10 [default: lines]",
         "--since": "How far back to count commits (git --since date spec) [default: \"6 months ago\"]",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -344,6 +358,7 @@
         "--serial": "--serial Disable parallel indexing (single-threaded)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--verbose": "-v, --verbose Show verbose output",
         "--watch": "-w, --watch Watch for changes and reindex automatically"
       },
@@ -406,7 +421,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": [
         "add",
@@ -431,6 +447,7 @@
         "--server": "--server <NAME> Pick a specific server instead of the registry's recommended one",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--yes": "-y, --yes Skip the confirmation prompt (required in non-interactive use)"
       },
       "subcommands": []
@@ -449,7 +466,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -468,7 +486,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -487,6 +506,7 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--yes": "-y, --yes Apply changes without prompting"
       },
       "subcommands": []
@@ -507,7 +527,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -525,7 +546,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": [
         "callers",
@@ -553,7 +575,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -574,7 +597,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -592,7 +616,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -613,7 +638,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -633,7 +659,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--output": "--output <OUTPUT> Output format (text, json, dot) [default: text]",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -652,7 +679,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -670,7 +698,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -693,7 +722,8 @@
         "--repo": "--repo <REPO> Repository (owner/name, auto-detected if not specified)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--summary": "--summary Include change summary"
+        "--summary": "--summary Include change summary",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -713,7 +743,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -733,7 +764,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--output": "--output <OUTPUT> Output format (table, json) [default: table]",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -752,6 +784,7 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--version": "--version <X.Y.Z> Install this exact release (allows downgrades) instead of the latest"
       },
       "subcommands": []
@@ -774,7 +807,8 @@
         "--output": "--output <OUTPUT> Output format (table, json) [default: table]",
         "--provider": "Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -795,6 +829,7 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--vi": "--vi Use vi editing mode (default: emacs)"
       },
       "subcommands": []
@@ -817,7 +852,8 @@
         "--openai": "--openai",
         "--provider": "Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -842,7 +878,8 @@
         "--provider": "Deprecated alias for `--provider openai` (requires OPENAI_API_KEY)",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--top": "--top <TOP> Number of initial semantic matches to find [default: 10]"
+        "--top": "--top <TOP> Number of initial semantic matches to find [default: 10]",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -863,7 +900,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--since": "How far back to count per-file churn (git --since date spec) [default: \"90 days ago\"]",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": [
         "backfill"
@@ -886,7 +924,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--since": "How far back to count per-file churn (git --since date spec); the upper bound is anchored to each commit's date [default: \"90 days ago\"]",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -906,7 +945,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
@@ -931,7 +971,8 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--snapshots": "Load snapshot partitions from DIR (default .ctx/snapshots) as in-memory tables snap.files / snap.symbols / snap.dup_pairs / snap.meta for trend queries (see `ctx snapshot`). Pass a custom dir with `--snapshots=DIR`",
         "--stats": "--stats Print stats (file count, total size, time taken)",
-        "--timeout": "--timeout <TIMEOUT> Abort the query after N seconds [default: 10]"
+        "--timeout": "--timeout <TIMEOUT> Abort the query after N seconds [default: 10]",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     }

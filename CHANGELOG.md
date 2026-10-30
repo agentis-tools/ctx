@@ -94,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are listed separately as possible callers. `get_callers` honours `depth`
   (default 3, max 5) and `get_callees` shows the definition each call
   resolved to.
+- Hardened project path handling across discovery, context selection, MCP file
+  tools, and harness/config writers: symlinks, special files, parent escapes,
+  and absolute paths outside the project are rejected, while generated files
+  and persistent `.ctx` state are replaced through collision-resistant
+  project-local staging files.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
@@ -111,6 +116,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check violations by default; duplication remains visible for calibration,
   and `ctx harness init`/`doctor` warn before a customized blocking hook uses
   `new_duplication` (#105).
+- Project embedding defaults are untrusted unless `--trust-project` is passed;
+  this prevents a committed `.ctx/config.toml` from silently selecting a
+  network-backed provider or routing `OLLAMA_API_KEY` to its host. Authenticated
+  non-loopback Ollama endpoints now require HTTPS, while strict loopback HTTP
+  remains supported.
+- Local FastEmbed artifacts now use an absolute per-user ctx cache outside the
+  checkout, so a tracked `.fastembed_cache` cannot substitute a model. Model
+  initialization fails rather than falling back to a project-relative cache
+  when no safe absolute cache directory is available.
 
 ### Documentation
 - Refreshed README measurements, token-budget wording, LSP guidance, and

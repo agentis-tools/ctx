@@ -122,6 +122,8 @@ Options:
       --no-tree             Disable project tree in output
       --no-stream           Buffer output instead of streaming
       --stats               Print statistics after completion
+      --trust-project       Trust provider, model, and Ollama host defaults from
+                            the committed .ctx/config.toml
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -201,6 +203,8 @@ Options:
   -v, --verbose         Show progress
       --batch-size <N>  Batch size [default: 50]
       --openai          Use OpenAI API instead of local model
+      --trust-project   Trust provider, model, and Ollama host defaults from the
+                        committed .ctx/config.toml
   -w, --watch           Watch for index changes and auto-embed
 ```
 
@@ -261,6 +265,8 @@ Options:
       --explain         Show selection reasoning for each file
       --dry-run         Preview selection without generating context
       --openai          Use OpenAI embeddings instead of local model
+      --trust-project   Trust provider, model, and Ollama host defaults from the
+                        committed .ctx/config.toml
 ```
 
 ### Diff Context Options
@@ -325,7 +331,8 @@ Options:
 ctx serve [OPTIONS]
 
 Options:
-      --mcp  Run as MCP server over stdio (for Claude Desktop integration)
+      --mcp             Run as MCP server over stdio (for Claude Desktop integration)
+      --trust-project   Trust provider, model, and Ollama host defaults from the committed .ctx/config.toml
 ```
 
 ## Key Features

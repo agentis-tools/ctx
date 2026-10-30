@@ -10,12 +10,14 @@
 //! [embedding]
 //! provider = "ollama"            # local | openai | ollama
 //! model = "qwen3-embedding:8b"   # provider-specific (Ollama/OpenAI model)
-//! # host = "http://localhost:11434"  # Ollama only
+//! # host = "http://localhost:11434"  # Ollama only; requires --trust-project
 //! ```
 //!
-//! Precedence for the resolved settings is always **CLI flag > environment
-//! variable > this file > built-in default**, so the config never overrides an
-//! explicit request.
+//! Provider defaults from a committed file are used only after the caller has
+//! explicitly trusted the project (for example with `--trust-project`). This
+//! prevents a checkout from silently selecting a network-backed provider.
+//! Once trusted, precedence is **CLI flag > environment variable > this file
+//! > built-in default**, so the config never overrides an explicit request.
 
 use std::path::Path;
 
@@ -45,7 +47,8 @@ pub struct EmbeddingConfig {
     /// Model name (Ollama/OpenAI). For Ollama this overrides the built-in
     /// default but is itself overridden by `OLLAMA_EMBED_MODEL`.
     pub model: Option<String>,
-    /// Ollama host URL; overridden by `OLLAMA_HOST`.
+    /// Ollama host URL; honored only when the caller trusts the project and
+    /// overridden by `OLLAMA_HOST`.
     pub host: Option<String>,
 }
 
