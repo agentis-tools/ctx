@@ -51,8 +51,18 @@ const INDEX_TABLES: &[&str] = &["files", "symbols", "edges", "modules", "symbol_
 ///    temporary DuckDB file, which is then ATTACHed READ_ONLY as `code` — so
 ///    writes are rejected exactly as with the direct attach, and the SQLite
 ///    index can never be modified.
+///
+/// `CTX_DUCKDB_EXTENSION_DIRECTORY` points DuckDB at a staged extension
+/// directory, so an air-gapped machine can still use the zero-copy attach.
 pub(crate) fn attach_index(conn: &Connection, sqlite_path: &Path) -> Result<Option<TempDbFile>> {
     conn.execute_batch("SET autoinstall_known_extensions = false;")?;
+    if let Some(directory) = std::env::var_os("CTX_DUCKDB_EXTENSION_DIRECTORY") {
+        let directory = Path::new(&directory)
+            .display()
+            .to_string()
+            .replace('\'', "''");
+        conn.execute_batch(&format!("SET extension_directory = '{directory}';"))?;
+    }
     let escaped_path = sqlite_path.display().to_string().replace('\'', "''");
     let attached = conn
         .execute(

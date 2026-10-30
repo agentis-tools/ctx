@@ -52,11 +52,21 @@ pub fn run_diff(
         }
     };
 
-    // Open analytics if we have a database
-    let analytics = if db.is_some() {
-        analytics::Analytics::open(&root).ok()
-    } else {
-        None
+    // Open analytics if we have a database. A diff can still fall back to
+    // changes-only output, but make the reason visible when graph analytics
+    // are unavailable (for example in a no-DuckDB or offline build).
+    let analytics = match db.as_ref() {
+        Some(_) => match analytics::Analytics::open(&root) {
+            Ok(analytics) => Some(analytics),
+            Err(error) => {
+                if !changes_only {
+                    eprintln!("Warning: DuckDB analytics unavailable: {error}");
+                    eprintln!("Using --changes-only mode.\n");
+                }
+                None
+            }
+        },
+        None => None,
     };
 
     // Configure diff context

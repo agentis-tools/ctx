@@ -317,7 +317,7 @@ fn execute_command(
             } else if let Some(a) = analytics {
                 cmd_callers(db, a, args)?;
             } else {
-                eprintln!("Analytics not available (run 'ctx index' first)");
+                eprintln!("DuckDB analytics unavailable; use a default-feature ctx build and stage sqlite_scanner for offline runs");
             }
             Ok(false)
         }
@@ -327,7 +327,7 @@ fn execute_command(
             } else if let Some(a) = analytics {
                 cmd_callees(db, a, args)?;
             } else {
-                eprintln!("Analytics not available (run 'ctx index' first)");
+                eprintln!("DuckDB analytics unavailable; use a default-feature ctx build and stage sqlite_scanner for offline runs");
             }
             Ok(false)
         }
@@ -337,7 +337,7 @@ fn execute_command(
             } else if let Some(a) = analytics {
                 cmd_impact(a, args)?;
             } else {
-                eprintln!("Analytics not available");
+                eprintln!("DuckDB analytics unavailable; use a default-feature ctx build and stage sqlite_scanner for offline runs");
             }
             Ok(false)
         }
@@ -345,7 +345,7 @@ fn execute_command(
             if let Some(a) = analytics {
                 cmd_complexity(a)?;
             } else {
-                eprintln!("Analytics not available");
+                eprintln!("DuckDB analytics unavailable; use a default-feature ctx build and stage sqlite_scanner for offline runs");
             }
             Ok(false)
         }
