@@ -95,6 +95,60 @@ missing bound.
 
 `match_type` is `"exact"`, `"semantic"`, or `"name"`. `score` is a relevance value in `0.0..=1.0`.
 
+### `grep`
+
+`ctx grep <PATTERN> [PATHS]... --json`
+
+```json
+{
+  "pattern": "close",
+  "index": "present",
+  "tag_vocabulary_version": 1,
+  "files_searched": 3,
+  "files_matched": 3,
+  "truncated": false,
+  "by_tag": { "def": 2, "unresolved": 1, "unlinked": 2, "unindexed": 1 },
+  "targets": [
+    { "target": "Conn::close", "matches": 1 },
+    { "target": "File::close", "matches": 1 }
+  ],
+  "matches": [
+    {
+      "file": "src/conn.rs",
+      "line": 8,
+      "text": "    fn close(&self) {}",
+      "submatches": [{ "start": 7, "end": 12 }],
+      "tags": [
+        {
+          "tag": "def",
+          "identifier": "close",
+          "target": { "name": "close", "qualified_name": "Conn::close", "kind": "method", "file": "src/conn.rs", "line_start": 8, "line_end": 8 },
+          "family": "Closeable"
+        }
+      ]
+    },
+    {
+      "file": "src/conn.rs",
+      "line": 16,
+      "text": "    conn.close();",
+      "submatches": [{ "start": 9, "end": 14 }],
+      "tags": [
+        { "tag": "unresolved", "identifier": "close", "edge_kind": "calls", "candidates": 2 }
+      ]
+    },
+    {
+      "file": "NOTES.md",
+      "line": 1,
+      "text": "Remember to close everything.",
+      "submatches": [{ "start": 12, "end": 17 }],
+      "tags": [{ "tag": "unindexed" }]
+    }
+  ]
+}
+```
+
+`index` is `"present"`, `"missing"` (no index: every match is `unindexed`), or `"disabled"` (`--no-annotate`: `tags` is always empty). `tag` is one of `def`, `ref`, `unresolved`, `unlinked`, `stale`, `unindexed`; the vocabulary is versioned by `tag_vocabulary_version`. Optional tag fields (`identifier`, `edge_kind`, `target`, `family`, `candidates`) are omitted when they do not apply. `submatches` are byte offsets into `text`. `by_tag` counts matching lines per tag; `targets` lists the `def`/`ref` targets by frequency. Tag objects and the payload are extensible: new optional fields may be added.
+
 ### `semantic`
 
 `ctx semantic <QUERY> --json` (also `--output json`)

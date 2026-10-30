@@ -361,6 +361,108 @@ impl Database {
             .optional()
     }
 
+    /// Reference edges whose source symbol lives in `path`, each paired with
+    /// its resolved target symbol (`None` when the edge is unresolved or its
+    /// target is no longer indexed). Used by `ctx grep` to bind text matches
+    /// to the symbols they refer to.
+    pub fn edges_originating_in_file(&self, path: &str) -> Result<Vec<(Edge, Option<Symbol>)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.source_id, e.target_id, e.target_name, e.kind, e.line,
+                   e.col, NULL,
+                   t.id, t.file_path, t.name, t.qualified_name, t.kind,
+                   t.visibility, t.signature, t.brief, t.docstring,
+                   t.line_start, t.line_end, t.col_start, t.col_end,
+                   t.parent_id, NULL
+            FROM edges e
+            JOIN symbols s ON s.id = e.source_id
+            LEFT JOIN symbols t ON t.id = e.target_id
+            WHERE s.file_path = ?
+            ORDER BY e.line, e.col
+            "#,
+        )?;
+        let rows = stmt.query_map([path], |row| {
+            let edge = edge_from_row(row);
+            let target_id: Option<String> = row.get(7)?;
+            let target = target_id.map(|_| symbol_from_offset_row(row, 7));
+            Ok((edge, target))
+        })?;
+        rows.collect()
+    }
+
+    /// Number of indexed symbols with exactly this name. `ctx grep` reports
+    /// it as the candidate count of an unresolved reference.
+    pub fn count_symbols_named(&self, name: &str) -> Result<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols WHERE name = ?",
+            [name],
+            |row| row.get(0),
+        )
+    }
+
+    /// The interface family a symbol belongs to, if the index records one:
+    /// the trait, interface, or base class that declares a member with the
+    /// same name as `symbol`, either because `symbol` is declared inside it
+    /// or because `symbol`'s parent type implements or extends it.
+    ///
+    /// Renaming any member of a family usually means renaming all of them,
+    /// and call sites that dispatch through the family are exactly the ones
+    /// the name graph tends not to bind, so `ctx grep` surfaces the family.
+    ///
+    /// Heuristic, and conservative: the family type must be indexed, and it
+    /// must either own a member symbol with this name or mention `name(` in
+    /// its source (bodyless trait/interface members are not symbols). Types
+    /// outside the index (`Default`, `Display`, ...) are never reported.
+    pub fn interface_family(&self, symbol: &Symbol) -> Result<Option<String>> {
+        let Some(parent) = symbol.parent_id.as_deref() else {
+            return Ok(None);
+        };
+        // `parent_id` is the parent's id without its `@line` suffix.
+        let declared_in: Option<String> = self
+            .conn
+            .query_row(
+                r#"
+                SELECT name FROM symbols
+                WHERE (id = ?1 OR substr(id, 1, length(?1) + 1) = ?1 || '@')
+                  AND kind IN ('trait', 'interface')
+                LIMIT 1
+                "#,
+                [parent],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if declared_in.is_some() {
+            return Ok(declared_in);
+        }
+        self.conn
+            .query_row(
+                r#"
+                SELECT f.name
+                FROM symbols p
+                JOIN edges e ON e.source_id = p.id
+                             AND e.kind IN ('implements', 'extends')
+                JOIN symbols f ON f.name = e.target_name
+                              AND f.kind IN ('trait', 'interface', 'class')
+                WHERE (p.id = ?1 OR substr(p.id, 1, length(?1) + 1) = ?1 || '@')
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM symbols m
+                      WHERE m.name = ?2
+                        AND m.parent_id IS NOT NULL
+                        AND (f.id = m.parent_id
+                             OR substr(f.id, 1, length(m.parent_id) + 1) = m.parent_id || '@')
+                    )
+                    OR instr(coalesce(f.source, ''), ?2 || '(') > 0
+                  )
+                ORDER BY f.name
+                LIMIT 1
+                "#,
+                params![parent, symbol.name],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
     /// Get the parser language recorded for an indexed file.
     pub fn get_file_language(&self, path: &str) -> Result<Option<String>> {
         self.conn
@@ -2211,25 +2313,31 @@ fn rust_function_item_path_matches(file_path: &str, name: &str, reference_path: 
 
 /// Helper to convert a row to a Symbol.
 fn symbol_from_row(row: &rusqlite::Row) -> Symbol {
-    let kind_str: String = row.get(4).unwrap_or_default();
-    let visibility_str: String = row.get(5).unwrap_or_default();
+    symbol_from_offset_row(row, 0)
+}
+
+/// Like [`symbol_from_row`], but reads the fifteen symbol columns starting at
+/// `offset` (for queries that select a symbol after other columns).
+fn symbol_from_offset_row(row: &rusqlite::Row, offset: usize) -> Symbol {
+    let kind_str: String = row.get(offset + 4).unwrap_or_default();
+    let visibility_str: String = row.get(offset + 5).unwrap_or_default();
 
     Symbol {
-        id: row.get(0).unwrap_or_default(),
-        file_path: row.get(1).unwrap_or_default(),
-        name: row.get(2).unwrap_or_default(),
-        qualified_name: row.get(3).ok(),
+        id: row.get(offset).unwrap_or_default(),
+        file_path: row.get(offset + 1).unwrap_or_default(),
+        name: row.get(offset + 2).unwrap_or_default(),
+        qualified_name: row.get(offset + 3).ok(),
         kind: SymbolKind::from_str(&kind_str).unwrap_or(SymbolKind::Function),
         visibility: Visibility::from_str(&visibility_str).unwrap_or_default(),
-        signature: row.get(6).ok(),
-        brief: row.get(7).ok(),
-        docstring: row.get(8).ok(),
-        line_start: row.get(9).unwrap_or(0),
-        line_end: row.get(10).unwrap_or(0),
-        col_start: row.get(11).unwrap_or(0),
-        col_end: row.get(12).unwrap_or(0),
-        parent_id: row.get(13).ok(),
-        source: row.get(14).ok(),
+        signature: row.get(offset + 6).ok(),
+        brief: row.get(offset + 7).ok(),
+        docstring: row.get(offset + 8).ok(),
+        line_start: row.get(offset + 9).unwrap_or(0),
+        line_end: row.get(offset + 10).unwrap_or(0),
+        col_start: row.get(offset + 11).unwrap_or(0),
+        col_end: row.get(offset + 12).unwrap_or(0),
+        parent_id: row.get(offset + 13).ok(),
+        source: row.get(offset + 14).ok(),
     }
 }
 

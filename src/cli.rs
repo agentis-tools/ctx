@@ -236,6 +236,72 @@ internal and unstable. Access is read-only and engine-hardened.
         output: String,
     },
 
+    /// Search file contents like ripgrep, tagging each match with what the index knows
+    ///
+    /// Uses ripgrep's search engine and file walker, so it finds what `rg`
+    /// finds: no match is dropped. Each matching line is annotated from the
+    /// index: `def` (defines a symbol), `ref` (an edge resolves the name to a
+    /// symbol), `unresolved` (an edge exists but its target is ambiguous),
+    /// `unlinked` (indexed file, but no index fact for the name here),
+    /// `stale` (file changed since indexing), or `unindexed` (file not in the
+    /// index). A summary line counts the tags and lists the symbols the
+    /// pattern resolved to.
+    ///
+    /// Paths and globs are given positionally after the pattern. `-i` is
+    /// ctx's global --ignore; use --ignore-case (or -S) for case-insensitive
+    /// search.
+    ///
+    /// Exit codes: 0 = success (with or without matches); 2 = invalid
+    /// pattern, glob, or file type, or another operational error.
+    #[command(after_help = r#"EXAMPLES:
+    ctx grep 'fn close'                  # Search the whole repository
+    ctx grep -w close src/               # Whole-word matches under src/
+    ctx grep -F 'a.b(' -g '*.rs'         # Literal search in Rust files
+    ctx grep -t py 'def handler'         # Restrict to a ripgrep file type
+    ctx grep --no-annotate close         # Plain `rg -n` output, no index
+    ctx grep --json close                # Matches and tags as JSON
+"#)]
+    Grep {
+        /// Regular expression to search for (Rust regex syntax)
+        pattern: String,
+
+        /// Treat the pattern as a literal string
+        #[arg(short = 'F', long)]
+        fixed_strings: bool,
+
+        /// Search case-insensitively
+        #[arg(long)]
+        ignore_case: bool,
+
+        /// Search case-insensitively unless the pattern has an uppercase letter
+        #[arg(short = 'S', long)]
+        smart_case: bool,
+
+        /// Only show matches surrounded by word boundaries
+        #[arg(short = 'w', long)]
+        word_regexp: bool,
+
+        /// Include or exclude files matching a glob (prefix with ! to exclude; repeatable)
+        #[arg(short = 'g', long = "glob")]
+        globs: Vec<String>,
+
+        /// Only search files of this ripgrep file type, e.g. rust, py, ts (repeatable)
+        #[arg(short = 't', long = "type")]
+        types: Vec<String>,
+
+        /// Search hidden files and directories
+        #[arg(long)]
+        hidden: bool,
+
+        /// Stop after this many matching lines (the summary reports truncation)
+        #[arg(long)]
+        max_results: Option<usize>,
+
+        /// Do not consult the index: print plain `path:line:text` like `rg -n`
+        #[arg(long)]
+        no_annotate: bool,
+    },
+
     /// Get the source code for a symbol
     Source {
         /// Symbol ID or name
