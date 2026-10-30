@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C++), size beat complexity at predicting which functions later got bug
   fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
   and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
+- BREAKING: `ctx smart --max-tokens` is now a hard limit on the complete rendered
+  context, including tree and format wrappers. A top-ranked file larger than the
+  budget is no longer included by default; `--include-oversized-top` restores
+  the previous behavior. The MCP `smart_context` tool applies the same limit,
+  and the global `--max-tokens` flag is now rejected with an error on commands that do
+  not take a token budget instead of being ignored (#102).
 
 ### Fixed
 - C/C++: calls that name a function declared in a header and defined in one
@@ -74,6 +80,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locally the index is attached directly; otherwise it is copied into a
   private read-only DuckDB file. `ctx sql`, `query`, `snapshot`, `smart`
   and `diff` now work offline and behind egress allowlists.
+- MCP `get_callers`, `get_callees`, `find_references` and `get_definition`
+  now answer for the definition that was asked about. They took the first row
+  of a substring search, and the call-graph tools searched functions only, so
+  `get_callers getValue` on a Go method answered for `TestContextSetGetValues`
+  and `get_definition greet` also offered the struct `Greeter`. Exact name
+  matches now win, methods are included, and several same-named definitions
+  are listed (up to five) instead of silently picking one.
+- MCP `get_callers` and `find_references` follow resolved edges (`target_id`),
+  as `ctx callers` does, instead of every call with the same bare name, so
+  edges bound by the resolver, the LSP or `ctx judge edges` are no longer
+  mixed with calls to other same-named definitions. Unbound same-name calls
+  are listed separately as possible callers. `get_callers` honours `depth`
+  (default 3, max 5) and `get_callees` shows the definition each call
+  resolved to.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
@@ -115,6 +135,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Re-running `ctx index` on an existing index is not sufficient to clear
   previously stored false edges, because resolution only fills targets that are
   still unset. Delete `.ctx/codebase.sqlite` and reindex to pick up the fix.
+
+### Documentation
+- Refreshed README measurements, token-budget wording, LSP guidance, and
+  library version examples; governance now checks README version references
+  against the manifest (#101).
+- BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
 
 ## [0.4.0] - 2026-07-24
 
