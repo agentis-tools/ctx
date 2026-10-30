@@ -1044,9 +1044,9 @@ fn duckdb_type_name(dt: &duckdb::arrow::datatypes::DataType) -> String {
     .to_string()
 }
 
-/// Convert a DuckDB `ValueRef` into a `serde_json::Value` for output. Exotic
-/// types (temporal, decimal, nested) fall back to a debug string so rendering
-/// never panics.
+/// Convert a DuckDB `ValueRef` into a `serde_json::Value` for output.
+/// Decimals render as their exact text; other exotic types (nested, some
+/// temporal) fall back to a debug string so rendering never panics.
 fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
     use serde_json::Value as J;
     match v {
@@ -1085,6 +1085,8 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
                 });
             J::String(formatted.unwrap_or_else(|| format!("Timestamp({unit:?}, {raw})")))
         }
+        // Exact decimal text ("0.5", "-12.340"); a JSON number would round it.
+        ValueRef::Decimal(d) => J::String(d.to_string()),
         other => J::String(format!("{:?}", other)),
     }
 }
@@ -1105,6 +1107,33 @@ mod tests {
         ))
         .unwrap();
         tmp
+    }
+
+    #[test]
+    fn decimals_render_as_exact_text() {
+        let conn = Connection::open_in_memory().unwrap();
+        let got: Vec<serde_json::Value> = conn
+            .query_row(
+                "SELECT 0.5, CAST(-12.340 AS DECIMAL(10,3)), CAST(7 AS DECIMAL(4,0)), \
+                 CAST(0.001 AS DECIMAL(18,3)), CAST('123456789012345678901.5' AS DECIMAL(38,1))",
+                [],
+                |r| {
+                    Ok((0..5)
+                        .map(|i| value_ref_to_json(r.get_ref(i).unwrap()))
+                        .collect())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                serde_json::json!("0.5"),
+                serde_json::json!("-12.340"),
+                serde_json::json!("7"),
+                serde_json::json!("0.001"),
+                serde_json::json!("123456789012345678901.5"),
+            ]
+        );
     }
 
     #[test]
