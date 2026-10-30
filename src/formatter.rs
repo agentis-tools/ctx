@@ -112,18 +112,27 @@ pub struct MarkdownFormatter;
 
 impl Formatter for MarkdownFormatter {
     fn format_tree(&self, tree: &str) -> String {
-        format!("## Project Tree\n\n```\n{}```", tree)
+        let fence = markdown_fence(tree);
+        format!("## Project Tree\n\n{}\n{}\n{}", fence, tree, fence)
     }
 
     fn format_file(&self, entry: &FileEntry, content: &str) -> String {
-        let path = format_path_for_output(&entry.relative_path);
+        let path = sanitize_markdown_label(&format_path_for_output(&entry.relative_path));
         let extension = entry
             .relative_path
             .extension()
-            .map(|s| s.to_string_lossy())
+            .map(|s| sanitize_markdown_language(&s.to_string_lossy()))
             .unwrap_or_default();
+        let fence = markdown_fence(content);
 
-        format!("## {}\n\n```{}\n{}\n```", path, extension, content.trim())
+        format!(
+            "## {}\n\n{}{}\n{}\n{}",
+            path,
+            fence,
+            extension,
+            content.trim(),
+            fence
+        )
     }
 
     fn wrap(&self, tree_block: Option<&str>, files_block: &str) -> String {
@@ -275,6 +284,43 @@ fn format_path_for_output(path: &Path) -> String {
     }
 }
 
+/// Select a fenced-code delimiter that cannot be closed by repository content.
+/// CommonMark permits any fence of at least three backticks; making it one
+/// longer than the longest run in the content keeps nested examples intact.
+fn markdown_fence(content: &str) -> String {
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for byte in content.bytes() {
+        if byte == b'`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    "`".repeat(longest.max(2) + 1)
+}
+
+/// Keep repository-controlled path labels on one Markdown heading line.
+fn sanitize_markdown_label(path: &str) -> String {
+    path.chars()
+        .map(|ch| match ch {
+            '\n' | '\r' | '\t' => ' ',
+            ch if ch.is_control() => '\u{fffd}',
+            '`' => '\u{2032}',
+            ch => ch,
+        })
+        .collect()
+}
+
+/// Language-info strings are presentation metadata, not arbitrary Markdown.
+fn sanitize_markdown_language(extension: &str) -> String {
+    extension
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '_' | '.'))
+        .collect()
+}
+
 /// Output format for context generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
@@ -394,6 +440,26 @@ mod tests {
         assert!(output.contains("## /src/main.rs"));
         assert!(output.contains("```rs"));
         assert!(output.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn test_markdown_formatter_extends_fence_for_nested_code() {
+        let formatter = MarkdownFormatter;
+        let entry = make_entry("src/nested`name.rs");
+        let content = "fn example() {\n    ```rust\n    nested();\n    ```\n}";
+        let output = formatter.format_file(&entry, content);
+
+        assert!(output.starts_with("## /src/nested′name.rs\n\n````rs\n"));
+        assert!(output.ends_with("\n````"));
+        assert!(output.contains("\n    ```rust\n"));
+    }
+
+    #[test]
+    fn test_markdown_path_cannot_inject_a_heading() {
+        let formatter = MarkdownFormatter;
+        let entry = make_entry("src/evil\n## injected.rs");
+        let output = formatter.format_file(&entry, "content");
+        assert!(!output.contains("evil\n## injected"));
     }
 
     #[test]

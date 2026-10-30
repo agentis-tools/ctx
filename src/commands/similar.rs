@@ -38,6 +38,7 @@ pub fn run_similar(
     patterns: &[String],
     trust_project: bool,
 ) -> Result<Outcome> {
+    let limit = limit.min(ctx::limits::MAX_SEARCH_RESULTS as usize);
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
     let filter = FilePatternFilter::new(&root, patterns)

@@ -20,6 +20,15 @@ ctx src/ | pbcopy
 
 ## File Selection
 
+### Resource limits
+
+To keep repository-controlled input bounded, discovery accepts at most 100,000
+files and 256 MiB of aggregate content, and skips individual files larger than
+8 MiB. The same per-file cap is enforced when indexing or reading context, so
+metadata changes cannot turn a later read into an unbounded allocation. Skipped
+files are reported on stderr. MCP responses are capped at 2 MiB; use narrower
+patterns or direct file retrieval when a result is intentionally large.
+
 ### Glob Patterns
 
 ctx supports standard glob patterns:

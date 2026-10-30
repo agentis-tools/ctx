@@ -139,6 +139,7 @@ pub mod fingerprint;
 pub mod index;
 pub mod json;
 pub mod judge;
+pub mod limits;
 pub mod lsp;
 pub mod parser;
 pub mod rank;

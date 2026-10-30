@@ -439,9 +439,30 @@ pub fn run_audit(
     let mut report = QualityReport::new();
     report.threshold = config.min_score;
 
-    // Get all symbols using a broad search
-    // We use "%" pattern to get all symbols with a high limit
-    let mut symbols = db.find_symbols("%", 100000)?;
+    // Load all symbols through a dedicated, unbounded-by-search API. A `%`
+    // search is not equivalent: search patterns escape LIKE metacharacters,
+    // so it can return zero rows while the index is populated.
+    let indexed_count = db.get_stats()?.symbols;
+    let mut symbols = db.all_symbols()?;
+    if indexed_count > 0 && symbols.is_empty() {
+        return Err(CtxError::other(format!(
+            "audit could not load indexed symbols (database reports {} symbols)",
+            indexed_count
+        )));
+    }
+    if symbols.len() as i64 != indexed_count {
+        return Err(CtxError::other(format!(
+            "audit symbol count mismatch (database reports {}, query returned {})",
+            indexed_count,
+            symbols.len()
+        )));
+    }
+
+    report.total_symbols = symbols.len();
+    report.total_functions = symbols
+        .iter()
+        .filter(|s| s.kind.as_str() == "function" || s.kind.as_str() == "method")
+        .count();
 
     // If incremental mode, filter to only changed files
     if config.incremental {
@@ -949,6 +970,8 @@ fn capitalize(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{FileRecord, Symbol, SymbolKind, Visibility};
+    use std::path::PathBuf;
 
     #[test]
     fn test_snake_case() {
@@ -996,6 +1019,54 @@ mod tests {
         assert!(text.contains("Code Quality Audit"));
         assert!(text.contains("Complexity:"));
         assert!(text.contains("Coverage:"));
+    }
+
+    #[test]
+    fn audit_counts_match_the_index_instead_of_wildcard_search_results() {
+        let db = Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/lib.rs".to_string(),
+                content_hash: "hash".to_string(),
+                size_bytes: 1,
+                language: Some("rust".to_string()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&Symbol {
+            id: "src/lib.rs::parse_input".to_string(),
+            file_path: "src/lib.rs".to_string(),
+            name: "parse_input".to_string(),
+            qualified_name: None,
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            signature: Some("fn parse_input()".to_string()),
+            brief: Some("Parse input".to_string()),
+            docstring: Some("Parse input".to_string()),
+            line_start: 1,
+            line_end: 1,
+            col_start: 0,
+            col_end: 1,
+            parent_id: None,
+            source: Some("fn parse_input() {}".to_string()),
+        })
+        .unwrap();
+
+        let report = run_audit(
+            &db,
+            None,
+            &AuditConfig {
+                categories: vec!["coverage".to_string(), "naming".to_string()],
+                path: PathBuf::from("."),
+                incremental: false,
+                min_score: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.total_symbols, 1);
+        assert_eq!(report.total_functions, 1);
     }
 
     #[test]

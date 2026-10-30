@@ -2,10 +2,13 @@
 
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
-use std::fs;
 
-use super::{invalid_params, parse_params, schema_for, FileTreeParams, GetFileParams};
+use super::{
+    bounded_mcp_output, invalid_params, parse_params, schema_for, FileTreeParams, GetFileParams,
+};
+use crate::limits::MAX_MCP_RESPONSE_BYTES;
 use crate::mcp::server::CtxServer;
+use crate::output::read_file_content;
 use crate::walker::{discover_files, secure_file_path, validate_project_path, WalkerConfig};
 
 /// Helper to create an internal error.
@@ -48,7 +51,7 @@ pub async fn get_file(
         .map_err(|e| invalid_params(format!("Invalid path: {}", e)))?;
 
     // Read the file
-    let content = fs::read_to_string(&canonical).map_err(|e| {
+    let content = read_file_content(&canonical).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             invalid_params(format!("File not found: {}", params.path))
         } else {
@@ -59,7 +62,9 @@ pub async fn get_file(
     // Format output with file path header
     let output = format!("// File: {}\n\n{}", params.path, content);
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 /// Execute the get_file_tree tool.
@@ -107,6 +112,7 @@ pub async fn get_file_tree(
 
     // Apply depth filter if specified
     let entries: Vec<_> = if let Some(max_depth) = params.depth {
+        let max_depth = max_depth.min(crate::limits::MAX_GRAPH_DEPTH as u32);
         entries
             .into_iter()
             .filter(|e| {
@@ -124,6 +130,9 @@ pub async fn get_file_tree(
     // Group by directory for better organization
     let mut current_dir = String::new();
     for entry in &entries {
+        if output.len() >= MAX_MCP_RESPONSE_BYTES {
+            break;
+        }
         let path_str = entry.relative_path.display().to_string();
         let parent = entry
             .relative_path
@@ -147,7 +156,9 @@ pub async fn get_file_tree(
         output.push_str(&format!("  {}\n", file_name));
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 #[cfg(test)]

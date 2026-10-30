@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::cli::Args;
 use crate::commands::format_token_count;
 use ctx::error::Result;
-use ctx::output::{generate_context, stream_context};
+use ctx::output::{generate_context, read_file_content, stream_context};
 use ctx::tokens;
 use ctx::walker::{self, discover_files, FileEntry, WalkerConfig};
 
@@ -131,10 +131,8 @@ pub fn run_count_only(
                 continue;
             }
         };
-        // Use lossy read to match read_file_content behavior in output.rs
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                let content = String::from_utf8_lossy(&bytes);
+        match read_file_content(&path) {
+            Ok(content) => {
                 let token_count = tokens::count_tokens_with_encoding(&content, encoding)?;
                 total_tokens += token_count;
                 total_chars += content.chars().count(); // Use char count, not byte length
@@ -190,8 +188,7 @@ pub fn filter_files_by_tokens(
             }
         };
         // Use lossy read to match read_file_content behavior in output.rs
-        if let Ok(bytes) = std::fs::read(&path) {
-            let content = String::from_utf8_lossy(&bytes);
+        if let Ok(content) = read_file_content(&path) {
             let token_count = tokens::count_tokens_with_encoding(&content, encoding)?;
             file_tokens.push((token_count, entry));
         }
