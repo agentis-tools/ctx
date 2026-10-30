@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
   lookup index identified by profiling of its hot path (#96).
+- `ctx duplicates` now bounds candidate and result memory, adds `--limit`,
+  and reports truncation in both human and JSON output (#104).
 - Hardened self-update staging and writability probes with exclusive randomized
   temporary files, bounded release/archive/member reads, and bounded
   decompression. Snapshot backfill now uses a randomized private RAII tempdir

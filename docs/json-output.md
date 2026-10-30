@@ -353,13 +353,15 @@ Entry selection and `token_estimate` are computed from the text rendering, so JS
 
 ### `duplicates`
 
-`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
+`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--limit N] [--fail-on-found] --json`
 
 ```json
 {
   "threshold": 0.85,
   "min_tokens": 50,
   "against": null,
+  "limit": 1000,
+  "truncated": false,
   "skipped_languages": ["solidity"],
   "pairs": [
     {
@@ -373,7 +375,7 @@ Entry selection and `token_estimate` are computed from the text rendering, so JS
 }
 ```
 
-`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
+`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted (Solidity has no tree-sitter grammar). `limit` accepts 1-10,000 and bounds retained results; `truncated` is true when candidate, result-count, or retained-source-byte limits prevent a complete search. With `--fail-on-found`, either a non-empty `pairs` array or `truncated: true` exits with code 1 so an incomplete search fails closed.
 
 ### `hotspots`
 
