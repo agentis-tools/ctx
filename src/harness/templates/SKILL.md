@@ -78,7 +78,7 @@ against source.
 ```bash
 ctx index
 ctx check --against HEAD --json
-ctx score --against main --fail-on "check_violations>0,new_duplication>0"
+ctx score --against main --fail-on "check_violations>0"
 ctx duplicates --against main
 ```
 

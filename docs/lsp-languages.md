@@ -42,6 +42,7 @@ The table key (`kotlin`, `python`, …) is the language name stored on every ind
 | `args` | array of strings | `[]` | Arguments passed to the server (e.g. `["--stdio"]`). |
 | `extensions` | array of strings | built-in set for built-in language names | File extensions (without the dot) this server claims. **Required** when the table key is not a built-in language name. Normalized to lowercase, leading dots stripped. |
 | `root_markers` | array of strings | `[]` | Marker files/dirs identifying a workspace root. Informational; `ctx lsp doctor` reports which ones exist under the project root. |
+| `ready_timeout_ms` | integer | `300000` | How long cross-file resolution waits for the server to report it has finished loading the workspace (`experimental/serverStatus` quiescence or all `$/progress` ended). Servers such as rust-analyzer answer `null` to definition requests until then. |
 | `capabilities` | array of strings | `[]` | Capabilities you expect the server to provide (e.g. `["documentSymbol", "definition"]`). `ctx lsp doctor` warns when the server does not advertise them. |
 | `backend` | `"tree-sitter"` \| `"lsp"` \| `"hybrid"` | `"hybrid"` | Extraction backend for files claimed by this block (see below). |
 | `initialization_options` | any TOML value | unset | Passed through verbatim as LSP `initializationOptions`. |

@@ -35,6 +35,26 @@ pub struct LspConfig {
     pub lsp: BTreeMap<String, LspServerConfig>,
 }
 
+/// `[lsp.<language>] ready_timeout_ms`: how long cross-file resolution waits
+/// for the server to finish loading the workspace (default 300 000 ms).
+///
+/// Read on its own rather than as an [`LspServerConfig`] field so that adding
+/// the key does not change that public struct. `LspServerConfig` ignores the
+/// key when deserializing, like any other key it does not know.
+pub(crate) fn ready_timeout_ms(root: &Path, language: &str) -> Option<u64> {
+    let path = root
+        .join(crate::index::CTX_DIR)
+        .join(crate::config::CONFIG_FILE);
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: toml::Value = toml::from_str(&text).ok()?;
+    value
+        .get("lsp")?
+        .get(language)?
+        .get("ready_timeout_ms")?
+        .as_integer()
+        .and_then(|ms| u64::try_from(ms).ok())
+}
+
 impl LspConfig {
     /// Load `<root>/.ctx/config.toml`. A missing file yields defaults; a
     /// malformed file yields defaults with a warning (never fatal — config
@@ -482,6 +502,22 @@ command = 42
 
         let f = write_temp("this is not valid toml : : :");
         assert!(LspConfig::load_file(f.path()).lsp.is_empty());
+    }
+
+    #[test]
+    fn ready_timeout_is_read_per_language_and_ignored_by_the_server_config() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(ready_timeout_ms(dir.path(), "rust"), None);
+        std::fs::create_dir_all(dir.path().join(".ctx")).unwrap();
+        std::fs::write(
+            dir.path().join(".ctx/config.toml"),
+            "[lsp.rust]\ncommand = \"rust-analyzer\"\nready_timeout_ms = 1200\n",
+        )
+        .unwrap();
+        assert_eq!(ready_timeout_ms(dir.path(), "rust"), Some(1200));
+        assert_eq!(ready_timeout_ms(dir.path(), "python"), None);
+        let cfg = LspConfig::load(dir.path());
+        assert_eq!(cfg.lsp["rust"].command, "rust-analyzer");
     }
 
     #[test]
