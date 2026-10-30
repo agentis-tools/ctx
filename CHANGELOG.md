@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
+  0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
+  decompression, ServerHello downgrade, distrusted intermediates),
+  webpki-roots / webpki-root-certs 1.0.11 (distrusted emSign roots), tokio
+  1.54.1 (`AsyncFd` I/O safety), zip 9 (symlink and SUID extraction
+  advisories; ctx never calls `ZipArchive::extract`) for the Windows
+  self-updater and for DuckDB's build, which moves to 1.10506.1 (engine
+  v1.5.4 -> v1.5.6), and the yanked clipboard-win 5.4.1. The ring and rmcp
+  advisory exceptions are removed: the locked versions are no longer
+  affected. Both lockfiles (root and `perf/`) are updated.
+
 ### Changed
 - Cold `ctx index` no longer builds a new parser (and recompiles every
   language's queries) for each file in the parallel path; parsers are reused
@@ -37,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C++), size beat complexity at predicting which functions later got bug
   fixes in 10/10 repositories (mean ΔAUC +0.031, 95 % CI [+0.012, +0.046]),
   and churn × size beat churn × complexity in 9/10 (+0.017 [+0.006, +0.028]).
+- BREAKING: `ctx smart --max-tokens` is now a hard limit on the complete rendered
+  context, including tree and format wrappers. A top-ranked file larger than the
+  budget is no longer included by default; `--include-oversized-top` restores
+  the previous behavior. The MCP `smart_context` tool applies the same limit,
+  and the global `--max-tokens` flag is now rejected with an error on commands that do
+  not take a token budget instead of being ignored (#102).
 
 ### Fixed
 - Analytics engines opened in the same process (the MCP server, parallel
@@ -45,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clock, which collided within the clock's resolution (microseconds on macOS),
   so DuckDB aborted with `FetchStringFromDict` or answered from another
   index. Each copy now lives in its own private, randomly named directory.
+- `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
+  DuckDB update the previous debug fallback would have printed the new
+  decimal type's internals.
 - C/C++: calls that name a function declared in a header and defined in one
   `.c`/`.cc` file are now bound to the definition during indexing (previously
   they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
@@ -80,6 +101,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locally the index is attached directly; otherwise it is copied into a
   private read-only DuckDB file. `ctx sql`, `query`, `snapshot`, `smart`
   and `diff` now work offline and behind egress allowlists.
+- MCP `get_callers`, `get_callees`, `find_references` and `get_definition`
+  now answer for the definition that was asked about. They took the first row
+  of a substring search, and the call-graph tools searched functions only, so
+  `get_callers getValue` on a Go method answered for `TestContextSetGetValues`
+  and `get_definition greet` also offered the struct `Greeter`. Exact name
+  matches now win, methods are included, and several same-named definitions
+  are listed (up to five) instead of silently picking one.
+- MCP `get_callers` and `find_references` follow resolved edges (`target_id`),
+  as `ctx callers` does, instead of every call with the same bare name, so
+  edges bound by the resolver, the LSP or `ctx judge edges` are no longer
+  mixed with calls to other same-named definitions. Unbound same-name calls
+  are listed separately as possible callers. `get_callers` honours `depth`
+  (default 3, max 5) and `get_callees` shows the definition each call
+  resolved to.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
@@ -90,6 +125,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for historical worktrees.
 - Release checksum generation no longer includes `SHA256SUMS` in its own
   manifest, and release validation rejects self-referential entries (#103).
+- `ctx score` now resolves its merge base once and uses that commit for every
+  baseline input, avoiding inconsistent results when the target branch moved
+  after a feature branch diverged (#99).
+- Generated Claude Code and Codex Stop hooks now block only on architecture
+  check violations by default; duplication remains visible for calibration,
+  and `ctx harness init`/`doctor` warn before a customized blocking hook uses
+  `new_duplication` (#105).
+
+### Documentation
+- Refreshed README measurements, token-budget wording, LSP guidance, and
+  library version examples; governance now checks README version references
+  against the manifest (#101).
+- BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
 
 ## [0.4.0] - 2026-07-24
 
