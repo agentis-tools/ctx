@@ -135,6 +135,27 @@ pub struct ScoreReport {
 ///
 /// `root` is the project root (also the directory git commands run in).
 pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
+    compute_score_with_baseline(root, reference).map(|(report, _)| report)
+}
+
+/// Compute a score and return the immutable merge-base commit used for every
+/// score dimension. This keeps the resolved baseline available to CLI output
+/// without adding a field to the public ScoreReport struct.
+pub fn compute_score_with_baseline(root: &Path, reference: &str) -> Result<(ScoreReport, String)> {
+    if !gitutil::is_git_repo_in(root) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    // Resolve the merge base once. Every score input must use this same
+    // commit; using the reference tip for file contents while changed paths
+    // are merge-base-scoped makes branch scores depend on unrelated target
+    // branch changes.
+    let baseline = gitutil::merge_base_in(root, reference)?;
+    let report = compute_score_at_baseline(root, reference, &baseline)?;
+    Ok((report, baseline))
+}
+
+fn compute_score_at_baseline(root: &Path, against: &str, baseline: &str) -> Result<ScoreReport> {
     if !gitutil::is_git_repo_in(root) {
         return Err(CtxError::NotGitRepo);
     }
@@ -150,7 +171,7 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
     // Changed files, filtered to supported source files that are either
     // indexed (exist) or gone from disk (deleted). Supported files that
     // exist but are excluded from the index (ignore patterns) are skipped.
-    let mut changed: Vec<String> = gitutil::changed_files_against_in(root, reference)?
+    let mut changed: Vec<String> = gitutil::changed_files_against_in(root, baseline)?
         .into_iter()
         .filter(|f| CodeParser::is_supported_static(Path::new(f)))
         .filter(|f| indexed.contains(f) || !root.join(f).exists())
@@ -166,20 +187,20 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
             root,
             &db,
             &mut parser,
-            reference,
+            baseline,
             path,
             &indexed,
         )?);
     }
 
     // Newly introduced near-duplicate pairs.
-    let new_duplication = new_duplication(root, &db, &mut parser, reference, &changed_set)?;
+    let new_duplication = new_duplication(root, &db, &mut parser, baseline, &changed_set)?;
 
     // Architecture rules, scoped to the same reference.
     let rules_path = root.join(rules::DEFAULT_RULES_PATH);
     let (check_violations, check_violations_note) = if rules_path.exists() {
         let context = check::load_context(root, None)?;
-        let violations = check::collect_violations(root, &context, Some(reference))?;
+        let violations = check::collect_violations(root, &context, Some(baseline))?;
         (violations.len() as i64, None)
     } else {
         (0, Some(NO_RULES_NOTE.to_string()))
@@ -212,7 +233,7 @@ pub fn compute_score(root: &Path, reference: &str) -> Result<ScoreReport> {
     }
 
     Ok(ScoreReport {
-        against: reference.to_string(),
+        against: against.to_string(),
         files_reindexed: index_result.files_indexed,
         complexity_baseline,
         complexity_current,

@@ -94,7 +94,7 @@ Stamp columns plus:
 
 ## Backfilling history
 
-`ctx snapshot backfill --since <REF>` captures partitions for historical commits so trend queries have a past to look at. It walks the **first-parent** range `REF..HEAD` oldest-first (including `REF` itself when it resolves to a commit), checks each missing commit out into a temporary `git worktree`, snapshots it into *this* repository's `.ctx/snapshots/`, and removes the worktree again — your working tree is never touched.
+`ctx snapshot backfill --since <REF>` captures partitions for historical commits so trend queries have a past to look at. It walks the **first-parent** range `REF..HEAD` oldest-first (including `REF` itself when it resolves to a commit), checks each missing commit out into a randomized private temporary `git worktree`, snapshots it into *this* repository's `.ctx/snapshots/`, and removes the worktree again — your working tree is never touched.
 
 ```bash
 ctx snapshot backfill --since v0.1.0             # every first-parent commit since v0.1.0

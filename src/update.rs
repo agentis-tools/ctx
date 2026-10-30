@@ -31,8 +31,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::IsTerminal;
-use std::io::Read;
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::{Command, Stdio};
@@ -58,6 +57,16 @@ const PASSIVE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Network budget for explicit operations (`self-update`, `--version --check`).
 const EXPLICIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Resource limits for release metadata and archives. Release artifacts are
+/// expected to be small native binaries; these caps keep a compromised or
+/// accidentally oversized release from turning `self-update` into an
+/// unbounded memory/disk operation.
+const MAX_RELEASE_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_CHECKSUM_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_UNCOMPRESSED_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 
 // ============================================================================
 // Platform / artifact mapping
@@ -173,7 +182,8 @@ fn fetch_release(client: &reqwest::blocking::Client, url: &str) -> Result<Releas
             "release query failed: {url} returned HTTP {status}"
         )));
     }
-    let value: serde_json::Value = response.json()?;
+    let body = read_response_limited(response, MAX_RELEASE_RESPONSE_BYTES, "release metadata")?;
+    let value: serde_json::Value = serde_json::from_slice(&body)?;
     parse_release(&value)
 }
 
@@ -253,7 +263,11 @@ fn extract_binary(archive: &[u8], artifact: &str) -> Result<Vec<u8>> {
 }
 
 fn extract_from_tar_gz(archive: &[u8]) -> Result<Vec<u8>> {
-    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
+    // Bound the decompressed stream as well as the downloaded archive. A
+    // small gzip can otherwise expand without limit while tar walks it.
+    let decoded = flate2::read::GzDecoder::new(archive);
+    let bounded = decoded.take(MAX_UNCOMPRESSED_ARCHIVE_BYTES + 1);
+    let mut tar = tar::Archive::new(bounded);
     for entry in tar.entries()? {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
@@ -261,8 +275,25 @@ fn extract_from_tar_gz(archive: &[u8]) -> Result<Vec<u8>> {
         }
         let is_ctx = entry.path()?.file_name().is_some_and(|name| name == "ctx");
         if is_ctx {
+            let member_size = entry.header().size()?;
+            if member_size > MAX_BINARY_BYTES {
+                return Err(CtxError::Other(format!(
+                    "release archive 'ctx' member exceeds the {} MiB limit",
+                    MAX_BINARY_BYTES / (1024 * 1024)
+                )));
+            }
             let mut binary = Vec::new();
-            entry.read_to_end(&mut binary)?;
+            // Bound the physical read as well as trusting the tar header.
+            entry
+                .by_ref()
+                .take(MAX_BINARY_BYTES + 1)
+                .read_to_end(&mut binary)?;
+            if binary.len() as u64 > MAX_BINARY_BYTES {
+                return Err(CtxError::Other(format!(
+                    "release archive 'ctx' member exceeds the {} MiB limit",
+                    MAX_BINARY_BYTES / (1024 * 1024)
+                )));
+            }
             return Ok(binary);
         }
     }
@@ -288,8 +319,24 @@ fn extract_from_zip(archive: &[u8]) -> Result<Vec<u8>> {
             .and_then(|p| p.file_name().map(|n| n.to_os_string()))
             .is_some_and(|name| name == "ctx.exe");
         if is_ctx {
+            if entry.size() > MAX_BINARY_BYTES {
+                return Err(CtxError::Other(format!(
+                    "release archive 'ctx.exe' member exceeds the {} MiB limit",
+                    MAX_BINARY_BYTES / (1024 * 1024)
+                )));
+            }
             let mut binary = Vec::new();
-            entry.read_to_end(&mut binary)?;
+            // Bound the physical read as well as trusting the zip metadata.
+            entry
+                .by_ref()
+                .take(MAX_BINARY_BYTES + 1)
+                .read_to_end(&mut binary)?;
+            if binary.len() as u64 > MAX_BINARY_BYTES {
+                return Err(CtxError::Other(format!(
+                    "release archive 'ctx.exe' member exceeds the {} MiB limit",
+                    MAX_BINARY_BYTES / (1024 * 1024)
+                )));
+            }
             return Ok(binary);
         }
     }
@@ -305,8 +352,12 @@ fn extract_from_zip(archive: &[u8]) -> Result<Vec<u8>> {
 /// Check that we can create files in the executable's directory before doing
 /// any network work.
 fn ensure_writable(dir: &Path) -> Result<()> {
-    let probe = dir.join(format!(".ctx-write-probe-{}", std::process::id()));
-    let outcome = fs::write(&probe, b"").and_then(|()| fs::remove_file(&probe));
+    // `tempfile` uses an exclusive create with a randomized name. This avoids
+    // following a pre-created symlink at a predictable PID-derived path.
+    let outcome = tempfile::Builder::new()
+        .prefix(".ctx-write-probe-")
+        .tempfile_in(dir)
+        .map(|_| ());
     outcome.map_err(|e| {
         CtxError::Other(format!(
             "cannot update: install location '{}' is not writable ({e}); \
@@ -328,40 +379,44 @@ fn replace_executable(exe: &Path, data: &[u8]) -> Result<()> {
     let dir = exe
         .parent()
         .ok_or_else(|| CtxError::Other("executable has no parent directory".to_string()))?;
-    let staged = dir.join(format!(".ctx-update-{}", std::process::id()));
-    if let Err(e) = fs::write(&staged, data) {
-        let _ = fs::remove_file(&staged);
-        return Err(e.into());
-    }
+    // Keep the staging file in the destination directory so the final rename
+    // remains atomic. `tempfile` creates it exclusively under a randomized
+    // name, and all writes/permission changes use the open handle rather than
+    // reopening a path that an attacker could swap for a symlink.
+    let mut staged = tempfile::Builder::new()
+        .prefix(".ctx-update-")
+        .tempfile_in(dir)?;
+    staged.write_all(data)?;
+    staged.as_file().sync_all()?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)) {
-            let _ = fs::remove_file(&staged);
-            return Err(e.into());
-        }
-        if let Err(e) = fs::rename(&staged, exe) {
-            let _ = fs::remove_file(&staged);
-            return Err(e.into());
-        }
+        staged
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o755))?;
     }
+
+    // Moving the temp path out of `NamedTempFile` keeps its RAII cleanup on
+    // every error path until the rename succeeds.
+    let staged = staged.into_temp_path();
 
     #[cfg(windows)]
     {
         let old = old_binary_path(exe);
         let _ = fs::remove_file(&old);
         if let Err(e) = fs::rename(exe, &old) {
-            let _ = fs::remove_file(&staged);
             return Err(e.into());
         }
         if let Err(e) = fs::rename(&staged, exe) {
             // Roll the original back into place before failing.
             let _ = fs::rename(&old, exe);
-            let _ = fs::remove_file(&staged);
             return Err(e.into());
         }
     }
+
+    #[cfg(unix)]
+    fs::rename(&staged, exe)?;
 
     Ok(())
 }
@@ -578,6 +633,24 @@ pub fn self_update(pin: Option<&str>) -> Result<SelfUpdateReport> {
     })
 }
 
+fn read_response_limited<R: Read>(
+    response: R,
+    max_bytes: u64,
+    description: &str,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    response
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(CtxError::Other(format!(
+            "{description} exceeds the {} MiB limit",
+            max_bytes / (1024 * 1024)
+        )));
+    }
+    Ok(bytes)
+}
+
 fn download_text(client: &reqwest::blocking::Client, url: &str) -> Result<String> {
     let response = client.get(url).send()?;
     let status = response.status();
@@ -586,7 +659,18 @@ fn download_text(client: &reqwest::blocking::Client, url: &str) -> Result<String
             "download failed: {url} returned HTTP {status}"
         )));
     }
-    Ok(response.text()?)
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_CHECKSUM_MANIFEST_BYTES)
+    {
+        return Err(CtxError::Other(format!(
+            "checksum manifest exceeds the {} MiB limit",
+            MAX_CHECKSUM_MANIFEST_BYTES / (1024 * 1024)
+        )));
+    }
+    let body = read_response_limited(response, MAX_CHECKSUM_MANIFEST_BYTES, "checksum manifest")?;
+    String::from_utf8(body)
+        .map_err(|e| CtxError::Other(format!("checksum manifest is not valid UTF-8: {e}")))
 }
 
 fn download_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
@@ -597,7 +681,16 @@ fn download_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u
             "download failed: {url} returned HTTP {status}"
         )));
     }
-    Ok(response.bytes()?.to_vec())
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_ARCHIVE_BYTES)
+    {
+        return Err(CtxError::Other(format!(
+            "release archive exceeds the {} MiB limit",
+            MAX_ARCHIVE_BYTES / (1024 * 1024)
+        )));
+    }
+    read_response_limited(response, MAX_ARCHIVE_BYTES, "release archive")
 }
 
 // ============================================================================
@@ -891,6 +984,16 @@ mod tests {
         assert!(Version::parse("0.3.0-rc.1").unwrap() < Version::new(0, 3, 0));
     }
 
+    #[test]
+    fn test_read_response_limited_rejects_oversized_body() {
+        let err =
+            read_response_limited(std::io::Cursor::new(b"12345"), 4, "test body").unwrap_err();
+        assert!(err.to_string().contains("test body exceeds"), "{err}");
+
+        let body = read_response_limited(std::io::Cursor::new(b"1234"), 4, "test body").unwrap();
+        assert_eq!(body, b"1234");
+    }
+
     // ---- 24h cache --------------------------------------------------------
 
     #[test]
@@ -1004,6 +1107,23 @@ mod tests {
 
         let err = extract_binary(&archive, "ctx-v9.9.9-x.tar.gz").unwrap_err();
         assert!(err.to_string().contains("no 'ctx' binary member"));
+    }
+
+    #[test]
+    fn test_extract_binary_rejects_oversized_member_before_reading() {
+        let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(MAX_BINARY_BYTES + 1);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "ctx-v9.9.9-aarch64-apple-darwin/ctx", &b""[..])
+            .unwrap();
+        let archive = builder.into_inner().unwrap().finish().unwrap();
+
+        let err = extract_binary(&archive, "ctx-v9.9.9-aarch64-apple-darwin.tar.gz").unwrap_err();
+        assert!(err.to_string().contains("ctx' member exceeds"), "{err}");
     }
 
     // ---- atomic replacement ---------------------------------------------------

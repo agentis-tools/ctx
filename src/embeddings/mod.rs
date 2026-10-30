@@ -111,30 +111,165 @@ pub fn build_provider(
     }
 }
 
-/// Warn (to stderr) when the query provider/dimension differs from what the index
-/// was embedded with. Embeddings from different providers/models occupy different
-/// vector spaces, so mixing them yields meaningless similarities — the fix is to
-/// re-embed. No-op when the index is empty or consistent.
-pub fn warn_index_mismatch(db: &crate::db::Database, provider: &dyn EmbeddingProvider) {
+/// Check that the stored embedding corpus matches the provider used for a query.
+///
+/// Embeddings from different providers, models, or dimensions occupy different
+/// vector spaces. Continuing with a mismatched corpus produces either zero
+/// scores or meaningless rankings, so query commands fail and point at the
+/// explicit rebuild command instead.
+pub fn ensure_index_compatible(
+    db: &crate::db::Database,
+    provider: &dyn EmbeddingProvider,
+) -> Result<()> {
     let query_dim = provider.dimension();
     let query_name = provider.name();
-    if let Ok(metadata) = db.get_embedding_metadata() {
-        for (stored_provider, _model, stored_dim, count) in &metadata {
-            let stored_dim = *stored_dim as usize;
-            if stored_dim != query_dim || stored_provider != query_name {
-                eprintln!("Warning: embedding provider/dimension mismatch with the index!");
-                eprintln!(
-                    "  Index: {count} embeddings from '{stored_provider}' (dim {stored_dim})"
-                );
-                eprintln!("  Query: '{query_name}' (dim {query_dim})");
-                eprintln!(
-                    "  Results may be inaccurate. Re-run `ctx embed --provider {query_name}` \
-                     to regenerate embeddings."
-                );
-                eprintln!();
-                break;
-            }
+    let query_model = provider.model();
+    let metadata = db.get_embedding_metadata()?;
+    if let Some((stored_provider, stored_model, stored_dim, count)) =
+        metadata
+            .iter()
+            .find(|(stored_provider, model, dimension, _)| {
+                *dimension as usize != query_dim
+                || stored_provider != query_name
+                // Older indexes recorded the model as `default`; provider and
+                // dimension are the only compatibility evidence available for
+                // those rows, so keep them readable after upgrading.
+                || (model != "default" && model != query_model)
+            })
+    {
+        return Err(CtxError::embedding(format!(
+            "embedding corpus mismatch: index has {count} embeddings from '{stored_provider}' model '{stored_model}' (dim {stored_dim}), but the query uses '{query_name}' model '{query_model}' (dim {query_dim}); run `ctx embed --force --provider {query_name}`"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Warn (to stderr) when the query provider/dimension differs from what the
+/// index was embedded with. Kept for callers that only want diagnostics; query
+/// commands should use [`ensure_index_compatible`] to fail closed.
+pub fn warn_index_mismatch(db: &crate::db::Database, provider: &dyn EmbeddingProvider) {
+    if let Err(error) = ensure_index_compatible(db, provider) {
+        eprintln!("Warning: {error}");
+        eprintln!();
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use crate::db::{FileRecord, Symbol, SymbolKind, Visibility};
+
+    struct TestProvider {
+        name: &'static str,
+        model: &'static str,
+        dimension: usize,
+    }
+
+    impl EmbeddingProvider for TestProvider {
+        fn name(&self) -> &str {
+            self.name
         }
+
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn model(&self) -> &str {
+            self.model
+        }
+
+        fn embed(&self, _text: &str) -> Result<Embedding> {
+            Ok(Embedding::new(vec![0.0; self.dimension]))
+        }
+    }
+
+    #[test]
+    fn mismatched_provider_is_rejected() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/main.rs".into(),
+                content_hash: "test".into(),
+                size_bytes: 0,
+                language: Some("rust".into()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&Symbol {
+            id: "src/main.rs::main".into(),
+            file_path: "src/main.rs".into(),
+            name: "main".into(),
+            qualified_name: None,
+            kind: SymbolKind::Function,
+            visibility: Visibility::Private,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: 1,
+            line_end: 1,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        })
+        .unwrap();
+        db.store_embedding("src/main.rs::main", "openai", "default", &[0.0; 3])
+            .unwrap();
+        let provider = TestProvider {
+            name: "local",
+            model: "default",
+            dimension: 3,
+        };
+        let error = ensure_index_compatible(&db, &provider).unwrap_err();
+        assert!(error.to_string().contains("embedding corpus mismatch"));
+    }
+
+    #[test]
+    fn mismatched_model_is_rejected_even_when_provider_and_dimension_match() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.upsert_file(
+            &FileRecord {
+                path: "src/main.rs".into(),
+                content_hash: "test".into(),
+                size_bytes: 0,
+                language: Some("rust".into()),
+                last_indexed: 0,
+            },
+            None,
+        )
+        .unwrap();
+        db.insert_symbol(&Symbol {
+            id: "src/main.rs::main".into(),
+            file_path: "src/main.rs".into(),
+            name: "main".into(),
+            qualified_name: None,
+            kind: SymbolKind::Function,
+            visibility: Visibility::Private,
+            signature: None,
+            brief: None,
+            docstring: None,
+            line_start: 1,
+            line_end: 1,
+            col_start: 0,
+            col_end: 0,
+            parent_id: None,
+            source: None,
+        })
+        .unwrap();
+        db.store_embedding("src/main.rs::main", "ollama", "nomic-embed-text", &[0.0; 3])
+            .unwrap();
+        let provider = TestProvider {
+            name: "ollama",
+            model: "mxbai-embed-large",
+            dimension: 3,
+        };
+
+        let error = ensure_index_compatible(&db, &provider).unwrap_err();
+        assert!(error.to_string().contains("model 'nomic-embed-text'"));
+        assert!(error.to_string().contains("mxbai-embed-large"));
     }
 }
 
@@ -190,6 +325,15 @@ pub trait EmbeddingProvider: Send + Sync {
 
     /// Get the embedding dimension for this provider.
     fn dimension(&self) -> usize;
+
+    /// Get the model identifier used to produce embeddings.
+    ///
+    /// Custom providers that do not expose a model can keep the default
+    /// identifier; built-in providers override it so switching models cannot
+    /// silently reuse an incompatible corpus.
+    fn model(&self) -> &str {
+        "default"
+    }
 
     /// Generate an embedding for a single text.
     fn embed(&self, text: &str) -> Result<Embedding>;
@@ -369,6 +513,12 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
     serial: bool,
     progress_callback: Option<&dyn Fn(usize, usize)>,
 ) -> Result<usize> {
+    if batch_size == 0 {
+        return Err(CtxError::embedding(
+            "embedding batch size must be greater than zero",
+        ));
+    }
+
     let mut total_embedded = 0;
 
     loop {
@@ -392,9 +542,31 @@ pub fn embed_missing_symbols<P: EmbeddingProvider + ?Sized>(
             embed_texts_parallel(provider, &text_refs)?
         };
 
+        if embeddings.len() != symbols.len() {
+            return Err(CtxError::embedding(format!(
+                "embedding provider returned {} vectors for {} symbols",
+                embeddings.len(),
+                symbols.len()
+            )));
+        }
+        if let Some(embedding) = embeddings
+            .iter()
+            .find(|embedding| embedding.vector.len() != provider.dimension())
+        {
+            return Err(CtxError::DimensionMismatch {
+                expected: provider.dimension(),
+                actual: embedding.vector.len(),
+            });
+        }
+
         // Store embeddings serially on the owning thread, in symbol order.
         for (symbol, embedding) in symbols.iter().zip(embeddings.iter()) {
-            db.store_embedding(&symbol.id, provider.name(), "default", &embedding.vector)?;
+            db.store_embedding(
+                &symbol.id,
+                provider.name(),
+                provider.model(),
+                &embedding.vector,
+            )?;
         }
 
         total_embedded += symbols.len();
@@ -474,6 +646,15 @@ mod tests {
     fn test_embed_texts_parallel_empty() {
         let parallel = embed_texts_parallel(&LenProvider, &[]).unwrap();
         assert!(parallel.is_empty());
+    }
+
+    #[test]
+    fn test_embed_missing_rejects_zero_batch_size() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let error = embed_missing_symbols(&db, &LenProvider, 0, true, None).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("batch size must be greater than zero"));
     }
 
     #[test]

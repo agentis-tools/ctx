@@ -19,6 +19,151 @@ use crate::index::{CTX_DIR, DB_FILE};
 /// DuckDB analytics engine for code intelligence.
 pub struct Analytics {
     conn: Connection,
+    /// Private DuckDB copy of the index (when the sqlite extension is not
+    /// installed); deleted when the engine is dropped.
+    _index_copy: Option<TempDbFile>,
+}
+
+/// A temporary database file removed on drop.
+pub(crate) struct TempDbFile(std::path::PathBuf);
+
+impl Drop for TempDbFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(self.0.with_extension("duckdb.wal"));
+    }
+}
+
+/// Tables of the SQLite index that DuckDB analytics read as `code.<table>`.
+const INDEX_TABLES: &[&str] = &["files", "symbols", "edges", "modules", "symbol_rank"];
+
+/// Make the SQLite index visible to DuckDB as `code.<table>`, without ever
+/// downloading anything.
+///
+/// DuckDB reads SQLite through its `sqlite_scanner` extension, which is not
+/// part of the bundled library: by default DuckDB would *download* it from
+/// extensions.duckdb.org on first use, which silently breaks every analytics
+/// command offline or behind an egress allowlist. So:
+///
+/// 1. autoinstall is switched off, and if the extension is already installed
+///    locally the index is ATTACHed read-only (zero-copy, fastest);
+/// 2. otherwise the tables are copied (rusqlite, read-only open) into a private
+///    temporary DuckDB file, which is then ATTACHed READ_ONLY as `code` — so
+///    writes are rejected exactly as with the direct attach, and the SQLite
+///    index can never be modified.
+pub(crate) fn attach_index(conn: &Connection, sqlite_path: &Path) -> Result<Option<TempDbFile>> {
+    conn.execute_batch("SET autoinstall_known_extensions = false;")?;
+    let escaped_path = sqlite_path.display().to_string().replace('\'', "''");
+    let attached = conn
+        .execute(
+            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
+            [],
+        )
+        .is_ok();
+    if attached {
+        return Ok(None);
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = TempDbFile(
+        std::env::temp_dir().join(format!("ctx-index-{}-{nanos}.duckdb", std::process::id())),
+    );
+    let escaped_tmp = tmp.0.display().to_string().replace('\'', "''");
+    conn.execute_batch(&format!("ATTACH '{escaped_tmp}' AS code_build;"))?;
+    copy_index(conn, sqlite_path, "code_build")?;
+    conn.execute_batch(&format!(
+        "DETACH code_build; ATTACH '{escaped_tmp}' AS code (READ_ONLY);"
+    ))?;
+    Ok(Some(tmp))
+}
+
+fn copy_index(conn: &Connection, sqlite_path: &Path, catalog: &str) -> Result<()> {
+    use duckdb::types::Value as DV;
+    use rusqlite::types::Value as SV;
+    let src = rusqlite::Connection::open_with_flags(
+        sqlite_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| duckdb::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let sq = |e: rusqlite::Error| duckdb::Error::ToSqlConversionFailure(Box::new(e));
+    for table in INDEX_TABLES {
+        let exists: bool = src
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
+                [table],
+                |r| r.get::<_, i64>(0),
+            )
+            .map_err(sq)?
+            > 0;
+        if !exists {
+            continue;
+        }
+        let mut cols: Vec<(String, String)> = Vec::new();
+        {
+            let mut stmt = src
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .map_err(sq)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+                .map_err(sq)?;
+            for row in rows {
+                cols.push(row.map_err(sq)?);
+            }
+        }
+        // `files.source` is the compressed file body: analytics never read it.
+        let keep: Vec<&(String, String)> = cols
+            .iter()
+            .filter(|(n, _)| !(*table == "files" && n == "source"))
+            .collect();
+        let ddl: Vec<String> = keep
+            .iter()
+            .map(|(n, t)| {
+                let t = t.to_ascii_uppercase();
+                let dt = if t.contains("INT") {
+                    "BIGINT"
+                } else if t.contains("REAL") || t.contains("FLOA") || t.contains("DOUB") {
+                    "DOUBLE"
+                } else if t.contains("BLOB") {
+                    "BLOB"
+                } else {
+                    "VARCHAR"
+                };
+                format!("\"{n}\" {dt}")
+            })
+            .collect();
+        conn.execute_batch(&format!(
+            "CREATE TABLE {catalog}.main.{table} ({});",
+            ddl.join(", ")
+        ))?;
+        let select = keep
+            .iter()
+            .map(|(n, _)| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = src
+            .prepare(&format!("SELECT {select} FROM {table}"))
+            .map_err(sq)?;
+        let n = keep.len();
+        let mut rows = stmt.query([]).map_err(sq)?;
+        let mut app = conn.appender_to_catalog_and_db(table, catalog, "main")?;
+        while let Some(row) = rows.next().map_err(sq)? {
+            let mut vals: Vec<DV> = Vec::with_capacity(n);
+            for i in 0..n {
+                vals.push(match row.get::<_, SV>(i).map_err(sq)? {
+                    SV::Null => DV::Null,
+                    SV::Integer(v) => DV::BigInt(v),
+                    SV::Real(v) => DV::Double(v),
+                    SV::Text(v) => DV::Text(v),
+                    SV::Blob(v) => DV::Blob(v),
+                });
+            }
+            app.append_row(duckdb::appender_params_from_iter(vals))?;
+        }
+        app.flush()?;
+    }
+    Ok(())
 }
 
 impl Analytics {
@@ -27,20 +172,15 @@ impl Analytics {
         let ctx_dir = root.join(CTX_DIR);
         let sqlite_path = ctx_dir.join(DB_FILE);
 
-        // Create in-memory DuckDB and attach SQLite
+        // Create in-memory DuckDB and expose the SQLite index as `code.*`.
         let conn = Connection::open_in_memory()?;
-
-        // Attach SQLite database with properly escaped path
-        // DuckDB uses single quotes for strings, so we need to escape any single quotes in the path
-        let path_str = sqlite_path.display().to_string();
-        let escaped_path = path_str.replace('\'', "''");
-        conn.execute(
-            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
-            [],
-        )?;
+        let index_copy = attach_index(&conn, &sqlite_path)?;
 
         // Create materialized views for better performance
-        let analytics = Self { conn };
+        let analytics = Self {
+            conn,
+            _index_copy: index_copy,
+        };
         analytics.create_materialized_views()?;
 
         Ok(analytics)
@@ -671,15 +811,13 @@ impl Analytics {
 
         let conn = Connection::open_in_memory()?;
 
-        // Attach the SQLite index read-only (single-quote-escape the path).
-        let path_str = sqlite_path.display().to_string();
-        let escaped_path = path_str.replace('\'', "''");
-        conn.execute(
-            &format!("ATTACH '{}' AS code (TYPE sqlite, READ_ONLY)", escaped_path),
-            [],
-        )?;
+        // Expose the SQLite index read-only as `code.*`.
+        let index_copy = attach_index(&conn, &sqlite_path)?;
 
-        let analytics = Self { conn };
+        let analytics = Self {
+            conn,
+            _index_copy: index_copy,
+        };
 
         let index_root = root.display().to_string();
         analytics.create_public_schema_v1(env!("CARGO_PKG_VERSION"), &index_root)?;
@@ -953,6 +1091,60 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    /// Force the copy path (as when the sqlite extension is not installed).
+    fn attach_index_copy_only(conn: &Connection, sqlite_path: &Path) -> TempDbFile {
+        let tmp = TempDbFile(
+            std::env::temp_dir().join(format!("ctx-index-test-{}.duckdb", std::process::id())),
+        );
+        let p = tmp.0.display().to_string();
+        conn.execute_batch(&format!("ATTACH '{p}' AS code_build;"))
+            .unwrap();
+        copy_index(conn, sqlite_path, "code_build").unwrap();
+        conn.execute_batch(&format!(
+            "DETACH code_build; ATTACH '{p}' AS code (READ_ONLY);"
+        ))
+        .unwrap();
+        tmp
+    }
+
+    #[test]
+    fn copy_index_exposes_tables_without_the_sqlite_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i.sqlite");
+        {
+            let c = rusqlite::Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE symbols (id TEXT PRIMARY KEY, name TEXT, line_start INTEGER, score REAL);
+                 INSERT INTO symbols VALUES ('a', 'x', 1, 0.5), ('b', NULL, 2, NULL);
+                 CREATE TABLE files (path TEXT, source BLOB); INSERT INTO files VALUES ('f', x'00ff');",
+            )
+            .unwrap();
+        }
+        let conn = Connection::open_in_memory().unwrap();
+        let _copy = attach_index_copy_only(&conn, &path);
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM code.symbols WHERE line_start >= 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
+        let s: f64 = conn
+            .query_row("SELECT sum(score) FROM code.symbols", [], |r| r.get(0))
+            .unwrap();
+        assert!((s - 0.5).abs() < 1e-9);
+        // The compressed file body is not copied.
+        let cols: i64 = conn
+            .query_row("SELECT count(*) FROM duckdb_columns() WHERE database_name='code' AND table_name='files'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cols, 1);
+        // Writes to the copy are rejected, like the read-only SQLite attach.
+        assert!(conn
+            .execute("UPDATE code.symbols SET name = 'y'", [])
+            .is_err());
+    }
+
     use super::*;
     use duckdb::Connection;
 
@@ -1002,7 +1194,10 @@ mod tests {
     #[test]
     fn test_call_graph_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let result = analytics.call_graph("main", 5);
         assert!(
@@ -1020,7 +1215,10 @@ mod tests {
     #[test]
     fn test_impact_analysis_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let result = analytics.impact_analysis("helper", 5);
         assert!(
@@ -1052,7 +1250,10 @@ mod tests {
             "#,
         )
         .unwrap();
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let nodes = analytics.impact_analysis_located("helper", 1).unwrap();
 
@@ -1082,7 +1283,10 @@ mod tests {
     #[test]
     fn test_located_impact_depth_preserves_locations() {
         let conn = setup_test_db().expect("Failed to setup test db");
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let depth_one = analytics.impact_analysis_located("helper", 1).unwrap();
         assert_eq!(depth_one.len(), 1);
@@ -1118,7 +1322,10 @@ mod tests {
             "#,
         )
         .unwrap();
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let nodes = analytics.impact_analysis_located("helper", 1).unwrap();
         let legacy = nodes
@@ -1132,7 +1339,10 @@ mod tests {
     #[test]
     fn test_has_path_syntax() {
         let conn = setup_test_db().expect("Failed to setup test db");
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         // main -> run -> helper (path exists)
         let result = analytics.has_path("main", "helper", 5);

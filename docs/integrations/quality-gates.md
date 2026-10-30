@@ -45,7 +45,7 @@ The quality commands are designed to be composed:
 
 ## Claude Code Integration (reference configuration)
 
-This is the reference wiring for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) hooks in a project's `.claude/settings.json`. It gives the agent a codebase map at session start, checks architecture rules after every edit, and blocks it from finishing with rule violations or fresh copy-paste:
+This is the reference wiring for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) hooks in a project's `.claude/settings.json`. It gives the agent a codebase map at session start, checks architecture rules after every edit, and blocks it from finishing with rule violations. Duplication remains visible in the scorecard while it is calibrated:
 
 ```json
 {
@@ -53,7 +53,7 @@ This is the reference wiring for [Claude Code](https://docs.anthropic.com/en/doc
   "hooks": {
     "SessionStart": [ { "hooks": [{ "type": "command", "command": "ctx map --budget 2000" }] } ],
     "PostToolUse": [ { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "ctx index && ctx check --against HEAD --json" }] } ],
-    "Stop": [ { "hooks": [{ "type": "command", "command": "ctx score --against main --fail-on \"check_violations>0,new_duplication>0\"" }] } ]
+    "Stop": [ { "hooks": [{ "type": "command", "command": "ctx score --against main --fail-on \"check_violations>0\"" }] } ]
   }
 }
 ```
@@ -62,7 +62,7 @@ How the pieces work together:
 
 - **SessionStart** - `ctx map --budget 2000` injects a token-budgeted structural overview, so the agent starts oriented instead of exploring blind.
 - **PostToolUse** on `Edit|Write` - `ctx index && ctx check --against HEAD --json` reindexes incrementally (fast: only changed files are re-parsed) and reports any *new* architecture violation right at the edit that introduced it, as JSON the agent can act on.
-- **Stop** - `ctx score --against main --fail-on "check_violations>0,new_duplication>0"` is the final gate: exit 1 tells the agent its work is not done, with the failed conditions on stderr.
+- **Stop** - the generated hook defaults to `ctx score --against main --fail-on "check_violations>0"`; duplication stays visible in the scorecard while the repository calibrates the heuristic.
 
 ### Recommended CLAUDE.md guidance
 

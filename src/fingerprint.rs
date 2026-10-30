@@ -520,6 +520,20 @@ pub fn find_near_duplicates_limited(
         }
     }
 
+    // --against filter: at least one endpoint must be in a changed file.
+    // Only pairs with a changed endpoint are enumerated, so a bucket without
+    // changed members costs nothing. Enumerating every pair of every bucket
+    // and filtering afterwards made `ctx score` quadratic in the size of the
+    // largest bucket of the whole repository, not of the change (#23, #96).
+    let in_changed: Option<Vec<bool>> = changed_files.map(|changed| {
+        fingerprints
+            .iter()
+            .map(|fp| changed.contains(&fp.file_path))
+            .collect()
+    });
+    // Candidate retention is bounded too: a pathological bucket must not grow
+    // the candidate set without limit (#104). Buckets are visited in key order
+    // so truncation is deterministic.
     let candidate_limit = limit.saturating_mul(CANDIDATE_LIMIT_MULTIPLIER).max(limit);
     let mut candidates: HashSet<(usize, usize)> = HashSet::new();
     let mut truncated = false;
@@ -530,22 +544,21 @@ pub fn find_near_duplicates_limited(
             continue;
         }
         for (n, &i) in members.iter().enumerate() {
-            for &j in &members[n + 1..] {
-                let pair = if i < j { (i, j) } else { (j, i) };
-                if pair.0 != pair.1 {
-                    if let Some(changed) = changed_files {
-                        if !changed.contains(&fingerprints[pair.0].file_path)
-                            && !changed.contains(&fingerprints[pair.1].file_path)
-                        {
-                            continue;
-                        }
-                    }
-                    if candidates.len() >= candidate_limit && !candidates.contains(&pair) {
-                        truncated = true;
-                        break 'bucket;
-                    }
-                    candidates.insert(pair);
+            let partners: &[usize] = match &in_changed {
+                None => &members[n + 1..],
+                Some(in_changed) if in_changed[i] => &members,
+                Some(_) => continue,
+            };
+            for &j in partners {
+                if i == j {
+                    continue;
                 }
+                let pair = if i < j { (i, j) } else { (j, i) };
+                if candidates.len() >= candidate_limit && !candidates.contains(&pair) {
+                    truncated = true;
+                    break 'bucket;
+                }
+                candidates.insert(pair);
             }
         }
     }

@@ -228,10 +228,10 @@ mod engine {
         }
         let sampled = sample_every(shas, opts.every.max(1));
 
-        // Parent directory for the temporary worktrees.
-        let worktrees_root =
-            std::env::temp_dir().join(format!("ctx-backfill-{}", std::process::id()));
-        fs::create_dir_all(&worktrees_root)?;
+        // Keep historical worktrees under a private, randomized RAII tempdir.
+        // The old PID-derived path was predictable and could be redirected by
+        // a pre-created symlink or reused after an interrupted run.
+        let worktrees_root = backfill_worktree_root()?;
 
         let total = sampled.len();
         let mut reports = Vec::new();
@@ -252,7 +252,7 @@ mod engine {
             }
 
             eprintln!("[{}/{}] {}: capturing…", i + 1, total, short);
-            match capture_commit(root, sha, &worktrees_root, opts) {
+            match capture_commit(root, sha, worktrees_root.path(), opts) {
                 Ok(report) => reports.push(report),
                 Err(e) => {
                     failed += 1;
@@ -260,8 +260,8 @@ mod engine {
                 }
             }
         }
-        // Best-effort: the per-sha guards removed their worktrees already.
-        let _ = fs::remove_dir(&worktrees_root);
+        // Per-sha guards remove their worktrees; `worktrees_root` removes its
+        // private parent directory when this function returns.
 
         if failed > 0 {
             eprintln!(
@@ -307,6 +307,19 @@ mod engine {
                 force: false,
             },
         )
+    }
+
+    fn backfill_worktree_root() -> Result<tempfile::TempDir> {
+        let dir = tempfile::Builder::new().prefix("ctx-backfill-").tempdir()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            // Do not rely on the process umask: historical worktrees may
+            // contain source and generated data from another commit.
+            fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(dir)
     }
 
     // ========================================================================
@@ -673,6 +686,29 @@ pub fn beta() -> i64 {
                 Indexer::with_config(&repo.root, false, WalkerConfig::default()).unwrap();
             indexer.index().unwrap();
             (temp, repo)
+        }
+
+        #[test]
+        fn backfill_worktree_root_is_randomized_and_private() {
+            let first = backfill_worktree_root().unwrap();
+            let second = backfill_worktree_root().unwrap();
+            assert_ne!(first.path(), second.path());
+            assert!(first.path().is_dir());
+            assert!(second.path().is_dir());
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                assert_eq!(
+                    first.path().metadata().unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                assert_eq!(
+                    second.path().metadata().unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
         }
 
         /// End-to-end round trip: capture a partition, then read every
