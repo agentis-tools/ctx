@@ -10,12 +10,12 @@ ctx check [OPTIONS]
 
 ## Description
 
-The `check` command loads a declarative rules file, builds a file-level dependency set from the index (resolved call/implements/extends/uses edges plus resolved imports), evaluates the rules, and reports every violation. Use it to:
+`ctx check` loads a rules file, builds a file-level dependency set from the index (resolved call, implements, extends, and uses edges plus resolved imports), evaluates the rules, and reports every violation. Use it to:
 
-- **Enforce layering** - e.g. the domain layer must never import infrastructure
-- **Freeze legacy code** - forbid new dependents of modules slated for removal
-- **Cap complexity** - fail when fan-in, fan-out, complexity, or file symbol counts exceed limits
-- **Gate PRs** - with `--against`, only violations touching changed files are reported
+- enforce layering, for example forbid the domain layer from importing infrastructure,
+- freeze legacy code by forbidding new dependents of modules you plan to remove,
+- fail when fan-in, fan-out, complexity, or symbols per file exceed a limit,
+- gate pull requests: with `--against`, it reports only violations that touch changed files.
 
 ## Prerequisites
 
@@ -25,7 +25,7 @@ Index your codebase first:
 ctx index
 ```
 
-## Rules File
+## Rules file
 
 Rules live in `.ctx/rules.toml` (override with `--rules`):
 
@@ -57,7 +57,7 @@ paths  = ["src/legacy/**"]
 reason = "Legacy module is frozen; do not add new callers"
 ```
 
-Layers must not overlap: a file matching two layers' globs is a configuration error.
+Layers must not overlap. A file that matches the globs of two layers is a configuration error.
 
 ## Options
 
@@ -68,17 +68,17 @@ Layers must not overlap: a file matching two layers' globs is a configuration er
 | `--list` | Print the parsed rules and layer membership counts, then exit 0 | false |
 | `--json` | Machine-readable output (global flag) | false |
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | No violations |
 | 1 | At least one violation |
-| 2 | Operational error (missing/invalid rules file, unknown or overlapping layers, missing index, bad git ref) |
+| 2 | Operational error (missing or invalid rules file, unknown or overlapping layers, missing index, bad git ref) |
 
 ## Examples
 
-### Check All Rules
+### Check all rules
 
 ```bash
 ctx check
@@ -92,21 +92,21 @@ forbidden: domain -> infrastructure
 1 violation across 1 rule
 ```
 
-### Only New Violations (PR gate)
+### Only new violations (PR gate)
 
 ```bash
 ctx check --against main
 ```
 
-Pre-existing violations in untouched files are ignored, so a legacy codebase can adopt rules incrementally.
+`ctx check` ignores existing violations in untouched files, so a legacy codebase can adopt rules one change at a time.
 
-### Inspect Parsed Rules
+### Inspect parsed rules
 
 ```bash
 ctx check --list
 ```
 
-### JSON Output
+### JSON output
 
 ```bash
 ctx check --against main --json
@@ -114,7 +114,7 @@ ctx check --against main --json
 
 ```json
 {
-  "ctx_version": "0.2.1",
+  "ctx_version": "0.4.0",
   "command": "check",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
@@ -137,16 +137,16 @@ ctx check --against main --json
 }
 ```
 
-See [JSON Output](../json-output.md) for the full payload contract.
+See [JSON output](../json-output.md) for the full payload contract.
 
 ## Caveats
 
-- Dependencies come from the index: resolved symbol edges plus imports resolved with per-language heuristics (relative paths for TS/JS/Solidity, `crate::`/`self::`/`super::` for Rust, dotted modules for Python, package-directory suffixes for Go). Unresolvable or third-party imports are silently skipped, so external packages never trigger violations.
-- Dynamic dispatch, reflection, and macro-generated calls are not tracked; rules are enforced on the statically extracted graph.
-- Re-run `ctx index` after changing code, or the check sees stale dependencies.
+- Dependencies come from the index: resolved symbol edges plus imports resolved with per-language rules. TS/JS, Solidity, and Zig use paths relative to the importing file; C/C++ quoted includes try the importing directory, the repository root, then a unique indexed suffix, and angle includes resolve only as exact repository-relative paths; Rust uses `crate::`, `self::`, and `super::`; Python uses dotted modules; Go uses package-directory suffixes. ctx skips imports it cannot resolve and third-party imports, so external packages never trigger violations.
+- ctx does not track dynamic dispatch, reflection, or macro-generated calls. Rules apply to the statically extracted graph.
+- Re-run `ctx index` after changing code. Otherwise the check sees stale dependencies.
 
-## See Also
+## See also
 
-- [ctx score](./score.md) - includes `check_violations` as one metric of a combined quality gate
-- [Quality Gates](../integrations/quality-gates.md)
-- [JSON Output](../json-output.md)
+- [ctx score](./score.md): includes `check_violations` as one metric of a combined quality gate
+- [Quality gates](../integrations/quality-gates.md)
+- [JSON output](../json-output.md)

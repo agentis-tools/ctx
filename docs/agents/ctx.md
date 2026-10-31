@@ -89,10 +89,10 @@ ctx search "auth" --output json       # JSON output
 export OPENAI_API_KEY=sk-...
 ctx embed                             # Generate embeddings first
 ctx embed --force                     # Re-embed all symbols
-ctx embed --openai                    # Use OpenAI API
+ctx embed --provider openai           # Use OpenAI API
 ctx semantic "authentication logic"   # Search by meaning
 ctx semantic "error handling" --limit 20
-ctx semantic "auth" --openai    # Use OpenAI for query embedding
+ctx semantic "auth" --provider openai  # Use OpenAI for query embedding
 
 # Query the database
 ctx query find "handle*"              # Wildcard symbol search
@@ -226,7 +226,7 @@ dist/
 *.csv
 ```
 
-### 3. Built-in Ignores (170+ patterns)
+### 3. Built-in ignores (164 patterns)
 Automatically excludes:
 - **Version control**: `.git/`, `.svn/`
 - **Dependencies**: `node_modules/`, `vendor/`, `target/`
@@ -403,7 +403,7 @@ For natural language queries that go beyond keyword matching, ctx supports embed
 # First, generate embeddings (requires OPENAI_API_KEY for OpenAI)
 export OPENAI_API_KEY=sk-...
 ctx embed                       # Generate embeddings
-ctx embed --openai              # Use OpenAI API explicitly
+ctx embed --provider openai     # Use OpenAI API explicitly
 ctx embed --force               # Re-embed all symbols
 ctx embed --batch-size 100      # Process in batches of 100
 
@@ -411,10 +411,10 @@ ctx embed --batch-size 100      # Process in batches of 100
 ctx semantic "functions that handle user authentication"
 ctx semantic "database connection management"
 ctx semantic "error recovery and retry logic" --limit 20
-ctx semantic "auth" --openai    # Use OpenAI for query embedding
+ctx semantic "auth" --provider openai  # Use OpenAI for query embedding
 ```
 
-This finds symbols based on **meaning**, not just keywords. For example, searching for "authentication functions" will find `login`, `verify_token`, `check_credentials` even if they don't contain the word "authentication".
+This finds symbols by meaning rather than by keyword. For example, searching for "authentication functions" will find `login`, `verify_token`, `check_credentials` even if they don't contain the word "authentication".
 
 ### Search Output
 
@@ -838,6 +838,11 @@ ctx duplicates [OPTIONS]       Detect structurally similar functions (MinHash)
 ctx check [OPTIONS]            Check architecture rules from .ctx/rules.toml
 ctx score [OPTIONS]            Score quality delta of changes vs a git reference
 ctx graph [OPTIONS]            Generate dependency graph visualization
+ctx smart <TASK>               Select whole files for a task within a hard token budget
+ctx map                        Token-budgeted codebase map
+ctx similar <DESCRIPTION>      Find existing functions before writing new ones
+ctx hotspots                   Rank files by churn x size (--signal complexity)
+ctx sql <QUERY>                Read-only SQL over the v1.* views
 
 Global Options:
   -f, --format <FORMAT>        Output format [xml, markdown, md, plain, json]
@@ -852,18 +857,21 @@ Global Options:
 Index Options:
   -w, --watch                  Watch for changes
   -v, --verbose                Verbose output
-  -f, --force                  Force full reindex
+      --force                  Force full reindex (clears the database)
+      --serial                 Single-threaded indexing
+  -p, --pattern <PATTERN>      Limit indexing to files or globs
 
 Embed Options:
-  -f, --force                  Re-embed all symbols
+      --force                  Clear the stored corpus and re-embed every symbol
   -v, --verbose                Show progress
       --batch-size <N>         Batch size for embedding (default: 50)
-      --openai                 Use OpenAI API (requires OPENAI_API_KEY)
+      --provider <P>           local (default), openai (needs OPENAI_API_KEY), or ollama
+  -w, --watch                  Embed new symbols as the index changes
 
 Semantic Options:
   -l, --limit <N>              Max results (default: 10)
       --output <FORMAT>        Output format (table, json)
-      --openai                 Use OpenAI API for query embedding
+      --provider <P>           Must match the provider used by `ctx embed`
 
 Query Subcommands:
   find <PATTERN>               Find symbols by name

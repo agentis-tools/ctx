@@ -232,7 +232,7 @@ area. Together those facts justify a boundary investigation; neither proves that
 schema module should be split.
 
 The first meaningful ctx architecture baseline should therefore begin with reviewed layer and
-dependency assertions. Historical violation comparisons should start—or be clearly annotated—when
+dependency assertions. Historical violation comparisons should start, or be clearly annotated, when
 that policy becomes active.
 
 ## Give the workflow to an agent
