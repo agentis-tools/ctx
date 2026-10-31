@@ -62,7 +62,7 @@ The Homebrew tap, Scoop bucket, and AUR package are published from separate pack
 repositories. Prebuilt release binaries support Linux GNU x86-64, macOS Intel and Apple Silicon,
 and Windows x86-64. Linux ARM64 and musl binaries are not currently published. The Windows and
 Intel macOS binaries are built without DuckDB, so graph analytics return empty results there and
-`ctx sql` and `ctx snapshot` exit 2.
+`ctx sql` and `ctx snapshot` exit 2 (`ctx sql --schema` still works).
 
 ### Upgrading
 
@@ -213,9 +213,10 @@ not claim or configure MCP support.
 - The SessionStart hook runs `ctx map` and gives the agent a codebase map before its first step.
 - The PostToolUse hook (on Edit and Write) runs `ctx index`, then `ctx check --against HEAD`, and
   reports any architecture violation the edit introduced.
-- The Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0"`. New duplication appears in the
-  scorecard but doesn't fail the gate until you add it. The gate reports only; set
-  `CTX_GATE_BLOCKING=1` to keep the session going until it passes.
+- The Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0"`.
+  New duplication appears in the scorecard but doesn't fail the gate until you add it (v0.4.0
+  hooks also gated on duplication; rerun `ctx harness init` after upgrading). The gate only
+  reports; set `CTX_GATE_BLOCKING=1` to keep the session going until it passes.
 
 The generated permissions let the agent run `ctx *` but deny `ctx self-update` and edits to the
 rules, hooks, and settings, so the agent can't change the policy it is checked against.

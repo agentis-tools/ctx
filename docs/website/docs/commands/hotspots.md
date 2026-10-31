@@ -72,7 +72,7 @@ ctx hotspots --json
 
 - Churn counts commits per file from `git log`. Renames are not followed, so a renamed file's history restarts.
 - With `--by symbol`, every symbol in a file gets the file's churn.
-- Complexity is the index's coupling formula (fan-out and same-file fan-in), not control-flow complexity. ctx does not track dynamic calls or macro-generated code.
+- Complexity is the index's coupling formula (2 × fan-out + resolved fan-in), not control-flow complexity. ctx does not track dynamic calls or macro-generated code.
 
 ## See also
 

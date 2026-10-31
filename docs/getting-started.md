@@ -187,7 +187,7 @@ ctx index
 
 `ctx index` writes `.ctx/codebase.sqlite`, which holds:
 - symbols: functions, classes, interfaces, structs, enums, traits
-- edges: calls, imports, extends, implements
+- edges: calls, extends, implements, uses (imports are stored per file as module metadata)
 - files: metadata and compressed source
 - a full-text index over symbol names and documentation
 
@@ -519,8 +519,9 @@ ctx smart "fix login bug" --dry-run
 ctx smart "refactor parser" --explain
 ```
 
-`ctx smart` needs an index (`ctx index`) and embeddings (`ctx embed`). Without a complete,
-compatible embedding corpus it exits with code 2 and tells you to run
+`ctx smart` needs an index (`ctx index`) and embeddings (`ctx embed`). If embeddings are missing
+or incomplete, it exits with code 2 and tells you to run `ctx embed`. If they come from another
+provider, model, or dimension, it exits 2 and tells you to run
 `ctx embed --force --provider <provider>`. `--max-tokens` (default 8000) is a hard limit on the
 whole rendered output, including the tree and format wrappers. A top-ranked file larger than the
 budget is left out unless you pass `--include-oversized-top`. In v0.4.0, `--max-tokens` counted
@@ -700,8 +701,9 @@ ctx audit --min-score 7.0 --output json > quality-report.json
 ctx audit --min-score 7.0 || exit 1
 ```
 
-`ctx audit --incremental` is accepted but not implemented: the audit always analyzes the whole
-index.
+`ctx audit --incremental` is only partly incremental. It limits the duplication, coverage, and
+naming checks to staged, unstaged, and untracked files; complexity and modularity still read the
+whole index. With no changed files it reports 10.0 without auditing anything.
 
 ## Next steps
 

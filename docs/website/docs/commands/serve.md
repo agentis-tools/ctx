@@ -72,7 +72,7 @@ The server exposes eight tools.
 |------|-------------|
 | `get_callers` | Find callers of the requested definition through resolved edges. `depth` defaults to 3, maximum 5 |
 | `get_callees` | Find calls made by a function, with the definition each call resolved to |
-| `smart_context` | Select files for a task. Takes `task`, `max_tokens` (a hard limit on the whole response, default 8000), `depth` (default 2), `top` (default 10), and `provider` (`local`, `openai`, or `ollama`) |
+| `smart_context` | Select files for a task. Takes `task`, `max_tokens` (a hard limit on the whole response, default 8000), `depth` (default 3), `top` (default 10), and `provider` (`local`, `openai`, or `ollama`) |
 
 ## Claude Desktop integration
 

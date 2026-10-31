@@ -16,7 +16,7 @@ ctx query find parse --json | jq '.data.symbols[].file'
 
 ### Exit codes
 
-Every ctx command uses three exit codes, like `grep` and most linters:
+ctx commands use three exit codes, like `grep` and most linters:
 
 | Code | Meaning |
 |------|---------|
@@ -25,7 +25,7 @@ Every ctx command uses three exit codes, like `grep` and most linters:
 | 2    | Operational error (bad arguments, missing index, git failure, IO error, ...) |
 | 3    | Version requirement not met (`ctx harness compat` only) |
 
-Versions before 0.2 exited 1 on operational errors. Exit code 1 now means only that the command ran and found issues.
+Versions before 0.3.0 exited 1 on operational errors. Exit code 1 now means that the command ran and found issues. The exception is `ctx diff` and `ctx review`, which exit 1 when the directory is not a git repository or the revision is invalid, and exit 2 when there are no changes.
 
 ### The envelope
 
@@ -429,7 +429,7 @@ Ranks indexed files or symbols by `score = normalized_churn * normalized_signal`
 
 v0.4.0 and earlier ranked by churn x complexity only and had no `signal` or `lines` fields.
 
-`complexity` is the index's coupling measure, `2 x fan_out + fan_in` over resolved `calls` edges. It does not count branches.
+`complexity` is the index's coupling measure, `2 x fan_out + fan_in`, where `fan_out` counts every outgoing `calls` edge and `fan_in` counts resolved incoming ones. It does not count branches.
 
 With `--by file` (the default), each entry lists the file's 3 symbols with the highest complexity:
 

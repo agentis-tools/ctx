@@ -43,7 +43,7 @@ The checksum makes regeneration safe. On a re-run, ctx regenerates files that st
 Two files get special treatment:
 
 - ctx never overwrites `.ctx/rules.toml` once it exists, not even with `--force`, because it holds your policy.
-- ctx never edits `.claude/settings.json`. `init` prints a snippet for you to merge by hand.
+- ctx merges its hook wiring and permissions into `.claude/settings.json` and keeps your other settings. If the file isn't valid JSON, ctx leaves it alone and prints the snippet for you to merge by hand.
 
 ## `init --mode local` (default)
 
@@ -57,10 +57,9 @@ Sets up the current project's `.claude/` directory:
 | `.ctx/rules.toml` | Commented starter rules file (only when absent) |
 | `.ctx/harness.lock` | Manifest of generated files and their checksums |
 
-It then prints two blocks to stdout (instructions go to stderr):
+It also creates `.claude/settings.json`, or merges into an existing one, the hook wiring plus a permissions block that allows `Bash(ctx *)` and denies `Bash(ctx self-update*)`, `Edit(.ctx/rules.toml)`, `Edit(.claude/hooks/ctx/**)`, and `Edit(.claude/settings.json)`. It reports whether it created, merged, or found the file already wired. If the existing file isn't valid JSON, it prints the snippet instead.
 
-1. A settings snippet to merge into `.claude/settings.json`: hook wiring plus a permissions block that allows `Bash(ctx *)` and denies `Bash(ctx self-update*)`, `Edit(.ctx/rules.toml)`, `Edit(.claude/hooks/ctx/**)`, and `Edit(.claude/settings.json)`.
-2. A guidance block for your `CLAUDE.md` that tells the model to use ctx.
+Finally it prints a guidance block for your `CLAUDE.md` that tells the model to use ctx.
 
 ## `init --mode plugin`
 
@@ -90,6 +89,8 @@ If the installed binary is older than the templates (exit code 3), the script pr
 ## Blocking gates (`CTX_GATE_BLOCKING`)
 
 The generated Stop hook runs `ctx score --against <default branch> --fail-on "check_violations>0"`. Duplication stays visible in the scorecard, but it does not fail the gate until you calibrate the heuristic against your repository. By default a failed gate only prints the scorecard and a stderr note, and the session stops normally. Set `CTX_GATE_BLOCKING=1` (exactly `1`) in the environment Claude Code runs in to make gate failures block the stop. The hook then exits 2, which Claude Code treats as "keep working", so the session continues until the failed conditions in the scorecard are fixed.
+
+In v0.4.0 the generated Stop hook also gated on `new_duplication>0`, and the `blocking_duplication_gate` warning did not exist. Rerun `ctx harness init` after upgrading to regenerate the hook.
 
 If you customize a Stop hook to include `new_duplication` while blocking mode is on, `ctx harness init` and `ctx harness doctor` warn you before that heuristic can hold a session open. To adopt it, first run `ctx score --against <default branch>` without a gate, review repeated findings in the scorecard, and only then add a calibrated duplication threshold to a blocking gate.
 
@@ -125,6 +126,8 @@ Runs independent checks and reports findings (`error`, `warning`, `info`):
 | `rules_missing` (info) / `rules_invalid` | `.ctx/rules.toml` presence and validity |
 | `hooks_missing` / `hooks_modified` | generated hook scripts exist and match their checksums |
 | `settings_not_wired` | `.claude/settings.json` does not reference `.claude/hooks/ctx/` |
+| `codex_hooks_not_wired` | `.codex/hooks.json` is missing, invalid, or does not reference `.codex/hooks/ctx/` (warning) |
+| `blocking_duplication_gate` | `CTX_GATE_BLOCKING=1` is set and a Stop hook still gates on duplication (warning) |
 | `mcp_unavailable` / `mcp_not_wired` | `.mcp.json` vs the binary's `mcp` feature |
 
 Checks are independent: a missing index and an invalid rules file are both reported in the same run.
@@ -144,7 +147,6 @@ Checks are independent: a missing index and an invalid rules file are both repor
 
 ```bash
 ctx harness init
-# merge the printed snippet into .claude/settings.json,
 # add the printed block to CLAUDE.md, then:
 ctx harness doctor
 ```

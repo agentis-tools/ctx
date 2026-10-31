@@ -418,7 +418,8 @@ ctx --max-tokens 8000 src/
 ```
 
 `ctx smart`, `ctx diff`, and `ctx review` have their own budget options. For `ctx smart`,
-`--max-tokens` limits the whole rendered output; see [ctx smart](commands/smart.md).
+`--max-tokens` limits the whole rendered output; see [ctx smart](commands/smart.md). Passing
+`--max-tokens` to any other subcommand is an error (exit 2); in v0.4.0 it was silently ignored.
 
 ### Tokenizer encoding
 

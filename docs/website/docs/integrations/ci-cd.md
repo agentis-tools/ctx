@@ -148,7 +148,7 @@ pre-commit install --hook-type pre-push
 
 The hooks do not refresh the index. Run `ctx index` before committing, or run `ctx index -w` in the background.
 
-`ctx audit --incremental` is only partly incremental. It limits the duplication, coverage, and naming checks to files with staged or unstaged changes, but the complexity and modularity checks still read the whole index. With no changed files it reports 10.0 without auditing anything. Its `--help` text still marks the flag as not yet implemented.
+`ctx audit --incremental` is only partly incremental. It limits the duplication, coverage, and naming checks to staged, unstaged, and untracked files, but the complexity and modularity checks still read the whole index. With no changed files it reports 10.0 without auditing anything. Its `--help` text still marks the flag as not yet implemented.
 
 ### Manual Git hook
 

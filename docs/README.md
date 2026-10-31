@@ -114,7 +114,7 @@ directory. Common options:
 | Option | Effect |
 |---|---|
 | `-f, --format <FORMAT>` | `xml` (default), `markdown`/`md`, `plain`/`text`, or `json` |
-| `--max-tokens <N>` | Stop adding files at a token budget |
+| `--max-tokens <N>` | Leave out whole files to keep file contents within N tokens |
 | `--count-only` | Count tokens instead of printing contents |
 | `--encoding <ENCODING>` | Tokenizer: `cl100k_base` (default), `o200k_base`, `p50k_base` |
 | `-i, --ignore <PATTERN>` | Extra ignore pattern (repeatable) |
@@ -130,7 +130,7 @@ See [Context generation](context-generation.md).
 | Command | Description | Reference |
 |---|---|---|
 | `ctx index` | Build or update the index (`--watch`, `--force`, `--serial`, `-p` scope) | [Code intelligence](code-intelligence.md) |
-| `ctx embed` | Generate embeddings (`--provider local\|openai\|ollama`, `--force` rebuilds the corpus) | [Code intelligence](code-intelligence.md#embeddings) |
+| `ctx embed` | Generate embeddings (`--provider local\|openai\|ollama`, `--force` rebuilds the corpus) | [Code intelligence](code-intelligence.md#generating-embeddings) |
 | `ctx query find\|callers\|deps\|graph\|impact\|stats\|files` | Query symbols and the call graph | [Code intelligence](code-intelligence.md) |
 | `ctx search` / `ctx semantic` | Keyword (FTS5) or embedding search over symbols | [Code intelligence](code-intelligence.md) |
 | `ctx source` / `ctx explain` | Stored source of a symbol; a symbol with its calls and relationships | [Code intelligence](code-intelligence.md) |

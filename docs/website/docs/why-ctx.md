@@ -10,7 +10,7 @@ AI coding agents duplicate logic that already exists, break architectural bounda
 task as done without evidence. ctx gives the agent a model of the codebase before it edits and
 checks the result afterwards.
 
-ctx is a single local binary. It indexes your codebase (symbols, dependencies, change history) into
+ctx is a single local binary. It indexes your codebase (symbols, calls, and dependencies) into
 a queryable model and uses it in two ways:
 
 - Guide the agent. ctx gives it a codebase map before it starts and lists what an edit can affect.

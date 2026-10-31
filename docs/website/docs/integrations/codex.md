@@ -24,7 +24,7 @@ The hooks do three things:
   Codex as additional context with a `block` decision.
 - At stop, the hook runs `ctx score --against <default branch> --fail-on "check_violations>0"`
   and passes the scorecard to Codex. Findings do not stop the turn unless you set
-  `CTX_GATE_BLOCKING=1`, which makes a failed gate exit 2 so Codex keeps working.
+  `CTX_GATE_BLOCKING=1`, which makes a failed gate exit 2 so Codex keeps working. In v0.4.0 the stop hook also gated on `new_duplication>0`; rerun `ctx harness init --target codex` after upgrading.
 
 Every hook fails open: an operational error, or a ctx binary older than the hook
 templates, never blocks the session.

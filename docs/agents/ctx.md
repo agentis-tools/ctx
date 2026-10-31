@@ -226,7 +226,7 @@ dist/
 *.csv
 ```
 
-### 3. Built-in Ignores (164 patterns)
+### 3. Built-in ignores (164 patterns)
 Automatically excludes:
 - **Version control**: `.git/`, `.svn/`
 - **Dependencies**: `node_modules/`, `vendor/`, `target/`

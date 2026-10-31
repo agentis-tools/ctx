@@ -10,7 +10,7 @@ A shell `&&`, a CI step or an agent hook can enforce a ctx gate from the exit co
 parsing output; `--json` gives the details when a tool needs them. An operational error never exits
 0, so a broken gate fails instead of passing.
 
-Every command uses the same codes, the convention of `grep` and most linters:
+ctx commands use the same codes, the convention of `grep` and most linters:
 
 | Code | Meaning |
 |------|---------|
@@ -19,7 +19,7 @@ Every command uses the same codes, the convention of `grep` and most linters:
 | `2` | Operational error: bad arguments, missing index, missing embeddings, bad git ref, IO error |
 | `3` | `ctx harness compat` only: the installed binary is older than a hook's required version |
 
-Versions before 0.2 exited `1` on operational errors. If a script treats `1` as an error, update it.
+Versions before 0.3.0 exited `1` on operational errors. If a script treats `1` as an error, update it. The exception is `ctx diff` and `ctx review`, which exit 1 when the directory is not a git repository or the revision is invalid, and exit 2 when there are no changes.
 
 ## Which commands gate
 

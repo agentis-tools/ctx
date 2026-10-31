@@ -514,7 +514,7 @@ min_confidence = 0.7    # answers below this leave the edge unchanged (default 0
 ```
 
 With `edges = true`, each `ctx index` asks the TypeSafe Jev model to resolve call edges whose name
-matches more than one in-repo function, then rewrites the edge. Answers are cached in the index,
+matches at least one in-repo function, then rewrites the edge when the answer is confident enough. Answers are cached in the index,
 so a reindex of unchanged code makes no network calls. The API key comes only from `JEV_API_KEY`;
 without it, `ctx index` applies cached answers and makes no calls. See
 [`ctx judge`](commands/judge.md) and the [privacy policy](privacy.md) for what is sent.

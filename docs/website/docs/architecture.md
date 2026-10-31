@@ -107,7 +107,7 @@ CREATE TABLE edges (
     source_id TEXT NOT NULL,         -- calling or referring symbol
     target_id TEXT,                  -- resolved target symbol, NULL if unresolved
     target_name TEXT NOT NULL,       -- name as written at the site
-    kind TEXT NOT NULL,              -- calls, imports, uses, extends, implements, ...
+    kind TEXT NOT NULL,              -- calls, uses, extends, implements, ...
     line INTEGER,
     col INTEGER,
     context TEXT,                    -- source line of the site
@@ -149,7 +149,7 @@ SQLite fits because the index is one file you can delete, copy or inspect with a
 
 ## Analytics: DuckDB
 
-Commands that need analytical queries (`ctx sql`, `ctx query`, `ctx snapshot`, `ctx smart`, `ctx diff`, and parts of `ctx audit`) use an in-memory DuckDB connection over the SQLite index. DuckDB is part of the default build (`duckdb` feature). A build with `--no-default-features` (used for Windows MSVC, where DuckDB doesn't compile) replaces it with a stub that returns empty analytics results; `ctx sql` and `ctx snapshot` exit 2 there.
+Commands that need analytical queries (`ctx sql`, `ctx query`, `ctx snapshot`, `ctx smart`, `ctx diff`, and parts of `ctx audit`) use an in-memory DuckDB connection over the SQLite index. DuckDB is part of the default build (`duckdb` feature). A build with `--no-default-features` (used for the Windows and Intel macOS release binaries) replaces it with a stub that returns empty analytics results; `ctx sql` (except `--schema`) and `ctx snapshot` exit 2 there.
 
 DuckDB reads SQLite through its `sqlite_scanner` extension, and ctx never downloads it:
 

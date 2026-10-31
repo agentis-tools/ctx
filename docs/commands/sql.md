@@ -26,8 +26,12 @@ Queries run against the versioned `v1` schema, a set of stable views
 - Anything outside `v1.*` is internal and can change at any time. The raw index is
   visible as `code.*`, but do not depend on it.
 
-ctx reads the query from the first of: the `[QUERY]` argument, `--file`, or stdin
-(when `QUERY` is `-` or omitted and stdin is piped).
+Pass the query as the `[QUERY]` argument, with `--file`, or on stdin (when `QUERY` is `-` or
+omitted and stdin is piped). Passing both `QUERY` and `--file` is an error.
+
+Imports are stored as per-file module metadata, not as `v1.edges` rows, so an
+`imports` filter on `v1.edges` returns nothing. Use [`ctx check`](check.md) rules for import
+boundaries.
 
 ### Programmatic use
 
@@ -108,18 +112,20 @@ selects the violations, and any returned row fails the check. Keep gate
 queries in files under `.ctx/gates/` and run them by path:
 
 ```bash
-ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
+ctx sql --fail-on-rows --file .ctx/gates/no-legacy-calls.sql
 ```
 
 If the query returns any row, `ctx sql` exits `1` and the gate fails. Zero rows
-exit `0`. For example, a `.ctx/gates/no-utils-imports.sql` that flags forbidden
-imports:
+exit `0`. For example, a `.ctx/gates/no-legacy-calls.sql` that flags new code
+calling into a legacy module:
 
 ```sql
--- Fail if anything imports the legacy utils module
-SELECT source_file, line
+-- Fail if code outside src/legacy/ calls into it
+SELECT source_file, source_name, target_name, line
 FROM v1.edges
-WHERE kind = 'imports' AND target_name = 'utils';
+WHERE kind = 'calls'
+  AND target_file LIKE 'src/legacy/%'
+  AND source_file NOT LIKE 'src/legacy/%';
 ```
 
 Wire it into a pre-commit hook:

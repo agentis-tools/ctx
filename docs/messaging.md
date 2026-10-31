@@ -75,7 +75,7 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
   repo-committed SQL gates; `ctx snapshot` captures per-commit Parquet metrics for trend queries.
 
 **Agent-native** — `ctx serve --mcp` exposes the world model as eight MCP tools (built with the
-`mcp` feature, which release binaries don't include); `--json` on every command. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
+`mcp` feature, which release binaries don't include); `--json` on most commands. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
 indexed 2,701 symbols and 18,730 extracted edges in this repository. Configured providers may
 have their own local or network dependencies.
 

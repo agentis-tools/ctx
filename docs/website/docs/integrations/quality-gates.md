@@ -75,8 +75,8 @@ Run `ctx harness init` in the repository. It writes three hook scripts under `.c
 What each hook does:
 
 - `session-start.sh` runs `ctx map --budget 2000`. Claude Code adds its output to the session context, so the agent starts with a structural overview.
-- `post-tool-use.sh` runs after each `Edit` or `Write`. It refreshes the index incrementally and runs `ctx check --against HEAD --json`. In ctx 0.4.0, Claude Code shows this output in the transcript but does not pass it to the model, so the agent does not see post-edit violations unless it runs `ctx check` itself.
-- `stop.sh` runs `ctx score --against <default branch> --fail-on "check_violations>0"` and prints the scorecard. The `new_duplication` metric stays in the scorecard but does not fail the gate, because the duplication heuristic needs calibration for each repository.
+- `post-tool-use.sh` runs after each `Edit` or `Write`. It refreshes the index incrementally and runs `ctx check --against HEAD --json`. Claude Code shows this output in the transcript but does not pass it to the model, so the agent does not see post-edit violations unless it runs `ctx check` itself.
+- `stop.sh` runs `ctx score --against <default branch> --fail-on "check_violations>0"` and prints the scorecard. The `new_duplication` metric stays in the scorecard but does not fail the gate, because the duplication heuristic needs calibration for each repository. v0.4.0 hooks also gated on `new_duplication>0`; rerun `ctx harness init` after upgrading to regenerate them.
 
 By default the Stop hook only reports. Set `CTX_GATE_BLOCKING=1` in the environment Claude Code runs in to make a failed gate exit 2, which Claude Code treats as "keep working". If you add `new_duplication` to a blocking Stop hook, `ctx harness init` and `ctx harness doctor` print a warning. Every hook fails open: an operational error, or a ctx binary older than the templates, exits 0 with a note on stderr.
 

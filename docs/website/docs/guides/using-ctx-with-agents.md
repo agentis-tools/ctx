@@ -47,9 +47,9 @@ ctx check --against origin/main --json
 ctx score --against origin/main --fail-on "check_violations>0"
 ```
 
-The generated hooks block only on `check_violations` by default. Duplication still appears in the
-scorecard; add `new_duplication>0` to `--fail-on` once you have checked its findings against your
-repository.
+The generated Stop hook gates only on `check_violations` by default. Duplication still appears in
+the scorecard; add `new_duplication>0` to `--fail-on` once you have checked its findings against
+your repository. (In v0.4.0 the generated hook also gated on `new_duplication>0`.)
 
 You do not have to wire this by hand. `ctx harness init` (Claude Code, the default) or
 `ctx harness init --target codex` installs hooks that run [`ctx map`](../commands/map.md) at session
