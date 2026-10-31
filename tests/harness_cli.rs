@@ -207,11 +207,173 @@ fn test_local_init_post_tool_use_hook_runs_end_to_end() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // A clean check says nothing: Claude Code would only log plain stdout anyway.
+    // (And it really was clean, not an operational failure, which is also silent on stdout.)
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stdout.contains("\"command\": \"check\""),
-        "stdout: {stdout}\nstderr: {}",
+        stdout.trim().is_empty(),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(!stderr.contains("failed"), "stderr: {stderr}");
+}
+
+// ============================================================================
+// (1a) post-tool-use hook: findings reach the model as additionalContext
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_delivers_findings_as_additional_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = GitRepo::init(temp.path());
+    let root = &repo.root;
+    repo.commit_file("src/lib.rs", SOURCE, "initial");
+    assert!(ctx(root, &["index"]).status.success());
+    assert!(ctx(root, &["harness", "init", "--mode", "local"])
+        .status
+        .success());
+    // A rule every changed file breaks, then an uncommitted edit (the hook
+    // runs right after an Edit/Write, before any commit).
+    repo.write(
+        ".ctx/rules.toml",
+        "version = 1\n\n[[rules.limit]]\nmetric = \"file_symbols\"\nscope = \"file\"\nmax = 0\n",
+    );
+    repo.write(
+        "src/lib.rs",
+        &format!("{SOURCE}\npub fn added_by_agent() -> &'static str {{ \"quote \\\" and backslash \\\\\" }}\n"),
+    );
+
+    let hook = root.join(".claude/hooks/ctx/post-tool-use.sh");
+    let out = run_hook(root, &hook);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 1, "one JSON line: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("hook output is not JSON ({e}): {stdout}"));
+    let hso = &value["hookSpecificOutput"];
+    assert_eq!(hso["hookEventName"], "PostToolUse");
+    let context = hso["additionalContext"]
+        .as_str()
+        .expect("additionalContext");
+    assert!(
+        context.starts_with("ctx check found architecture rule violations"),
+        "{context}"
+    );
+    // The embedded report is the real (plain) `ctx check` output naming the file.
+    let report = context
+        .split_once('\n')
+        .expect("report after the first line")
+        .1;
+    assert!(report.contains("src/lib.rs"), "{report}");
+    assert!(value.get("decision").is_none(), "non-blocking: {value}");
+}
+
+/// A generated local post-tool-use hook whose `ctx check` is a stub printing
+/// `report` and exiting 1 (compat and index succeed). Returns the hook output.
+#[cfg(unix)]
+fn post_tool_use_with_stub_report(report: &[u8]) -> Output {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let repo = GitRepo::init(&temp.path().join("repo"));
+    repo.commit_file("src/lib.rs", SOURCE, "initial");
+    assert!(ctx(&repo.root, &["index"]).status.success());
+    assert!(ctx(&repo.root, &["harness", "init", "--mode", "local"])
+        .status
+        .success());
+    let stub_dir = temp.path().join("stub");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let report_path = stub_dir.join("report");
+    fs::write(&report_path, report).unwrap();
+    let stub = stub_dir.join("ctx");
+    fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n  check) cat '{}'; exit 1 ;;\n  *) exit 0 ;;\nesac\n",
+            report_path.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        stub_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let hook = repo.root.join(".claude/hooks/ctx/post-tool-use.sh");
+    let out = run_hook_env(&repo.root, &hook, &[("PATH", path.as_str())]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    out
+}
+
+#[cfg(unix)]
+fn additional_context(out: &Output) -> String {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 1, "one JSON line: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("hook output is not JSON ({e}): {stdout}"));
+    value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext")
+        .to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_escapes_hostile_reports() {
+    // Quotes, backslashes, a literal \u sequence, printf directives, tab, CR,
+    // control bytes and non-ASCII text all survive as valid JSON.
+    let report = "a.rs \"quoted\" back\\slash \\u0041 %s %d\ttab\rcr\x01\x1b é ✓\nsecond line\n";
+    let context = additional_context(&post_tool_use_with_stub_report(report.as_bytes()));
+    let body = context
+        .split_once('\n')
+        .expect("report after the first line")
+        .1;
+    assert_eq!(
+        body, "a.rs \"quoted\" back\\slash \\u0041 %s %d tab cr é ✓\nsecond line\n",
+        "{context:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_caps_large_reports() {
+    // Claude Code caps additionalContext at 10,000 characters (beyond it the
+    // model only sees a preview): the hook keeps whole lines and says how many
+    // it dropped.
+    let report: String = (0..1000)
+        .map(|i| format!("src/m{i}.rs: file_symbols 12 exceeds max 0 \"x\"\n"))
+        .collect();
+    let context = additional_context(&post_tool_use_with_stub_report(report.as_bytes()));
+    assert!(context.chars().count() < 10_000, "{}", context.len());
+    let last = context.trim_end().lines().last().unwrap();
+    assert!(
+        last.starts_with("... ")
+            && last.ends_with("more line(s) not shown; run: ctx check --against HEAD"),
+        "{last}"
+    );
+    assert!(context.contains("src/m0.rs: file_symbols 12 exceeds max 0 \"x\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_post_tool_use_hook_cap_stops_at_first_overflow() {
+    // A long line in the middle ends the report there: later short lines are
+    // not printed out of context.
+    let report = format!(
+        "rule A\nfinding 1\n{}\nrule B\nfinding 2\n",
+        "x".repeat(9500)
+    );
+    let context = additional_context(&post_tool_use_with_stub_report(report.as_bytes()));
+    let body = context.split_once('\n').unwrap().1;
+    assert_eq!(
+        body, "rule A\nfinding 1\n... 3 more line(s) not shown; run: ctx check --against HEAD\n",
+        "{context:?}"
     );
 }
 
@@ -295,6 +457,17 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("blocking"), "stderr: {stderr}");
+    // Exit 2 shows the model stderr only: the scorecard must be there, and
+    // nothing on stdout (Claude Code would only log it).
+    assert!(
+        stderr.contains("Score vs main"),
+        "scorecard on stderr: {stderr}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 
     let content = fs::read_to_string(repo.root.join(".ctx/gate-log.jsonl")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
@@ -313,6 +486,48 @@ fn test_stop_hook_gate_failure_blocks_and_logs_when_opted_in() {
             .any(|c| c == "check_violations > 0"),
         "record: {record}"
     );
+}
+
+/// A second Stop after a blocked one carries `stop_hook_active: true`.
+/// Blocking again would loop for as long as the gate keeps failing, so the
+/// hook reports the findings and lets the session stop.
+#[cfg(unix)]
+#[test]
+fn test_stop_hook_does_not_block_twice() {
+    use std::io::Write;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (repo, hook) = stop_hook_repo(temp.path());
+    trip_gate(&repo);
+
+    let bin_dir = Path::new(env!("CARGO_BIN_EXE_ctx")).parent().unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut child = Command::new("sh")
+        .arg(&hook)
+        .current_dir(&repo.root)
+        .env("PATH", path)
+        .env_remove("CTX_GATE_LOG")
+        .env("CTX_GATE_BLOCKING", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run hook script");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"hook_event_name":"Stop","stop_hook_active":true}"#)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stderr.contains("not blocking again"), "stderr: {stderr}");
 }
 
 #[cfg(unix)]

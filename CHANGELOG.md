@@ -57,6 +57,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- Claude Code hooks now deliver their findings to the model. Claude Code
+  only writes a PostToolUse hook's plain stdout to its debug log, so the
+  `ctx check` report never reached the agent (measured in ctx-bench: 111
+  PostToolUse runs, 0 delivered). The `post-tool-use.sh` template now emits
+  violations as `hookSpecificOutput.additionalContext` JSON, which Claude
+  Code shows next to the tool result, and prints nothing for a clean check.
+  The report is `ctx check --format plain`, cut at whole lines below Claude
+  Code's 10,000-character context limit with a count of the lines left out.
+  In blocking mode (`CTX_GATE_BLOCKING=1`) `stop.sh` now puts the scorecard
+  on stderr with the failure line, since an exit-2 Stop hook shows the model
+  stderr only (before, it was told to fix "the scorecard above" without
+  seeing it). The Claude Code reference wiring in the quality-gates docs now
+  points at the generated hooks. Rerun `ctx harness init` to regenerate local
+  hooks; the committed Claude plugin is regenerated.
+- The Claude Code `stop.sh` hook no longer blocks a second time when the
+  Stop payload has `stop_hook_active: true`. In blocking mode a gate the model
+  could not clear made every Stop exit 2, so the session never ended; it now
+  reports the still-failing gate on stderr and lets the session stop.
 - `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
   DuckDB update the previous debug fallback would have printed the new
   decimal type's internals.
