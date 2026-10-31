@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
+  0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
+  decompression, ServerHello downgrade, distrusted intermediates),
+  webpki-roots / webpki-root-certs 1.0.11 (distrusted emSign roots), tokio
+  1.54.1 (`AsyncFd` I/O safety), zip 9 (symlink and SUID extraction
+  advisories; ctx never calls `ZipArchive::extract`) for the Windows
+  self-updater and for DuckDB's build, which moves to 1.10506.1 (engine
+  v1.5.4 -> v1.5.6), and the yanked clipboard-win 5.4.1. The ring and rmcp
+  advisory exceptions are removed: the locked versions are no longer
+  affected. Both lockfiles (root and `perf/`) are updated.
+
 ### Changed
 - Cold `ctx index` no longer builds a new parser (and recompiles every
   language's queries) for each file in the parallel path; parsers are reused
@@ -45,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
+  DuckDB update the previous debug fallback would have printed the new
+  decimal type's internals.
 - C/C++: calls that name a function declared in a header and defined in one
   `.c`/`.cc` file are now bound to the definition during indexing (previously
   they stayed unresolved: 3 368 edges on jq, 446 on fmt). `ctx judge edges`
@@ -118,6 +133,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refreshed README measurements, token-budget wording, LSP guidance, and
   library version examples; governance now checks README version references
   against the manifest (#101).
+- Synchronized the `docs/` pages with their documentation-site copies and
+  checked both against the current CLI: hotspots' churn × size default,
+  `ctx smart`'s hard rendered budget and exit 2 without compatible embeddings,
+  the `check_violations>0` Stop-hook default, `ctx judge edges` (now on the
+  site), `ctx sql` (now in `docs/commands/`), offline DuckDB analytics,
+  `[lsp.<language>] ready_timeout_ms`, and the `mcp` feature requirement.
+  Removed a nonexistent `ctx index --quiet` flag and stale version examples,
+  rewrote the `docs/README.md` command reference to link per-command pages
+  instead of copying outdated `--help` text, and edited prose for plain,
+  direct wording.
 - BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
 
 ## [0.4.0] - 2026-07-24

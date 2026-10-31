@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
         'commands/audit',
         'commands/harness',
         'commands/lsp',
+        'commands/judge',
         'commands/self-update',
         'commands/shell',
         'commands/serve',
