@@ -20,6 +20,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # See ci.yml: drop debug info for C/C++ dependencies (DuckDB is rebuilt by
+  # the public API check), keeping DuckDB's assertions.
+  CFLAGS: -g0
+  CXXFLAGS: -g0
 
 jobs:
   repository-policy:

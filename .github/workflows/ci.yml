@@ -27,6 +27,14 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # C/C++ dependencies (above all the bundled DuckDB, ~260 translation units)
+  # still get full `-g` from cc-rs, because Cargo reports DEBUG=true for any
+  # debuginfo level. An appended -g0 overrides it while leaving DEBUG, and so
+  # DuckDB's internal assertions, on. Measured on DuckDB's unity files:
+  # 1.5-2.2x faster to compile and 4-6x smaller objects. The test job clears
+  # it on Windows, where cl.exe does not know the flag.
+  CFLAGS: -g0
+  CXXFLAGS: -g0
 
 permissions:
   contents: read
@@ -69,6 +77,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
+    env:
+      CFLAGS: ${{ !startsWith(matrix.os, 'windows') && '-g0' || '' }}
+      CXXFLAGS: ${{ !startsWith(matrix.os, 'windows') && '-g0' || '' }}
     strategy:
       fail-fast: false
       matrix:
