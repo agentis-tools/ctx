@@ -52,6 +52,11 @@ pub fn show_file(reference: &str, path: &str) -> Result<Option<String>> {
     show_file_in(Path::new("."), reference, path)
 }
 
+/// Resolve `reference` to the commit where it diverges from `HEAD`.
+pub fn merge_base(reference: &str) -> Result<String> {
+    merge_base_in(Path::new("."), reference)
+}
+
 // ============================================================================
 // Directory-explicit implementations (used directly by tests)
 // ============================================================================
@@ -65,6 +70,24 @@ pub fn is_git_repo_in(dir: &Path) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// Dir-explicit variant of [`merge_base`].
+pub fn merge_base_in(dir: &Path, reference: &str) -> Result<String> {
+    if !is_git_repo_in(dir) {
+        return Err(CtxError::NotGitRepo);
+    }
+
+    let output = run_git(dir, &["merge-base", reference, "HEAD"])?;
+    let base = stdout_or_err(output, Some(reference))?;
+    let base = base.trim();
+    if base.is_empty() {
+        return Err(CtxError::git(format!(
+            "git merge-base returned no commit for {}",
+            reference
+        )));
+    }
+    Ok(base.to_string())
 }
 
 fn repo_prefix_in(dir: &Path) -> Result<String> {
@@ -85,19 +108,25 @@ pub fn changed_files_against_in(dir: &Path, reference: &str) -> Result<HashSet<S
 
     // Committed changes since the merge base with the reference.
     let range = format!("{}...HEAD", reference);
-    let output = run_git(dir, &["diff", "--name-only", &range])?;
+    let output = run_git(dir, &["diff", "--name-only", "-z", &range])?;
     let committed = stdout_or_err(output, Some(reference))?;
     collect_paths(&committed, &prefix, &mut files);
 
     // Uncommitted (staged + unstaged) changes.
-    let output = run_git(dir, &["diff", "--name-only", "HEAD"])?;
+    let output = run_git(dir, &["diff", "--name-only", "-z", "HEAD"])?;
     let uncommitted = stdout_or_err(output, None)?;
     collect_paths(&uncommitted, &prefix, &mut files);
 
     // Untracked files (--full-name makes paths repo-root-relative like diff).
     let output = run_git(
         dir,
-        &["ls-files", "--others", "--exclude-standard", "--full-name"],
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z",
+        ],
     )?;
     let untracked = stdout_or_err(output, None)?;
     collect_paths(&untracked, &prefix, &mut files);
@@ -266,6 +295,8 @@ fn stdout_or_err(output: Output, revision: Option<&str>) -> Result<String> {
             || stderr.contains("bad revision")
             || stderr.contains("invalid object name")
             || stderr.contains("bad object")
+            || stderr.contains("Not a valid object name")
+            || stderr.contains("ambiguous argument")
         {
             return Err(CtxError::InvalidRevision(rev.to_string()));
         }
@@ -303,12 +334,11 @@ fn strip_repo_prefix(path: &str, prefix: &str) -> Option<String> {
 
 /// Add each non-blank, prefix-local path in `raw` to `files`.
 fn collect_paths(raw: &str, prefix: &str, files: &mut HashSet<String>) {
-    for line in raw.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.trim().is_empty() {
+    for path in raw.split('\0') {
+        if path.is_empty() {
             continue;
         }
-        if let Some(local) = strip_repo_prefix(line, prefix) {
+        if let Some(local) = strip_repo_prefix(path, prefix) {
             files.insert(local);
         }
     }
@@ -346,6 +376,14 @@ mod tests {
             Some("src/a.rs".to_string())
         );
         assert_eq!(strip_repo_prefix("other/a.rs", "sub/"), None);
+    }
+
+    #[test]
+    fn test_collect_paths_preserves_special_filenames() {
+        let mut files = HashSet::new();
+        collect_paths("src/plain.rs\0src/line\nbreak.rs\0", "", &mut files);
+        assert!(files.contains("src/plain.rs"));
+        assert!(files.contains("src/line\nbreak.rs"));
     }
 
     #[test]
@@ -409,6 +447,20 @@ mod tests {
             "expected InvalidRevision, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_merge_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path());
+        repo.commit_file("a.rs", "fn a() {}", "initial");
+        let base = crate::testutil::git_stdout(&repo.root, &["rev-parse", "HEAD"]);
+        repo.branch("feature");
+        repo.commit_file("a.rs", "fn a() { 1; }", "feature");
+
+        assert_eq!(merge_base_in(&repo.root, "main").unwrap(), base);
+        let err = merge_base_in(&repo.root, "no-such-ref").unwrap_err();
+        assert!(matches!(err, CtxError::InvalidRevision(ref r) if r == "no-such-ref"));
     }
 
     #[test]

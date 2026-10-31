@@ -65,6 +65,30 @@ example = "9.9.9"
 """
         self.assertEqual(governance.manifest_version(text), "0.3.4")
 
+    def test_readme_contract_errors_detect_stale_version_and_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text(
+                '[package]\nname = "agentis-ctx"\nversion = "0.4.0"\n',
+                encoding="utf-8",
+            )
+            (root / "README.md").write_text(
+                'agentis-ctx = "0.3"\n'
+                'agentis-ctx = { version = "0.2", default-features = false }\n'
+                "Measured on the v0.3.1 tag.\n"
+                "curl -LO https://github.com/agentis-tools/ctx/releases/download/v0.3.9/x.tar.gz\n"
+                "ctx-claude-plugin-0.3.9.zip\n",
+                encoding="utf-8",
+            )
+            errors = governance.readme_contract_errors(root)
+
+        # Both dependency forms and the (deduplicated) install reference are
+        # stale; the historical measurement reference is not an error.
+        self.assertEqual(len(errors), 3, errors)
+        self.assertEqual(sum("declares agentis-ctx" in error for error in errors), 2)
+        self.assertTrue(any("reference v0.3.9" in error for error in errors))
+        self.assertFalse(any("0.3.1" in error for error in errors))
+
 
 class ContractPolicyTests(unittest.TestCase):
     def test_removed_commands_and_options_are_breaking(self):

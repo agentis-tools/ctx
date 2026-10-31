@@ -93,8 +93,40 @@ pub fn stream_context(
     include_tree: bool,
     show_sizes: bool,
 ) -> io::Result<ContextResult> {
-    let formatter = get_formatter(format);
     let mut stdout = io::stdout().lock();
+    stream_context_to_writer(root, entries, format, include_tree, show_sizes, &mut stdout)
+}
+
+/// Render the streaming representation in memory.
+///
+/// This is useful when a caller must measure the complete output before
+/// writing it. It intentionally uses the same representation as
+/// [`stream_context`], including NDJSON for JSON output, so measuring output
+/// does not silently change the format contract.
+pub fn render_stream_context(
+    root: &Path,
+    entries: &[FileEntry],
+    format: OutputFormat,
+    include_tree: bool,
+    show_sizes: bool,
+) -> io::Result<ContextResult> {
+    let mut output = Vec::new();
+    let mut result =
+        stream_context_to_writer(root, entries, format, include_tree, show_sizes, &mut output)?;
+    result.content = String::from_utf8_lossy(&output).into_owned();
+    result.output_bytes = output.len();
+    Ok(result)
+}
+
+fn stream_context_to_writer<W: Write>(
+    root: &Path,
+    entries: &[FileEntry],
+    format: OutputFormat,
+    include_tree: bool,
+    show_sizes: bool,
+    writer: &mut W,
+) -> io::Result<ContextResult> {
+    let formatter = get_formatter(format);
 
     // Determine root name for tree
     let root_name = root
@@ -114,7 +146,7 @@ pub fn stream_context(
     let start = formatter.stream_start(tree_block.as_deref());
     let mut output_bytes = 0usize;
     if !start.is_empty() {
-        writeln!(stdout, "{}", start)?;
+        writeln!(writer, "{}", start)?;
         output_bytes += start.len() + 1;
     }
 
@@ -128,12 +160,12 @@ pub fn stream_context(
             Ok(content) => {
                 let block = formatter.format_file(entry, &content);
                 if i > 0 {
-                    write!(stdout, "{}", separator)?;
+                    write!(writer, "{}", separator)?;
                     output_bytes += separator.len();
                 }
-                write!(stdout, "{}", block)?;
+                write!(writer, "{}", block)?;
                 output_bytes += block.len();
-                stdout.flush()?;
+                writer.flush()?;
                 total_size += entry.size;
                 processed_count += 1;
             }
@@ -150,10 +182,10 @@ pub fn stream_context(
     // Print closing
     let end = formatter.stream_end();
     if !end.is_empty() {
-        writeln!(stdout, "\n{}", end)?;
+        writeln!(writer, "\n{}", end)?;
         output_bytes += end.len() + 2;
     } else {
-        writeln!(stdout)?;
+        writeln!(writer)?;
         output_bytes += 1;
     }
 
@@ -201,5 +233,29 @@ mod tests {
     #[test]
     fn test_separator_markdown() {
         assert_eq!(get_separator(OutputFormat::Markdown), "\n\n");
+    }
+
+    #[test]
+    fn rendered_stream_json_preserves_ndjson() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("one.rs");
+        std::fs::write(&path, "fn one() {}\n").unwrap();
+        let entries = vec![FileEntry {
+            absolute_path: path,
+            relative_path: "one.rs".into(),
+            size: 12,
+        }];
+
+        let result =
+            render_stream_context(temp.path(), &entries, OutputFormat::Json, false, false).unwrap();
+        let lines: Vec<serde_json::Value> = result
+            .content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["name"], "one.rs");
+        assert!(lines[0].get("files").is_none());
     }
 }
