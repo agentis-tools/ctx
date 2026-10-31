@@ -56,9 +56,10 @@ relationships. And almost nothing checks a model's change against the structure 
 ctx builds the world model once (`ctx index`), then uses it to both ground and govern:
 
 **Ground — the right context, in:**
-- **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, fit to a token
-  budget. On this repo: **~8,700 tokens instead of 502,856 — about 58× smaller.**
-- **Token control** — `--count-only`, `--max-tokens`, `--encoding` to budget any model's window.
+- **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, then fits
+  whole files to a token budget.
+- **Token control** — `--count-only --encoding cl100k_base` measures file content; `ctx smart --max-tokens`
+  is a hard limit on the complete rendered context, wrappers and tree included.
 
 **Govern — guardrails, on what changes:**
 - **Architecture rules** — `ctx check` enforces `.ctx/rules.toml` (layers, forbidden deps, limits)
@@ -66,14 +67,17 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
 - **Composite gate** — `ctx score --fail-on` folds check violations, new duplication, and
   complexity/fan-out deltas into one pass/fail scorecard.
 - **Impact, hotspots, duplicates** — `ctx query impact` (blast radius), `ctx hotspots`
-  (churn × complexity), MinHash `ctx duplicates --fail-on-found`.
+  (churn × size by default, `--signal complexity` for churn × complexity), MinHash
+  `ctx duplicates --fail-on-found`.
 - **In the agent loop** — `ctx harness init --target claude` wires check/score/map into Claude Code
   hooks; exit codes are the contract (0 clean / 1 findings / 2 error).
-- *Forthcoming (not yet shipped): `ctx sql` repo-committed SQL gates (`.ctx/gates/*.sql`), trend snapshots.*
+- **SQL gates and trends** — `ctx sql --fail-on-rows --file .ctx/gates/<name>.sql` runs
+  repo-committed SQL gates; `ctx snapshot` captures per-commit Parquet metrics for trend queries.
 
-**Agent-native** — `ctx serve --mcp` exposes the whole world model as MCP tools; `--output json`
-everywhere. **Local & fast** — Rust, one SQLite file, local embeddings; indexes 870 symbols and
-5,463 edges in **0.36s**, offline, code never leaves your machine.
+**Agent-native** — `ctx serve --mcp` exposes the world model as eight MCP tools (built with the
+`mcp` feature, which release binaries don't include); `--json` on most commands. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
+indexed 2,701 symbols and 18,730 extracted edges in this repository. Configured providers may
+have their own local or network dependencies.
 
 ## Audience
 
@@ -93,11 +97,14 @@ everywhere. **Local & fast** — Rust, one SQLite file, local embeddings; indexe
 **The line:** *a queryable world model — grounds the model's input, governs its output. Structural +
 semantic, agent-first, local.*
 
-## Proof points (REAL — ctx v0.2.1 on the ctx repo; see scratchpad/proof.md)
+## Proof points (ctx v0.4.0 tag on the ctx repo; see the reproducible commands below)
 
-- **Ground:** whole repo = **502,856 tokens** (`ctx --count-only`); `ctx smart "..." --max-tokens 8000`
-  = **4 files, ~8,700 tokens** — **≈58× smaller**.
-- **World model / speed:** `ctx index` builds it in **0.36 s** — 53 files, **870 symbols, 5,463 edges**.
+- **Ground:** the v0.4.0 tag (commit `0f4eea866055baa4e3e0aa4740a4b7e179a5779f`) reports **502,856
+  file-content tokens** from
+  `ctx --count-only --encoding cl100k_base` at the repository root; wrappers and the tree are
+  excluded.
+- **World model:** the same tag's default `ctx index` run reports **2,701 symbols and 18,730
+  extracted edges**; timing is machine-dependent and intentionally not claimed here.
 - **Govern:** `ctx query impact discover_files` shows a change ripples through `index`, `run_context`,
   `run` (the CLI entry point) and the MCP server across 5 hops.
 

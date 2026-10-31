@@ -51,6 +51,62 @@ impl std::fmt::Display for TransportError {
 
 type Pending = Arc<Mutex<HashMap<i64, mpsc::Sender<Result<Value, TransportError>>>>>;
 
+/// What the server has told us about its own loading state, from
+/// `experimental/serverStatus` (rust-analyzer) and `$/progress` (the LSP
+/// standard). Updated by the reader thread.
+#[derive(Debug, Default)]
+pub struct ReadyState {
+    /// The server speaks `experimental/serverStatus`.
+    pub status_seen: bool,
+    /// Last `quiescent` value from `experimental/serverStatus`.
+    pub quiescent: bool,
+    /// Work-done progress tokens that have begun and not ended.
+    pub active_progress: std::collections::HashSet<String>,
+    /// Any progress was ever reported.
+    pub progress_seen: bool,
+    /// Last time a status or progress notification arrived.
+    pub last_event: Option<Instant>,
+}
+
+/// Shared readiness state + wakeup.
+pub type Readiness = Arc<(Mutex<ReadyState>, std::sync::Condvar)>;
+
+fn note_readiness(readiness: &Readiness, method: &str, params: Option<&Value>) {
+    let (lock, cvar) = &**readiness;
+    let mut st = lock.lock().unwrap();
+    match method {
+        "experimental/serverStatus" => {
+            st.status_seen = true;
+            st.quiescent = params
+                .and_then(|p| p.get("quiescent"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        }
+        "$/progress" => {
+            let token = params
+                .and_then(|p| p.get("token"))
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            match params
+                .and_then(|p| p.pointer("/value/kind"))
+                .and_then(Value::as_str)
+            {
+                Some("begin") => {
+                    st.progress_seen = true;
+                    st.active_progress.insert(token);
+                }
+                Some("end") => {
+                    st.active_progress.remove(&token);
+                }
+                _ => {}
+            }
+        }
+        _ => return,
+    }
+    st.last_event = Some(Instant::now());
+    cvar.notify_all();
+}
+
 /// Maximum outgoing messages queued for the writer thread.
 const WRITE_QUEUE_CAPACITY: usize = 64;
 /// Enqueue deadline for notifications (which carry no caller timeout).
@@ -72,6 +128,7 @@ pub struct Transport {
     alive: Arc<AtomicBool>,
     reader_handle: Option<JoinHandle<()>>,
     writer_handle: Option<JoinHandle<()>>,
+    readiness: Readiness,
 }
 
 impl Transport {
@@ -94,12 +151,15 @@ impl Transport {
             })
         };
 
+        let readiness: Readiness =
+            Arc::new((Mutex::new(ReadyState::default()), std::sync::Condvar::new()));
         let reader_handle = {
             let write_tx = write_tx.clone();
             let pending = Arc::clone(&pending);
             let alive = Arc::clone(&alive);
+            let readiness = Arc::clone(&readiness);
             std::thread::spawn(move || {
-                reader_loop(reader, &write_tx, &pending, &alive, verbose);
+                reader_loop(reader, &write_tx, &pending, &alive, &readiness, verbose);
             })
         };
 
@@ -110,7 +170,13 @@ impl Transport {
             alive,
             reader_handle: Some(reader_handle),
             writer_handle: Some(writer_handle),
+            readiness,
         }
+    }
+
+    /// The server's loading state as reported through notifications.
+    pub fn readiness(&self) -> Readiness {
+        Arc::clone(&self.readiness)
     }
 
     /// Whether the reader thread still considers the connection open.
@@ -321,6 +387,7 @@ fn reader_loop<R: Read>(
     write_tx: &mpsc::SyncSender<Vec<u8>>,
     pending: &Pending,
     alive: &AtomicBool,
+    readiness: &Readiness,
     verbose: bool,
 ) {
     let mut reader = BufReader::new(reader);
@@ -348,8 +415,14 @@ fn reader_loop<R: Read>(
                     let _ = write_tx.try_send(frame);
                 }
             }
-            // Notification: dropped (logged under verbose for log messages).
+            // Notification: readiness signals are recorded; everything else is
+            // dropped (logged under verbose for log messages).
             (true, None) => {
+                note_readiness(
+                    readiness,
+                    message["method"].as_str().unwrap_or(""),
+                    message.get("params"),
+                );
                 if verbose {
                     let method = message["method"].as_str().unwrap_or("");
                     if method == "window/logMessage" || method == "window/showMessage" {

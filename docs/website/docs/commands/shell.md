@@ -16,12 +16,12 @@ ctx shell [OPTIONS]
 
 ## Description
 
-The `shell` command starts an interactive REPL for exploring your indexed codebase. It provides:
+`ctx shell` starts an interactive REPL over the index. It offers:
 
-- **Quick searches** - Find symbols without typing full commands
-- **Tab completion** - Auto-complete commands and arguments
-- **History** - Navigate previous commands with arrow keys
-- **Vi/Emacs modes** - Choose your preferred editing style
+- short commands for searches and call graph queries,
+- tab completion of command names,
+- history you can browse with the arrow keys and search with `Ctrl+R`,
+- emacs (default) or vi editing.
 
 ## Prerequisites
 
@@ -39,38 +39,38 @@ ctx index
 | `--no-history` | Disable command history | false |
 | `--vi` | Use vi editing mode | false (emacs) |
 
-## Shell Commands
+## Shell commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `find <pattern>` | Find symbols by name (use `*` for wildcards) | `find *Handler` |
-| `search <query>` | Hybrid search (text + semantic) | `search "user login"` |
+| `find <pattern>` | Find symbols whose name contains the pattern | `find Handler` |
+| `search <query>` | Hybrid search (text, plus semantic when embeddings exist) | `search "user login"` |
 | `callers <symbol>` | Show functions that call a symbol | `callers handleRequest` |
 | `callees <symbol>` | Show functions a symbol calls | `callees main` |
 | `deps <symbol>` | Alias for `callees` | `deps UserService` |
 | `impact <symbol>` | Show what a change to a symbol would affect | `impact validateToken` |
 | `source <symbol>` | Show stored source code | `source authenticate` |
 | `explain <symbol>` | Symbol details and relationships | `explain Config` |
-| `complexity` | Fan-out complexity report | `complexity` |
-| `audit` | Code-quality audit | `audit` |
+| `complexity` | High-complexity functions | `complexity` |
+| `audit` | Code quality audit | `audit` |
 | `stats` | Show codebase statistics | `stats` |
 | `help` / `?` | Show available commands | `help` |
 | `exit` / `quit` / `q` | Exit the shell | `exit` |
 
-### Built-in Commands
+### Built-in commands
 
 | Command | Description |
 |---------|-------------|
-| `cd <path>` | Scope subsequent queries to a path; `cd` with no argument clears the scope |
-| `pwd` | Show the current path scope (or `(root)`) |
+| `cd <path>` | Scope `find`, `source`, and `explain` to a path. `cd` with no argument clears the scope |
+| `pwd` | Show the current path scope, or `(root)` |
 | `clear` | Clear the screen |
 
-> `cd`/`pwd` set a **path context** that filters query results — they do not change your OS
-> working directory. Use them to focus the shell on a subdirectory.
+`cd` and `pwd` set a path context that filters `find`, `source`, and `explain`. They do not change your
+working directory. The prompt shows the active scope, for example `ctx (src/auth)>`.
 
 ## Examples
 
-### Start Shell
+### Start the shell
 
 ```bash
 ctx shell
@@ -78,29 +78,27 @@ ctx shell
 
 Output:
 ```
-ctx shell - Interactive codebase explorer
-Type 'help' for available commands, 'exit' to quit.
+ctx interactive shell - type 'help' for commands, 'exit' to quit
 
 ctx> _
 ```
 
-### Find Symbols
+### Find symbols
 
 ```
 ctx> find handle
-Found 12 symbols:
-  handleRequest     function  src/server.rs:45
-  handleAuth        function  src/auth.rs:23
-  handleError       function  src/error.rs:12
-  RequestHandler    struct    src/types.rs:89
-  ...
+Found 4 symbols:
+  handleRequest (function) - src/server.rs:45
+  handleAuth (function) - src/auth.rs:23
+  handleError (function) - src/error.rs:12
+  RequestHandler (struct) - src/types.rs:89
 ```
 
-### View Source
+### View source
 
 ```
 ctx> source handleRequest
-// src/server.rs:45-67
+// src/server.rs:45
 pub async fn handleRequest(req: Request) -> Response {
     let auth = handleAuth(&req)?;
     let result = process(req, auth).await;
@@ -108,32 +106,33 @@ pub async fn handleRequest(req: Request) -> Response {
 }
 ```
 
-### Explore Call Graph
+### Explore the call graph
 
 ```
 ctx> callers handleAuth
-handleAuth is called by:
-  handleRequest  src/server.rs:46
-  middleware     src/middleware.rs:23
-  testAuth       tests/auth_test.rs:15
+Callers of 'handleAuth' (depth 2):
+  handleRequest (function) - src/server.rs [distance: 1]
+  middleware (function) - src/middleware.rs [distance: 1]
+  serve (function) - src/main.rs [distance: 2]
 ```
 
-### Get Statistics
+### Get statistics
 
 ```
 ctx> stats
 Codebase Statistics:
-  Files indexed:    156
-  Total symbols:    2,847
-  Functions:        1,234
-  Structs/Classes:  456
-  Interfaces:       123
-  Edges:            8,901
+  Files:     156
+  Symbols:   2847
+  Functions: 1234
+  Structs:   456
+  Enums:     38
+  Traits:    123
+  Edges:     8901
 ```
 
-## Editing Modes
+## Editing modes
 
-### Emacs Mode (Default)
+### Emacs mode (default)
 
 | Key | Action |
 |-----|--------|
@@ -142,9 +141,9 @@ Codebase Statistics:
 | `Ctrl+K` | Delete to end |
 | `Ctrl+U` | Delete to beginning |
 | `Ctrl+R` | Reverse search history |
-| `Tab` | Auto-complete |
+| `Tab` | Complete a command name |
 
-### Vi Mode
+### Vi mode
 
 ```bash
 ctx shell --vi
@@ -161,8 +160,8 @@ ctx shell --vi
 
 ## History
 
-Command history is saved to `~/.ctx_history` by default. Navigate it with the arrow keys or
-search it with `Ctrl+R`.
+The shell saves command history to `~/.ctx_history` by default. Browse it with the arrow keys or
+search it with `Ctrl+R`. (`help` lists a `history` command, but it only prints a pointer to the arrow keys.)
 
 ```bash
 # Custom history location
@@ -174,13 +173,11 @@ ctx shell --no-history
 
 ## Tips
 
-- Use `Tab` for command and symbol completion
-- Use `Ctrl+R` to search command history
-- Prefix patterns with `*` for wildcard: `find *Handler`
-- Use `--vi` if you prefer vi keybindings
-- Run `help <command>` for detailed help on any command
+- `Tab` completes command names. Arguments are not completed.
+- `find` matches substrings, so `find Handler` finds `RequestHandler` and `HandlerMap`.
+- Use `--vi` if you prefer vi keybindings.
 
-## See Also
+## See also
 
-- [Code Intelligence](../code-intelligence.md)
+- [Code intelligence](../code-intelligence.md)
 - [Configuration](../configuration.md)

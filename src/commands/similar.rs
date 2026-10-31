@@ -48,7 +48,7 @@ pub fn run_similar(
         ensure_embeddings(&db)?;
         let provider =
             embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
-        embeddings::warn_index_mismatch(&db, provider.as_ref());
+        embeddings::ensure_index_compatible(&db, provider.as_ref())?;
         let query_embedding = provider.embed(query)?;
         (
             semantic_hits(&db, &query_embedding, limit, &filter)?,

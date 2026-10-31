@@ -173,7 +173,8 @@ impl LspManager {
         } else {
             let cfg = self.servers.get(language).cloned()?;
             match LspClient::spawn(&cfg, &self.root, self.verbose) {
-                Ok(client) => {
+                Ok(mut client) => {
+                    client.set_ready_timeout(config::ready_timeout_ms(&self.root, language));
                     if self.verbose {
                         let (name, version) = client.server_info();
                         eprintln!(

@@ -2,7 +2,9 @@
 
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
-use crate::db::{Edge, EdgeKind, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::db::{
+    Edge, EdgeKind, ImportInfo, ModuleInfo, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use crate::parser::{
     extract_brief, extract_call_edges, find_symbol_kind, is_def_capture, CallCapturePatterns,
     SymbolKindMapping,
@@ -160,6 +162,29 @@ impl GoParser {
             &mut edges,
             &CallCapturePatterns::STANDARD,
         );
+
+        // Imports belong in module metadata like every other language: an
+        // import edge would need a symbol as its source (edges.source_id has a
+        // foreign key on symbols.id), and a file path there made storing every
+        // Go file with an import fail.
+        let (imports, rest): (Vec<Edge>, Vec<Edge>) =
+            edges.into_iter().partition(|e| e.kind == EdgeKind::Imports);
+        let edges = rest;
+        let mut module = module.or_else(|| {
+            (!imports.is_empty()).then(|| ModuleInfo {
+                file_path: file_path.to_string(),
+                module_name: None,
+                exports: Vec::new(),
+                imports: Vec::new(),
+            })
+        });
+        if let Some(m) = module.as_mut() {
+            m.imports.extend(imports.into_iter().map(|e| ImportInfo {
+                from: e.target_name,
+                names: Vec::new(),
+                alias: None,
+            }));
+        }
 
         Some(ParseResult {
             file_path: file_path.to_string(),
@@ -332,10 +357,26 @@ fn build_go_symbol(
     let start = def_node.start_position();
     let end = def_node.end_position();
 
-    // Create symbol ID
-    let id = format!("{}::{}", file_path, name);
-
     // Handle method receivers
+    let receiver = if kind == SymbolKind::Method {
+        m.captures.iter().find_map(|c| {
+            (query.capture_names()[c.index as usize] == "method.receiver_type")
+                .then(|| c.node.utf8_text(source.as_bytes()).ok())
+                .flatten()
+                .map(|t| t.trim_start_matches('*').to_string())
+        })
+    } else {
+        None
+    };
+
+    // Create symbol ID: methods carry their receiver, so `func (A) String()`
+    // and `func (B) String()` in one file get distinct ids.
+    let id = match &receiver {
+        Some(r) => format!("{}::{}::{}", file_path, r, name),
+        None => format!("{}::{}", file_path, name),
+    };
+    let qualified_name = receiver.as_ref().map(|r| format!("{r}.{name}"));
+
     let parent_id = if kind == SymbolKind::Method {
         // Extract receiver type for parent reference
         m.captures.iter().find_map(|c| {
@@ -357,7 +398,7 @@ fn build_go_symbol(
         id,
         file_path: file_path.to_string(),
         name,
-        qualified_name: None,
+        qualified_name,
         kind,
         visibility,
         signature,
@@ -368,7 +409,7 @@ fn build_go_symbol(
         col_start: start.column as u32,
         col_end: end.column as u32,
         parent_id,
-        source: None,
+        source: def_node.utf8_text(source.as_bytes()).ok().map(String::from),
     })
 }
 
@@ -665,16 +706,35 @@ func main() {
 
         let result = parser.parse("test.go", source).unwrap();
 
-        // Check for import edges
-        let import_edges: Vec<_> = result
-            .edges
-            .iter()
-            .filter(|e| e.kind == EdgeKind::Imports)
-            .collect();
+        // Imports live in module metadata; no import edge may carry a file
+        // path as its source (that violated edges.source_id's foreign key).
+        assert!(!result.edges.iter().any(|e| e.kind == EdgeKind::Imports));
+        let module = result.module.expect("package module info");
+        let froms: Vec<&str> = module.imports.iter().map(|i| i.from.as_str()).collect();
+        assert!(froms.contains(&"fmt"));
+        assert!(froms.contains(&"strings"));
+    }
 
-        assert!(import_edges.len() >= 2, "Should have at least 2 imports");
-        assert!(import_edges.iter().any(|e| e.target_name == "fmt"));
-        assert!(import_edges.iter().any(|e| e.target_name == "strings"));
+    #[test]
+    fn test_go_methods_with_same_name_get_distinct_ids() {
+        let mut parser = GoParser::new();
+        let source = "package p\ntype A struct{}\ntype B struct{}\nfunc (A) String() string { return \"a\" }\nfunc (b *B) String() string { return \"b\" }\n";
+        let result = parser.parse("p.go", source).unwrap();
+        let ids: Vec<&str> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name == "String")
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, ["p.go::A::String", "p.go::B::String"]);
+        let q: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name == "String")
+            .map(|s| s.qualified_name.clone().unwrap())
+            .collect();
+        assert_eq!(q, ["A.String", "B.String"]);
+        assert!(result.symbols.iter().all(|s| s.source.is_some()));
     }
 
     #[test]
