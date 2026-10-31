@@ -6,19 +6,15 @@ exclude-dev = false
 version = 2
 yanked = "deny"
 ignore = [
-  # Transitive through fastembed/image; no maintained replacement is selectable.
-  # Reassess with the next fastembed update, no later than 2026-09-30.
+  # paste is unmaintained (no reported vulnerability); transitive through
+  # fastembed/image. Maintainer re-review: fastembed stays pinned at =5.4.0
+  # because 5.17+ (ort-sys rc.12) breaks the x86_64-apple-darwin and glibc 2.35
+  # release targets, so no maintained replacement is selectable yet.
+  # Reassess with the next fastembed update, no later than 2026-12-31.
   "RUSTSEC-2024-0436",
-  # ring's affected QUIC/large single-buffer AES paths are not used by ctx. A
-  # fixed ring currently conflicts with the tree-sitter 0.20 cc constraint.
-  # Remove after the parser stack moves, no later than 2026-09-30.
-  "RUSTSEC-2025-0009",
-  # ctx enables rmcp's stdio transport only; the vulnerable Streamable HTTP
-  # server transport is neither enabled nor exposed. Upgrade rmcp by 2026-09-30.
-  "RUSTSEC-2026-0189",
   # number_prefix is unmaintained but has no reported vulnerability; it is
-  # transitive through the Intel-compatible fastembed line. Remove when Intel
-  # macOS can move to a maintained ORT distribution, no later than 2026-09-30.
+  # transitive through the same pinned fastembed line. Remove when Intel macOS
+  # can move to a maintained ORT distribution, no later than 2026-12-31.
   "RUSTSEC-2025-0119",
 ]
 
