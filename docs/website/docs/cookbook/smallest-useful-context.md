@@ -12,7 +12,7 @@ to read and more expensive to trust.
 
 This recipe uses `ctx smart` to discover candidates, then verifies the working set with exact
 search, graph relationships, source inspection, and explicit token counting. It was exercised on
-the task **“add a new field to historical snapshot metadata”** in ctx itself.
+the task **"add a new field to historical snapshot metadata"** in ctx itself.
 
 :::note Worked-example provenance
 The candidate counts and token estimates were measured against ctx 0.3.5 on 2026-07-14. They are
@@ -61,7 +61,10 @@ ctx smart "add a new field to historical snapshot metadata" \
   --provider ollama
 ```
 
-Use the provider and model that match the stored embeddings. The project-level
+Use the provider and model that match the stored embeddings. Since the release after v0.4.0, `smart`
+exits 2 when embeddings are missing, incomplete, or from another provider, model, or dimension, and
+asks you to run `ctx embed --force --provider <provider>`; earlier versions printed nothing and
+exited 0. The project-level
 `.ctx/config.toml` can supply the provider, so the explicit flag is optional when that configuration
 is correct.
 
@@ -74,6 +77,8 @@ In ctx 0.3.5, `smart --dry-run` reports the entire ranked candidate set rather t
 `--max-tokens`. For the worked task, `--max-tokens 9000 --dry-run` still reported 18 files totaling
 81,869 content tokens. Dry-run also emits its human preview rather than a JSON envelope. Use it to
 inspect ranking and reasons, then run the non-dry command to verify the actual budgeted selection.
+Later versions keep this behavior on purpose, because dry-run emits no context document; use
+`--count-only` to inspect the budgeted selection.
 :::
 
 ## 2. Test the real budget boundary
@@ -102,8 +107,13 @@ ctx packs whole files; it does not truncate a large file to make it fit. At 4,00
 At 10,000 tokens the four selected files contained 9,768 tokens.
 
 The final formatted output was estimated at roughly 10,900 tokens because project framing,
-headings, and explanations add overhead. Treat `--max-tokens` as a selected-content budget, not a
-guarantee about the byte-for-byte size of the complete rendered response.
+headings, and explanations add overhead. In ctx 0.3.5 and 0.4.0, `--max-tokens` budgets selected
+file content only, and the top-ranked file is kept even when it alone exceeds the budget.
+
+Behavior changed after v0.4.0: `--max-tokens` is a hard limit on the complete rendered output,
+including the project tree and format wrappers. A top-ranked file larger than the budget is dropped
+unless you pass `--include-oversized-top`. The same task at the same budget can therefore select
+fewer files than the table shows. Re-measure at your ctx version before relying on these counts.
 
 ## 3. Audit the candidate set against the task
 
@@ -135,8 +145,8 @@ ctx's indexed search is symbol-oriented. Repository text search remains appropri
 snapshots, string contracts, generated-contract inputs, and configuration keys.
 
 :::caution Code relevance is not repository completeness
-A second ctx 0.3.5 trial asked `smart` to “update cookbook governance without breaking generated
-plugin contracts.” It selected 12 code files totaling 45,730 content tokens, but no cookbook page,
+A second ctx 0.3.5 trial asked `smart` to "update cookbook governance without breaking generated
+plugin contracts." It selected 12 code files totaling 45,730 content tokens, but no cookbook page,
 governance document, workflow YAML, or plugin skill source. That result was a useful code-symbol
 ranking, not a useful working set for the task. For documentation, CI, policy, packaging, or
 generated-contract work, inventory the relevant Markdown, YAML, configuration, and generator inputs
@@ -163,7 +173,7 @@ The verified graph showed:
 The source then showed the precise contract: one SQL projection writes `meta.parquet`, including
 `captured_at`, `ctx_version`, `snapshot_schema_version`, and `capture_mode`.
 
-Use graph expansion to answer “what behavior reaches this code?” It will not discover every
+Use graph expansion to answer "what behavior reaches this code?" It will not discover every
 documentation reference or persisted string consumer, and generic call names may produce false
 relationships. Verify important edges from source.
 
@@ -247,12 +257,12 @@ spending context on a global tree or unrelated ranked candidates.
 
 | Technique | Verified use | Limitation observed |
 |---|---|---|
-| `smart --dry-run --explain` | Reveals the ranked candidate set and selection reasons | Current dry-run ignores the token limit and is human-formatted |
+| `smart --dry-run --explain` | Reveals the ranked candidate set and selection reasons | Dry-run lists every candidate rather than the budgeted set, and is human-formatted |
 | Budgeted `smart` output | Quickly builds a useful whole-file implementation bundle | A smaller wrapper can displace a large core file; prose, workflows, and contracts may be omitted |
 | Exact `ctx search` | Finds writer symbols and symbolized consumers from persisted terminology | Does not cover every prose or string-only reference |
 | Callers, dependencies, and impact | Verifies the execution path around a distinctive symbol | Static edges do not replace contract or text search |
 | `ctx source` | Creates very small, high-signal investigation context | A snippet omits neighboring conventions needed for editing |
-| Explicit files plus `--count-only` | Measures the audited implementation set before rendering | Formatted output adds overhead beyond content tokens |
+| Explicit files plus `--count-only` | Measures the audited implementation set before rendering | Formatted output adds overhead beyond content tokens (later `smart` versions count it in `--max-tokens`) |
 
 The reliable loop is **rank candidates, audit requirements, inspect symbols, name the files, count,
 then package**.
