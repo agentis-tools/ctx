@@ -19,27 +19,27 @@ ctx lsp doctor [--json]
 
 ## Description
 
-The `lsp` command manages `[lsp.<language>]` blocks in `.ctx/config.toml` — the declarative registrations that let `ctx index` extract symbols through any stdio language server (see [Add a language via LSP](../lsp-languages.md)). `add` installs a curated entry from the community LSP registry, `list` shows what is configured (or available), `update` refreshes registry-installed entries, and `doctor` health-checks every configured server.
+`ctx lsp` manages the `[lsp.<language>]` blocks in `.ctx/config.toml`. Each block registers a stdio language server that `ctx index` can use to extract symbols (see [Add a language via LSP](../lsp-languages.md)). `add` installs a curated entry from the community LSP registry, `list` shows what is configured (or available), `update` refreshes registry-installed entries, and `doctor` health-checks every configured server.
 
 The registry lives in a separate repository, [`agentis-tools/ctx-lsp-registry`](https://github.com/agentis-tools/ctx-lsp-registry). ctx fetches its raw TOML manifests over HTTPS from the pinned `v1` branch (10-second timeout per fetch). Entries whose `schema_version` is newer than the running binary understands are rejected with a message telling you to upgrade ctx.
 
 ## Trust model
 
-`ctx lsp add` **never executes anything**. It writes a TOML block to `.ctx/config.toml` — nothing else:
+`ctx lsp add` never executes anything. It writes a TOML block to `.ctx/config.toml` and nothing else:
 
-- The command, arguments, install hint, and homepage from the registry are **shown to you first**, and nothing is written until you confirm (`--yes` skips the prompt).
-- The install hint (e.g. `npm install -g pyright`) is printed for you to run yourself; ctx never installs a server.
-- The server binary itself is only ever executed later, by `ctx index` (when a matching file is indexed) or by `ctx lsp doctor` (as an explicit health probe).
-- Hand-written `[lsp.<language>]` entries are never touched: `add` refuses to overwrite them and `update` refuses to refresh them. Only entries carrying the `source = "registry"` provenance key are managed by these commands.
-- Config writes are format-preserving and atomic: comments, formatting, and unrelated tables in `.ctx/config.toml` survive byte-for-byte.
+- ctx shows you the command, arguments, install hint, and homepage from the registry first, and writes nothing until you confirm (`--yes` skips the prompt).
+- ctx prints the install hint (for example `npm install -g pyright`) for you to run yourself. It never installs a server.
+- The server binary runs only later, from `ctx index` (when it indexes a matching file) or from `ctx lsp doctor` (as an explicit health probe).
+- ctx never touches hand-written `[lsp.<language>]` entries: `add` refuses to overwrite them and `update` refuses to refresh them. These commands manage only entries with the `source = "registry"` provenance key.
+- Config writes preserve formatting and are atomic: comments, formatting, and unrelated tables in `.ctx/config.toml` stay byte for byte the same.
 
-The registry base URL can be overridden with the `CTX_LSP_REGISTRY_BASE_URL` environment variable (for mirrors or testing). It is deliberately an environment variable and not a config key: where manifests come from is a distribution concern, not a per-project setting.
+The `CTX_LSP_REGISTRY_BASE_URL` environment variable overrides the registry base URL (for mirrors or testing). It is an environment variable and not a config key on purpose, because where manifests come from is a distribution choice, not a per-project setting.
 
 ### Treat `.ctx/config.toml` as executable content
 
-The flip side of declarative registration: `ctx index` **spawns whatever `[lsp.<language>]` blocks the current repository's `.ctx/config.toml` declares** — the configured `command` with its `args` and `env`, run with the repository as working directory — as soon as a matching file is indexed. The `add` confirmation prompt protects entries *you* write; it does not apply to a config that arrives already committed in a checkout.
+`ctx index` spawns whatever `[lsp.<language>]` blocks the current repository's `.ctx/config.toml` declares: the configured `command` with its `args` and `env`, run with the repository as working directory, as soon as it indexes a matching file. The `add` confirmation prompt protects entries you write. It does not apply to a config that is already committed in a checkout.
 
-Before running `ctx index` on a repository you don't trust, review its `.ctx/config.toml` like you would review a build script or git hook. Check the `command` **and** the `env` table — environment variables such as `LD_PRELOAD` or `DYLD_INSERT_LIBRARIES` can make even a familiar-looking binary load repository-local code.
+Before running `ctx index` on a repository you don't trust, review its `.ctx/config.toml` as you would a build script or git hook. Check the `command` and the `env` table. Environment variables such as `LD_PRELOAD` or `DYLD_INSERT_LIBRARIES` can make even a familiar-looking binary load repository-local code.
 
 ## `add <LANGUAGE>`
 
@@ -60,9 +60,9 @@ run 'ctx index' to reindex with the new language server
 ```
 
 - `--server <NAME>` picks a specific server from the entry instead of the registry's recommended one.
-- `--yes` / `-y` skips the confirmation prompt. It is **required** in non-interactive use: when stdin is not a TTY, or with `--json` (JSON mode never prompts), the command refuses with exit code 2 instead of hanging.
-- The written entry always uses `backend = "hybrid"` plus `source = "registry"` / `source_server = "<name>"` provenance keys so `ctx lsp update` can manage it later.
-- If the server binary is not on `PATH` yet, the entry is still written and a stderr warning repeats the install hint and points at `ctx lsp doctor`.
+- `--yes` / `-y` skips the confirmation prompt. Non-interactive use requires it: when stdin is not a TTY, or with `--json` (JSON mode never prompts), the command exits 2 instead of hanging.
+- The written entry always uses `backend = "hybrid"` plus `source = "registry"` / `source_server = "<name>"` provenance keys so that `ctx lsp update` can manage it later.
+- If the server binary is not on `PATH` yet, ctx still writes the entry, and a stderr warning repeats the install hint and points to `ctx lsp doctor`.
 
 Outcomes for an existing `[lsp.<LANGUAGE>]` entry:
 
@@ -70,7 +70,7 @@ Outcomes for an existing `[lsp.<LANGUAGE>]` entry:
 |----------------|--------|
 | None | Written after confirmation |
 | Registry-managed, identical | "already configured", exit 0, nothing written |
-| Registry-managed, differs | Error pointing at `ctx lsp update <LANGUAGE>` (exit 2) |
+| Registry-managed, differs | Error pointing to `ctx lsp update <LANGUAGE>` (exit 2) |
 | Hand-written (no `source = "registry"`) | Refused before any network call (exit 2) |
 
 An unknown language is an error (exit 2) that lists every language the registry does offer.
@@ -111,18 +111,18 @@ updated [lsp.python] in .ctx/config.toml
 ```
 
 - Without `LANGUAGE`, every registry-managed entry is checked; entries already matching the registry report `up to date`.
-- With `LANGUAGE`, only that entry is refreshed. Naming a hand-written entry is an error (exit 2) — `update` only manages registry-installed entries. Naming a language with no entry at all suggests `ctx lsp add <LANGUAGE>` (exit 2).
+- With `LANGUAGE`, only that entry is refreshed. Naming a hand-written entry is an error (exit 2), because `update` only manages registry-installed entries. Naming a language with no entry at all suggests `ctx lsp add <LANGUAGE>` (exit 2).
 - The server named by the entry's `source_server` provenance key is re-fetched; when that key is missing or empty the registry's recommended server is used.
 - `--yes` / `-y` applies all changes without prompting (required with `--json` or non-TTY stdin).
-- Nothing registry-managed in the config is a clean no-op (exit 0).
+- With no registry-managed entries in the config, `update` does nothing and exits 0.
 
 ## `doctor`
 
-Probes every valid `[lsp.<language>]` entry — including hand-written ones — end to end:
+Probes every valid `[lsp.<language>]` entry, including hand-written ones, end to end:
 
-1. **Binary lookup** — the `command` resolves to an executable (explicit path, or `PATH` search).
-2. **Handshake** — the server is spawned and must complete the LSP `initialize` handshake.
-3. **Capability diff** — every capability listed in the entry's `capabilities` array must be advertised by the server. Short names map to their provider keys (`documentSymbol` → `documentSymbolProvider`); names already ending in `Provider`, and `textDocumentSync`, are matched as-is.
+1. Binary lookup: the `command` must resolve to an executable (explicit path, or `PATH` search).
+2. Handshake: ctx spawns the server, which must complete the LSP `initialize` handshake.
+3. Capability diff: the server must advertise every capability listed in the entry's `capabilities` array. Short names map to their provider keys (`documentSymbol` → `documentSymbolProvider`); names already ending in `Provider`, and `textDocumentSync`, are matched as-is.
 
 ```text
 $ ctx lsp doctor
@@ -133,9 +133,9 @@ FAIL kotlin: `kotlin-language-server` not found on PATH
 2 servers: 1 pass, 0 warn, 1 fail
 ```
 
-Per server the status is `fail` (binary missing or handshake failed), `warn` (handshake ok but requested capabilities not advertised — extraction may be degraded), or `pass`. The exit code is 1 when at least one server **fails**; warnings alone still exit 0. Failed handshakes include the server's recent stderr lines. With nothing configured, `doctor` is a clean no-op.
+Per server the status is `fail` (binary missing or handshake failed), `warn` (handshake ok but requested capabilities not advertised, so extraction may be degraded), or `pass`. The exit code is 1 when at least one server fails. Warnings alone still exit 0. Failed handshakes include the server's recent stderr lines. With nothing configured, `doctor` does nothing and exits 0.
 
-`doctor` probes servers on demand; the related sidecar `.ctx/lsp_status.json` records what actually happened during the last `ctx index` run (see [Add a language via LSP — Troubleshooting](../lsp-languages.md#troubleshooting)).
+`doctor` probes servers on demand. The sidecar `.ctx/lsp_status.json` records what happened during the last `ctx index` run (see [Add a language via LSP: troubleshooting](../lsp-languages.md#troubleshooting)).
 
 ## JSON output
 
@@ -201,11 +201,11 @@ ctx lsp doctor --json
 
 `lsp.list` reports `{"available": false, "servers": [...]}` (configured entries) or `{"available": true, "registry": "<base url>", "languages": [...]}` (with `--available`). `lsp.update` reports `{"registry": "<base url>", "languages": [{"language", "server", "status": "up_to_date" | "updated", "changes": {"<key>": {"from", "to"}}}]}`.
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success — including "already configured" (`add`), "up to date" (`update`), and warnings-only `doctor` runs |
+| 0 | Success, including "already configured" (`add`), "up to date" (`update`), and warnings-only `doctor` runs |
 | 1 | `doctor` found at least one failing server (missing binary or failed handshake) |
 | 2 | Operational error (network failure, unknown language, refused overwrite, aborted confirmation, prompt needed but stdin is not a TTY or `--json` was given without `--yes`) |
 
@@ -247,9 +247,9 @@ ctx lsp doctor --json     # exit 1 signals an unhealthy server
 CTX_LSP_REGISTRY_BASE_URL=https://mirror.example.com/ctx-lsp-registry ctx lsp add python
 ```
 
-## See Also
+## See also
 
-- [Add a language via LSP](../lsp-languages.md) — the `[lsp.<language>]` config reference, backend modes, and troubleshooting
-- [Language Support](../language-support.md) — built-in tree-sitter languages
-- [Configuration](../configuration.md) — `.ctx/config.toml`
-- [ctx-lsp-registry](https://github.com/agentis-tools/ctx-lsp-registry) — contribute new language entries via that repository's `CONTRIBUTING.md`
+- [Add a language via LSP](../lsp-languages.md): the `[lsp.<language>]` config reference, backend modes, and troubleshooting
+- [Language support](../language-support.md): built-in tree-sitter languages
+- [Configuration](../configuration.md): `.ctx/config.toml`
+- [ctx-lsp-registry](https://github.com/agentis-tools/ctx-lsp-registry): contribute new language entries through that repository's `CONTRIBUTING.md`

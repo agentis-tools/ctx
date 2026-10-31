@@ -4,9 +4,9 @@ title: JSON Output
 sidebar_position: 8
 ---
 
-# JSON Output
+# JSON output
 
-ctx provides a machine-readable output mode for scripting and tool integration. Pass the global `--json` flag to any supported command to get a single, stable JSON document on stdout.
+Pass the global `--json` flag to a supported command to get one JSON document on stdout, for scripts and tools.
 
 ```bash
 ctx query find parse --json | jq '.data.symbols[].file'
@@ -14,31 +14,32 @@ ctx query find parse --json | jq '.data.symbols[].file'
 
 ## Contract
 
-### stdout / stderr rules
+### stdout and stderr
 
-- In JSON mode, **stdout contains exactly one JSON document and nothing else**.
-- Diagnostics (progress messages, warnings, hints) go to **stderr**.
-- "No results" is not an error: the command still emits a full envelope with empty arrays.
+- In JSON mode, stdout contains exactly one JSON document and nothing else.
+- Diagnostics (progress messages, warnings, hints) go to stderr.
+- No results is not an error: the command still emits a full envelope with empty arrays.
 
 ### Exit codes
 
-The whole ctx suite follows a three-way exit-code convention (like `grep` or most linters):
+ctx commands use three exit codes, like `grep` and most linters:
 
 | Code | Meaning |
 |------|---------|
 | 0    | Success, nothing to report |
 | 1    | Command ran successfully but produced findings (used by quality commands) |
 | 2    | Operational error (bad arguments, missing index, git failure, IO error, ...) |
+| 3    | Version requirement not met (`ctx harness compat` only) |
 
-> **Breaking change:** operational errors previously exited with code 1; they now exit with code 2. Exit code 1 is reserved for "ran fine, found issues".
+Versions before 0.3.0 exited 1 on operational errors. Exit code 1 now means that the command ran and found issues. The exception is `ctx diff` and `ctx review`, which exit 1 when the directory is not a git repository or the revision is invalid, and exit 2 when there are no changes.
 
 ### The envelope
 
-Every JSON document has the same top-level shape:
+Every JSON document has this top-level shape:
 
 ```json
 {
-  "ctx_version": "0.3.0",
+  "ctx_version": "0.4.0",
   "command": "query.find",
   "generated_at": "2026-07-09T13:30:46.623878Z",
   "data": { }
@@ -56,7 +57,7 @@ All field names are `snake_case`.
 
 ### SymbolRef
 
-Wherever a symbol appears in a payload, it is a **SymbolRef object** (never a bare string):
+A symbol in a payload is always a SymbolRef object, never a bare string:
 
 ```json
 {
@@ -69,9 +70,9 @@ Wherever a symbol appears in a payload, it is a **SymbolRef object** (never a ba
 }
 ```
 
-`qualified_name` is `null` when not known. Some commands attach extra fields alongside or inside a SymbolRef (e.g. `visibility` in `query.find`); additions are backwards-compatible, removals or renames are not.
+`qualified_name` is `null` when unknown. Some commands add fields next to or inside a SymbolRef (for example `visibility` in `query.find`). Added fields are backward compatible; removed or renamed fields are not.
 
-Note: `query.graph` nodes come from graph traversal that does not carry source
+`query.graph` nodes come from a graph traversal that carries no source
 locations, so their SymbolRefs have `line_start`/`line_end` of `0` and
 `qualified_name` of `null`. `query.impact` nodes include the indexed qualified
 name and source range; legacy or malformed indexes can still report `0` for a
@@ -119,7 +120,55 @@ missing bound.
 }
 ```
 
-If no embeddings have been generated yet, `results` is empty and a hint is printed to stderr.
+If no embeddings exist yet, `results` is empty and a hint goes to stderr. If the stored embeddings come from another provider, model or dimension than the query, the command exits 2 and tells you to run `ctx embed --force --provider <provider>`.
+
+### `similar`
+
+`ctx similar <QUERY> [--limit N] [--keyword] [--provider P] --json`
+
+Finds functions and methods that match a natural-language or signature-like description, so you can reuse an existing utility instead of writing a new one.
+
+```json
+{
+  "query": "count tokens in a string",
+  "mode": "semantic",
+  "results": [
+    {
+      "symbol": { "name": "count_tokens", "qualified_name": null, "kind": "function", "file": "src/tokens.rs", "line_start": 41, "line_end": 60 },
+      "score": 0.83,
+      "fan_in": 12,
+      "brief": "Count tokens using the configured encoding."
+    }
+  ]
+}
+```
+
+- `mode` is `"semantic"` (embedding search, the default) or `"keyword"` (`--keyword`, FTS5-based, needs no embeddings or API key).
+- `score` depends on the mode. In `semantic` mode it is the embedding similarity in `0.0..=1.0` (cosine similarity, or `1/(1+d)` for L2 distance when sqlite-vec is used). In `keyword` mode it is the hybrid-search relevance score: `1.0` for an exact name match, `0.9` for a prefix match, `0.7` for a contains match, or a normalized FTS5 bm25 relevance (`|rank| / (1 + |rank|)`) in `0.0..=1.0`.
+- `fan_in` is the number of resolved incoming `calls` edges. A high value points to an established utility.
+- `brief` is the symbol's one-line doc: the brief doc comment, falling back to the first sentence of the docstring, else `""`.
+- Only `function` and `method` symbols are returned.
+
+Exit codes: semantic mode without embeddings is an operational error (exit 2, with a hint to run `ctx embed` or use `--keyword`), and so is a corpus from another provider, model or dimension. Zero matches is a success (exit 0) with an empty `results` array.
+
+### `smart`
+
+`ctx smart <TASK> [--max-tokens N] --json`
+
+`--json` selects the JSON context format (`-f json`): on success stdout is the context document described in [Context generation](context-generation.md#json), not this envelope. `--max-tokens` (default 8000) is a hard limit on that complete rendered document.
+
+When the index has no embeddings, or fewer embeddings than symbols, `ctx smart` emits an envelope with the reason and exits 2:
+
+```json
+{
+  "ctx_version": "0.4.0",
+  "command": "smart",
+  "generated_at": "2026-10-30T12:00:00Z",
+  "data": { "error": "No embeddings found. Run 'ctx embed' first to generate embeddings." }
+}
+```
+
+A corpus from another provider, model or dimension also exits 2, with the message on stderr and no envelope. In v0.4.0 and earlier, missing embeddings exited 0 with empty output.
 
 ### `query.find`
 
@@ -277,6 +326,32 @@ filters disambiguate only the root. Ambiguity is reported like `query.callers`.
 }
 ```
 
+### `judge.edges`
+
+`ctx judge edges [--offline] [--dry-run] [--limit N] [--min-confidence P] [--concurrency N] --json`
+
+```json
+{
+  "dry_run": false,
+  "report": {
+    "considered": 412,
+    "cached": 380,
+    "asked": 32,
+    "failed": 0,
+    "skipped_uncached": 0,
+    "low_confidence": 3,
+    "bound": 21,
+    "rebound": 4,
+    "unbound_external": 6,
+    "unchanged": 378,
+    "input_tokens": 51200,
+    "seconds": 9.4
+  }
+}
+```
+
+`considered` counts the ambiguous call edges examined. `cached` answers came from the local `judgments` table, `asked` went to the model, and `skipped_uncached` were not asked (because of `--offline` or `--limit`). Of the answers, `bound` newly bound an edge, `rebound` moved it to another in-repo function, `unbound_external` marked it as a call outside the repository, `unchanged` matched the current binding, and `low_confidence` fell below `--min-confidence`. With `--dry-run`, the counts describe what would change and no edge is rewritten. The command exits 0 on success. See [ctx judge](commands/judge.md).
+
 ### `explain`
 
 `ctx explain <SYMBOL> [--file F] [--kind K] --json`
@@ -295,6 +370,131 @@ filters disambiguate only the root. Ambiguity is reported like `query.callers`.
 ```
 
 When the symbol is not found, `symbol` is `null` and the counts are `0`; when several symbols match without filters, `ambiguous` lists the candidates.
+
+### `map`
+
+`ctx map [--budget N] [--focus F] --json` (also `--format json`; the global `--json` flag forces JSON regardless of `--format`)
+
+```json
+{
+  "budget": 2000,
+  "token_estimate": 1043,
+  "focus": null,
+  "tree": "project/\nsrc/\n├── main.rs\n└── db/\n    └── … (3 files)\n",
+  "entries": [
+    {
+      "file": "src/index/mod.rs",
+      "line": 637,
+      "kind": "function",
+      "signature": "pub fn open_database(root: &Path) -> crate::error::Result<Database>",
+      "rank": 0.0192
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `budget` | The requested token budget |
+| `token_estimate` | Estimated tokens of the equivalent text rendering, `ceil(chars / 4)` |
+| `focus` | The `--focus` argument as given, or `null` |
+| `tree` | The compact project tree (possibly truncated to ~10% of the budget) |
+| `entries` | Selected symbols in emit order (PageRank descending) |
+
+Entry selection and `token_estimate` are computed from the text rendering, so JSON output selects exactly the same entries as `--format text` at the same budget (the JSON envelope itself is not counted against the budget). `rank` is the symbol's PageRank score (all ranks sum to 1 across the index). Output is deterministic for identical index state, except for the envelope's `generated_at` timestamp.
+
+### `duplicates`
+
+`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
+
+```json
+{
+  "threshold": 0.85,
+  "min_tokens": 50,
+  "against": null,
+  "skipped_languages": [],
+  "pairs": [
+    {
+      "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
+      "b": { "name": "sum_invoices", "qualified_name": null, "kind": "function", "file": "src/invoices.rs", "line_start": 4, "line_end": 22 },
+      "similarity": 0.97,
+      "token_count_a": 64,
+      "token_count_b": 64
+    }
+  ]
+}
+```
+
+`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted. Every supported language is fingerprinted (Solidity through the solang-parser lexer), so it is empty. With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
+
+### `hotspots`
+
+`ctx hotspots [--since S] [--limit N] [--by file|symbol] [--signal lines|complexity] [--min-churn N] [--against REF] --json`
+
+Ranks indexed files or symbols by `score = normalized_churn * normalized_signal`. The signal is size in lines by default (`--signal lines`: a symbol's span, or the sum of a file's symbol spans) or index complexity (`--signal complexity`). Both factors are min-max normalized to `0.0..=1.0` over the analyzed set: the indexed files with at least `min_churn` commits since `since`, intersected with the files changed against `--against REF` when given. If all values in the set are equal, they all normalize to `1.0`. The payload reports raw commits, lines and complexity next to the score. The command is informational: it exits 0 on success whatever it finds.
+
+v0.4.0 and earlier ranked by churn x complexity only and had no `signal` or `lines` fields.
+
+`complexity` is the index's coupling measure, `2 x fan_out + fan_in`, where `fan_out` counts every outgoing `calls` edge and `fan_in` counts resolved incoming ones. It does not count branches.
+
+With `--by file` (the default), each entry lists the file's 3 symbols with the highest complexity:
+
+```json
+{
+  "since": "6 months ago",
+  "min_churn": 2,
+  "by": "file",
+  "against": null,
+  "signal": "lines",
+  "entries": [
+    {
+      "file": "src/index/mod.rs",
+      "commits": 24,
+      "complexity": 310,
+      "fan_out": 88,
+      "score": 1.0,
+      "lines": 1840,
+      "symbols": [
+        {
+          "symbol": { "name": "parse_file", "qualified_name": "Indexer::parse_file", "kind": "function", "file": "src/index/mod.rs", "line_start": 120, "line_end": 158 },
+          "complexity": 42
+        }
+      ]
+    }
+  ]
+}
+```
+
+With `--by symbol`, each entry is a function or method and carries a `symbol` SymbolRef instead of `symbols`:
+
+```json
+{
+  "since": "6 months ago",
+  "min_churn": 2,
+  "by": "symbol",
+  "against": null,
+  "signal": "lines",
+  "entries": [
+    {
+      "symbol": { "name": "parse_file", "qualified_name": "Indexer::parse_file", "kind": "function", "file": "src/index/mod.rs", "line_start": 120, "line_end": 158 },
+      "file": "src/index/mod.rs",
+      "commits": 24,
+      "complexity": 42,
+      "fan_out": 15,
+      "score": 1.0,
+      "lines": 39
+    }
+  ]
+}
+```
+
+Entries are ordered by score (descending), raw commits (descending), the ranking signal (descending), then file path (ascending), with symbol id as the final `--by symbol` tiebreak.
+
+Known v1 approximations:
+
+- With `--by symbol`, a symbol's churn is its file's commit count; ctx does not track per-symbol git history yet.
+- Churn is collected with `git log --no-renames`, so renaming a file resets its commit count.
+- Only indexed files are reported. Churned files that are not indexed (for example, unsupported languages) never appear.
 
 ### `check`
 
@@ -361,30 +561,6 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 
 `files` is the number of indexed files matching the layer's globs. `--list` always exits 0.
 
-### `duplicates`
-
-`ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] --json`
-
-```json
-{
-  "threshold": 0.85,
-  "min_tokens": 50,
-  "against": null,
-  "skipped_languages": [],
-  "pairs": [
-    {
-      "a": { "name": "process_orders", "qualified_name": null, "kind": "function", "file": "src/orders.rs", "line_start": 12, "line_end": 30 },
-      "b": { "name": "sum_invoices", "qualified_name": null, "kind": "function", "file": "src/invoices.rs", "line_start": 4, "line_end": 22 },
-      "similarity": 0.97,
-      "token_count_a": 64,
-      "token_count_b": 64
-    }
-  ]
-}
-```
-
-`similarity` is the exact Jaccard similarity (0.0-1.0) of the two functions' normalized 5-token shingle sets. Pairs are sorted by similarity (descending), then by symbol id. `skipped_languages` lists languages that are never fingerprinted; all currently supported languages (including Solidity) are fingerprinted, so it is normally empty. With `--fail-on-found`, a non-empty `pairs` array exits with code 1.
-
 ### `score`
 
 `ctx score [--against REF] [--fail-on EXPR] --json`
@@ -424,7 +600,29 @@ Exit codes follow the suite convention: 0 = no violations, 1 = at least one viol
 
 Exit codes follow the suite convention: 0 = clean or informational, 1 = at least one `--fail-on` condition met, 2 = operational error (not a git repo, bad reference, malformed `--fail-on`, invalid rules file).
 
-Separately from `--json`, setting the `CTX_GATE_LOG` environment variable makes every `ctx score` run append one **JSONL** record (a bare JSON object per line — *not* this envelope) describing the gate evaluation to a local log, default `.ctx/gate-log.jsonl`. See [ctx score — Gate logging](commands/score.md#gate-logging).
+Separately from `--json`, the `CTX_GATE_LOG` environment variable makes every `ctx score` run append one JSONL record (a bare JSON object per line, not this envelope) describing the gate evaluation to a local log, by default `.ctx/gate-log.jsonl`. See [ctx score: gate logging](commands/score.md#gate-logging).
+
+### `sql`
+
+`ctx sql <QUERY> --json` (alias for `--output json`)
+
+```json
+{
+  "columns": [
+    { "name": "kind", "type": "VARCHAR" },
+    { "name": "n", "type": "BIGINT" }
+  ],
+  "rows": [
+    ["function", 500],
+    ["struct", 90]
+  ],
+  "row_count": 2,
+  "truncated": false,
+  "elapsed_ms": 12
+}
+```
+
+`columns` carries the name and DuckDB type of each result column; each entry in `rows` is one row in column order. `truncated` is `true` when the result hit `--max-rows`. DECIMAL values are rendered as exact strings (`"0.5"`). Any error (SQL error, timeout, missing index, build without the `duckdb` feature) exits 2. See [ctx sql](https://docs.agentis.tools/docs/commands/sql) and the [SQL schema](https://docs.agentis.tools/docs/sql-schema).
 
 ### `snapshot.capture`
 
@@ -443,7 +641,7 @@ Separately from `--json`, setting the `CTX_GATE_LOG` environment variable makes 
 }
 ```
 
-One report per captured partition. `commit_sha` and `committed_at` (the committer date, strict ISO 8601) identify the snapshotted commit; `partition_dir` is where the four Parquet files were written. `files`, `symbols`, and `dup_pairs` are the row counts of the corresponding Parquet tables; `violations` is the total architecture-rule violation count (0 when `.ctx/rules.toml` is absent). When a partition for the commit already exists and `--force` was not given, `skipped_existing` is `true` and the counts are reported as zero — they are not re-read from the existing files.
+One report per captured partition. `commit_sha` and `committed_at` (the committer date, strict ISO 8601) identify the snapshotted commit; `partition_dir` is where the four Parquet files were written. `files`, `symbols`, and `dup_pairs` are the row counts of the corresponding Parquet tables; `violations` is the total architecture-rule violation count (0 when `.ctx/rules.toml` is absent). When a partition for the commit already exists and `--force` was not given, `skipped_existing` is `true` and the counts are zero; ctx does not re-read them from the existing files.
 
 Exit codes: 0 = snapshot written or partition already existed, 2 = operational error (not a git repo, build without the `duckdb` feature, IO failure).
 
@@ -481,7 +679,7 @@ Exit codes: 0 = snapshot written or partition already existed, 2 = operational e
 }
 ```
 
-`since` is the `--since` argument as given. `snapshots` carries one `snapshot.capture`-shaped report per partition, oldest first; `captured` and `skipped_existing` are the counts of new vs. already-existing partitions among them. Commits that failed to capture are logged to stderr and **do not appear** in `snapshots` — the walk continues past them, and the exit code stays 0.
+`since` is the `--since` argument as given. `snapshots` carries one `snapshot.capture`-shaped report per partition, oldest first; `captured` and `skipped_existing` are the counts of new vs. already-existing partitions among them. Commits that fail to capture are logged to stderr and do not appear in `snapshots`. The walk continues past them and the exit code stays 0.
 
 ### `harness.init`
 
@@ -516,19 +714,19 @@ One `files` entry per planned file. `action` is one of `created` (did not exist)
 ```json
 {
   "healthy": false,
-  "binary_version": "0.3.0",
+  "binary_version": "0.4.0",
   "mcp_compiled": false,
-  "templates_version": "0.3.0",
+  "templates_version": "0.4.0",
   "summary": { "errors": 1, "warnings": 1, "info": 1 },
   "checks": [
-    { "severity": "info", "code": "binary_version", "message": "ctx v0.3.0 (mcp feature: not compiled in)" },
+    { "severity": "info", "code": "binary_version", "message": "ctx v0.4.0 (mcp feature: not compiled in)" },
     { "severity": "warning", "code": "index_missing", "message": "no code intelligence index (.ctx/codebase.sqlite)", "hint": "run 'ctx index' to build it" },
     { "severity": "error", "code": "rules_invalid", "message": ".ctx/rules.toml is invalid: ...", "hint": "fix the rules file; 'ctx check --help' documents the format" }
   ]
 }
 ```
 
-`severity` is `error`, `warning`, or `info`; `hint` is omitted when there is none. `code` is a stable machine-readable identifier: `binary_version`, `harness_not_initialized`, `templates_stale`, `index_missing`, `index_schema`, `index_stale`, `rules_missing`, `rules_invalid`, `hooks_missing`, `hooks_modified`, `settings_not_wired`, `mcp_unavailable`, `mcp_not_wired`. Checks are independent (a missing index and an invalid rules file are both reported in one run). `healthy` is `true` when no check is an error or a warning; exit codes: 0 = healthy, 1 = problems, 2 = operational error.
+`severity` is `error`, `warning`, or `info`; `hint` is omitted when there is none. `code` is a stable machine-readable identifier: `binary_version`, `harness_not_initialized`, `templates_stale`, `index_missing`, `index_schema`, `index_stale`, `rules_missing`, `rules_invalid`, `hooks_missing`, `hooks_modified`, `settings_not_wired`, `codex_hooks_not_wired`, `blocking_duplication_gate`, `mcp_unavailable`, `mcp_not_wired`. Checks are independent (a missing index and an invalid rules file are both reported in one run). `healthy` is `true` when no check is an error or a warning; exit codes: 0 = healthy, 1 = problems, 2 = operational error.
 
 ### `lsp.add`
 
@@ -574,7 +772,7 @@ JSON mode never prompts, so `--yes` is required (exit 2 otherwise).
 }
 ```
 
-`source` is `"registry"` for entries installed by `ctx lsp add`, `"manual"` otherwise. With `--available` the payload is instead `{"available": true, "registry": "<base url>", "languages": [{"language", "recommended", "servers", "configured"}]}` — one row per registry language, with `configured` marking languages already present in `.ctx/config.toml`.
+`source` is `"registry"` for entries installed by `ctx lsp add`, `"manual"` otherwise. With `--available` the payload is instead `{"available": true, "registry": "<base url>", "languages": [{"language", "recommended", "servers", "configured"}]}`, with one row per registry language; `configured` marks languages already present in `.ctx/config.toml`.
 
 ### `lsp.update`
 
@@ -635,17 +833,17 @@ JSON mode never prompts, so `--yes` is required (exit 2 otherwise).
 
 ```json
 {
-  "old_version": "0.2.1",
-  "new_version": "0.3.0",
+  "old_version": "0.3.5",
+  "new_version": "0.4.0",
   "outcome": "updated"
 }
 ```
 
 `outcome` is `updated` (the binary was replaced) or `up_to_date` (nothing to do). Failures
 (package-manager-owned installation, network error, checksum mismatch, install location not
-writable, or unsupported platform) exit 2 without emitting an envelope. Note that `--json` also
-suppresses the passive update notice — in JSON mode nothing but the envelope is ever printed to
-stdout, and update notices only ever go to stderr.
+writable, or unsupported platform) exit 2 without emitting an envelope. `--json` also
+suppresses the passive update notice: in JSON mode stdout carries only the envelope, and update
+notices go to stderr.
 
 ### `version.check`
 
@@ -653,8 +851,8 @@ stdout, and update notices only ever go to stderr.
 
 ```json
 {
-  "current_version": "0.2.1",
-  "latest_version": "0.3.0",
+  "current_version": "0.3.5",
+  "latest_version": "0.4.0",
   "update_available": true
 }
 ```
@@ -663,4 +861,4 @@ Explicit release comparison (never installs anything). Exits 0 whether or not an
 
 ## Legacy shapes
 
-`ctx complexity --output json`, `ctx graph --output json`, and `ctx audit --output json` still emit their old, ad-hoc JSON shapes. They will be migrated to the envelope in a future release. The old ad-hoc shapes of `search --output json` and `semantic --output json` have already been **replaced** by the envelope described above.
+`ctx complexity --output json`, `ctx graph --output json` and `ctx audit --output json` still emit their own JSON shapes without the envelope. `search --output json` and `semantic --output json` now emit the envelope described above.
