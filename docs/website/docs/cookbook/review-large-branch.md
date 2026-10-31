@@ -119,7 +119,7 @@ The 29 files became four coherent streams:
 This is more reliable than reviewing by directory or largest line count. Each stream has a different
 definition of correctness and a different validator.
 
-The lockfile diff was the largest textual change—1,644 lines—but neither Cargo manifest changed in
+The lockfile diff was the largest textual change, 1,644 lines, but neither Cargo manifest changed in
 the commit. That is a review prompt: establish which dependency update regenerated the locks and
 which checks justify it. It is not a reason to read every lockfile line before examining release
 permissions or enforcement behavior.
@@ -223,7 +223,7 @@ reproducing the pinned run exactly.
 
 ## 8. Review claims against their enforcement
 
-For every policy statement containing words such as “enforces,” “requires,” “never,” or “only,” find
+For every policy statement containing words such as "enforces," "requires," "never," or "only," find
 the executable mechanism and its negative test.
 
 For this branch, focused local validation passed:

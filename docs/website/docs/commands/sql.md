@@ -6,7 +6,7 @@ sidebar_position: 6
 
 # ctx sql
 
-Run read-only SQL against the code-intelligence index through DuckDB, over a stable `v1` view layer.
+Run read-only SQL against the code intelligence index through DuckDB, over a stable `v1` view layer.
 
 ## Synopsis
 
@@ -16,23 +16,23 @@ ctx sql [QUERY] [OPTIONS]
 
 ## Description
 
-`ctx sql` gives you raw SQL access to the code-intelligence index. Where the
-canned `ctx query` subcommands answer fixed questions (callers, deps, impact),
-`ctx sql` lets you ask arbitrary ones: aggregations, joins across symbols and
-edges, and custom `WHERE` conditions. **Prefer `ctx sql` whenever you need a
-grouping, a join, or a filter the canned commands do not expose.**
+`ctx sql` gives you raw SQL access to the code intelligence index. The
+`ctx query` subcommands answer fixed questions (callers, deps, impact).
+`ctx sql` answers any question you can write as SQL: aggregations, joins across
+symbols and edges, and custom `WHERE` conditions. Use it when you need a
+grouping, a join, or a filter that `ctx query` does not offer.
 
-The query surface is the versioned **`v1`** schema — a set of stable views
-(`v1.symbols`, `v1.edges`, `v1.files`, `v1.meta`). See the full
-[SQL Schema (v1)](../sql-schema.md) reference for every column.
+Queries run against the versioned `v1` schema, a set of stable views
+(`v1.symbols`, `v1.edges`, `v1.files`, `v1.meta`). See the
+[SQL schema (v1)](../sql-schema.md) reference for every column.
 
-- **Query `v1.*` only.** It is the compatibility contract: columns and views may
-  be added within `schema_version` 1, but nothing is renamed or removed without
-  bumping `v1.meta.schema_version`.
-- **Anything outside `v1.*` is internal and unstable.** The raw index is
-  reachable as `code.*`, but its shape can change at any time. Do not depend on it.
+- Query `v1.*` only. It is the compatibility contract: new columns and views may
+  appear within `schema_version` 1, but nothing is renamed or removed without
+  a new `v1.meta.schema_version`.
+- Anything outside `v1.*` is internal and can change at any time. The raw index is
+  visible as `code.*`, but do not depend on it.
 
-The query is read from the first of: the `[QUERY]` argument, `--file`, or stdin
+ctx reads the query from the first of: the `[QUERY]` argument, `--file`, or stdin
 (when `QUERY` is `-` or omitted and stdin is piped).
 
 ### Programmatic use
@@ -50,18 +50,19 @@ An index must exist first (`ctx index`); querying without one exits with code 2.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `[QUERY]` | SQL text. If `-` or omitted while stdin is piped, read from stdin. | — |
-| `--file <PATH>` | Read the query from a file (mutually exclusive with `QUERY`). | — |
+| `[QUERY]` | SQL text. If `-` or omitted while stdin is piped, read from stdin. | none |
+| `--file <PATH>` | Read the query from a file (mutually exclusive with `QUERY`). | none |
 | `--output <F>` | Output format: `table`, `csv`, or `json`. | `table` |
-| `--json` | Alias for `--output json`. | — |
+| `--json` | Alias for `--output json`. | false |
 | `--max-rows <N>` | Cap returned rows (`0` = unlimited). | 1000 |
 | `--timeout <SECS>` | Abort the query after N seconds. | 10 |
 | `--fail-on-rows` | Exit `1` if the query returns `>= 1` row (for gate usage). | false |
-| `--schema` | Print the `v1` schema reference and exit `0`. | — |
+| `--schema` | Print the `v1` schema reference and exit `0`. | false |
+| `--snapshots[=DIR]` | Load snapshot partitions from DIR as tables `snap.files`, `snap.symbols`, `snap.dup_pairs`, and `snap.meta` for trend queries (see [ctx snapshot](./snapshot.md)) | `.ctx/snapshots` |
 
-> **Note:** the flag is `--output`, not `--format` — `ctx` already has a global
-> `-f/--format` for context output. `--json` is the convenient alias for
-> `--output json`.
+The flag is `--output`, not `--format`, because `ctx` already has a global
+`-f/--format` for context output. `--json` is a shorter alias for
+`--output json`.
 
 ### Exit codes
 
@@ -109,15 +110,15 @@ ctx sql --schema
 ## Gates
 
 `--fail-on-rows` turns a query into a CI or pre-commit gate: write SQL that
-selects the *violations*, and any returned row fails the check. Keep gate
+selects the violations, and any returned row fails the check. Keep gate
 queries in files under `.ctx/gates/` and run them by path:
 
 ```bash
 ctx sql --fail-on-rows --file .ctx/gates/no-utils-imports.sql
 ```
 
-If the query returns any row, `ctx sql` exits `1` and the gate fails; zero rows
-exits `0`. For example, a `.ctx/gates/no-utils-imports.sql` that flags forbidden
+If the query returns any row, `ctx sql` exits `1` and the gate fails. Zero rows
+exit `0`. For example, a `.ctx/gates/no-utils-imports.sql` that flags forbidden
 imports:
 
 ```sql
@@ -143,15 +144,18 @@ done
 
 ## Security
 
-Access is **read-only and engine-hardened**. Filesystem access, extension
-loading, and file-based `ATTACH` are disabled, and the index cannot be
-modified — a query can only read the `v1` (and internal `code`) views. Because
-`ctx sql` cannot write to disk, mutate the index, or reach the network, it is
-safe to add `Bash(ctx sql *)` to a Claude Code (or other harness) plugin
-allow-list.
+Access is read-only. ctx disables filesystem access, extension loading, and
+file-based `ATTACH` in the DuckDB engine, and the index cannot be modified: a
+query can only read the `v1` (and internal `code`) views. ctx never downloads
+DuckDB extensions. It attaches the index through a locally installed
+`sqlite_scanner` extension when one exists and otherwise reads a private copy,
+so `ctx sql` works offline. Because it cannot write to disk, change the index,
+or reach the network, you can add `Bash(ctx sql *)` to a Claude Code (or other
+harness) plugin allow-list.
 
-## See Also
+## See also
 
-- [SQL Schema (v1)](../sql-schema.md) - Full column reference for the `v1` views
-- [Code Intelligence](../code-intelligence.md) - Indexing and the canned `ctx query` commands
-- [ctx audit](./audit.md) - Automated quality gates
+- [SQL schema (v1)](../sql-schema.md): column reference for the `v1` views
+- [Code intelligence](../code-intelligence.md): indexing and the `ctx query` commands
+- [ctx snapshot](./snapshot.md): per-commit metrics for trend queries
+- [ctx audit](./audit.md): automated quality gates

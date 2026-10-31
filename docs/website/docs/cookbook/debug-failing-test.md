@@ -12,7 +12,7 @@ and compare likely implementations before loading the surrounding subsystem.
 
 This recipe was exercised in an isolated clone of ctx with a controlled one-character regression in
 token-budget selection. The experiment changed an inclusive boundary into an exclusive one. The
-existing test—not a test written to reveal the injected bug—caught it. The lab change was restored
+existing test, not a test written to reveal the injected bug, caught it. The lab change was restored
 afterward; the purpose was to verify the diagnostic workflow, not to alter the product.
 
 ## Quickest version
@@ -94,8 +94,8 @@ The test contained three cases:
 | 300 | 100, 200, 150 | 2 | 300 |
 | 150 | 100, 200, 150 | 1 | 100 |
 
-Only the exact-fit case failed. That distinction narrows the hypothesis from “selection is broken”
-to “the budget boundary may be exclusive.” Read assertions as examples of the contract, not merely
+Only the exact-fit case failed. That distinction narrows the hypothesis from "selection is broken"
+to "the budget boundary may be exclusive." Read assertions as examples of the contract, not merely
 obstacles to make green.
 
 ## 3. Trace the test into production code
@@ -174,8 +174,8 @@ Because this was a controlled uncommitted regression, the diff identified one ch
 one-character comparison change immediately. In a real branch, a changed line is only a suspect:
 the failure may expose an older bug, depend on another commit, or arise from changed test setup.
 
-Use diff evidence to answer “what changed near the failing path?” Do not silently upgrade that to
-“this change caused the failure.” Causality requires a reproducer that fails with the candidate and
+Use diff evidence to answer "what changed near the failing path?" Do not silently upgrade that to
+"this change caused the failure." Causality requires a reproducer that fails with the candidate and
 passes when only the candidate is corrected or removed.
 
 The 4,000-token limit was sufficient for this 2,444-token file. It is not a fixed debugging budget.

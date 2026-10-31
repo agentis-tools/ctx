@@ -1,14 +1,14 @@
 ---
 id: context-generation
-title: Context Generation
+title: Context generation
 sidebar_position: 3
 ---
 
-# Context Generation
+# Context generation
 
-The primary use case for ctx is generating formatted context for LLMs. This page covers all the options for selecting files and formatting output.
+Running `ctx` without a subcommand prints the selected files as one formatted document for an LLM. This page covers file selection, output formats, and token budgets.
 
-## Basic Usage
+## Basic usage
 
 ```bash
 # All files in current directory
@@ -24,11 +24,11 @@ ctx src/ lib/ tests/
 ctx src/ | pbcopy
 ```
 
-## File Selection
+## File selection
 
-### Glob Patterns
+### Glob patterns
 
-ctx supports standard glob patterns:
+ctx accepts standard glob patterns:
 
 ```bash
 # All TypeScript files
@@ -50,40 +50,43 @@ ctx "src/*.rs"  # Only top-level .rs files in src/
 ctx "src/**/*.rs"  # All .rs files in src/ and subdirectories
 ```
 
-### Direct Paths
+### Direct paths
 
-Specify files and directories directly:
+Name files and directories directly:
 
 ```bash
 ctx src/ lib/ Cargo.toml README.md
 ```
 
-### Combining Patterns and Paths
+### Combining patterns and paths
 
 ```bash
 ctx src/ "tests/**/*.test.ts" package.json
 ```
 
-### Pattern Priority
+### How patterns combine
 
-When you specify patterns:
-1. **Literal paths** (no wildcards) are used as starting directories
-2. **Glob patterns** filter files within those directories
-3. If only globs are provided, search starts from current directory
+ctx selects the union of all patterns:
+1. A literal path (no wildcards) includes every file under it. Glob patterns do not filter it.
+2. Glob patterns match paths relative to the current directory.
+3. Without any pattern, ctx selects everything under the current directory.
 
 ```bash
-# Start from src/, filter to .ts files
+# Every file under src/, plus every .ts file anywhere in the project
 ctx src/ "**/*.ts"
 
-# Start from current dir, find all .rs files
-ctx "**/*.rs"
+# Only .ts files under src/
+ctx "src/**/*.ts"
 ```
 
-## Output Formats
+ctx also skips files that look binary (a null byte in the first 8 KB). If include patterns match no
+files, ctx prints a warning.
 
-### XML (Default)
+## Output formats
 
-Best for most LLMs. Clear structure with file paths as attributes.
+### XML (default)
+
+Each file is an element with its name and path as attributes.
 
 ```bash
 ctx --format xml src/
@@ -116,15 +119,12 @@ pub fn greet() -> String {
 </context>
 ```
 
-**Why XML?**
-- Unambiguous structure
-- Clear file boundaries
-- Works well with instruction-following models
-- Easy to parse programmatically
+XML marks where each file starts and ends without depending on the file's own content, and tools
+can parse it.
 
 ### Markdown
 
-Good for chat interfaces that render markdown.
+For chat interfaces that render Markdown.
 
 ```bash
 ctx --format markdown src/
@@ -163,14 +163,12 @@ pub fn greet() -> String {
 ```
 ````
 
-**Why Markdown?**
-- Renders nicely in chat UIs
-- Syntax highlighting in code blocks
-- Familiar format for developers
+Each file is a heading followed by a fenced code block tagged with the file extension, so chat
+interfaces highlight the syntax.
 
-### Plain Text
+### Plain text
 
-Simple format without markup.
+No markup beyond a header line per file. `--format text` is an alias.
 
 ```bash
 ctx --format plain src/
@@ -199,27 +197,42 @@ pub fn greet() -> String {
 }
 ```
 
-**Why Plain Text?**
-- Minimal overhead
-- Universal compatibility
-- Good for piping to other tools
+Plain text adds the fewest tokens and suits piping to other tools.
 
-## Ignore System
+### JSON
 
-ctx uses a three-tier ignore system to filter out irrelevant files.
+```bash
+ctx --format json src/
+```
 
-### Tier 1: .gitignore (Default)
+With the default streaming output, ctx writes newline-delimited JSON: a tree object first, then one
+object per file:
 
-Automatically respects your `.gitignore` file:
+```json
+{"type":"tree","content":"project/\n├── src/\n..."}
+{"name":"main.rs","path":"/src/main.rs","content":"fn main() {\n    println!(\"Hello!\");\n}"}
+{"name":"lib.rs","path":"/src/lib.rs","content":"pub fn greet() -> String {\n    \"Hello\".to_string()\n}"}
+```
+
+With `--no-stream`, ctx writes one object: `{"tree": "...", "files": [{"name", "path", "content"}, ...]}`.
+This is the context document itself, not the `--json` result envelope that other commands use.
+
+## Ignore rules
+
+ctx applies three kinds of ignore rules.
+
+### .gitignore (default)
+
+ctx follows `.gitignore`:
 
 ```bash
 # Include gitignored files
 ctx --no-gitignore src/
 ```
 
-### Tier 2: .contextignore
+### .contextignore
 
-Create a `.contextignore` file for project-specific exclusions. Uses the same syntax as `.gitignore`:
+Put project-specific exclusions in `.contextignore`, using `.gitignore` syntax:
 
 ```gitignore
 # Test files
@@ -236,7 +249,7 @@ __mocks__/
 *.pb.go
 generated/
 
-# Documentation (might not need for AI context)
+# Documentation, if the task does not need it
 docs/
 *.md
 
@@ -246,54 +259,54 @@ docs/
 data/
 ```
 
-### Tier 3: Built-in Ignores (170+ patterns)
+### Built-in ignores (164 patterns)
 
-ctx automatically excludes common non-source patterns:
+ctx excludes common non-source files, including:
 
-**Version Control:**
+Version control:
 - `.git/`, `.svn/`, `.hg/`, `.bzr/`
 
-**Dependencies:**
+Dependencies:
 - `node_modules/`, `vendor/`, `Pods/`, `target/`, `.cargo/`
 
-**Build Outputs:**
+Build outputs:
 - `dist/`, `build/`, `out/`, `.next/`, `.nuxt/`, `coverage/`
 
-**Binary Files:**
+Binary files:
 - Images: `*.png`, `*.jpg`, `*.gif`, `*.ico`, `*.webp`, `*.svg`
 - Media: `*.mp3`, `*.mp4`, `*.avi`, `*.mov`
 - Executables: `*.exe`, `*.dll`, `*.so`, `*.dylib`
 - Archives: `*.zip`, `*.tar`, `*.gz`, `*.rar`
 
-**Lock Files:**
+Lock files:
 - `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
 - `Cargo.lock`, `Gemfile.lock`, `poetry.lock`
 
-**Environment & Secrets:**
+Environment and secrets:
 - `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`
 
-**IDE & Editor:**
+IDE and editor:
 - `.vscode/`, `.idea/`, `*.swp`, `*.swo`
 
-**Cache & Temp:**
+Cache and temporary files:
 - `.cache/`, `tmp/`, `temp/`, `*.tmp`
 
-Disable with:
+[Configuration](configuration.md#built-in-ignores) lists more. Turn them off with:
 ```bash
 ctx --no-default-ignores src/
 ```
 
-### Command-Line Ignores
+### Command-line ignores
 
-Add patterns on the fly:
+Add patterns for one run:
 
 ```bash
 ctx -i "*.test.ts" -i "fixtures/" src/
 ```
 
-Multiple `-i` flags are combined with other ignore sources.
+`-i` can be repeated and adds to the other ignore rules.
 
-### Disabling Ignores
+### Disabling ignores
 
 ```bash
 # Disable .gitignore only
@@ -306,13 +319,13 @@ ctx --no-default-ignores src/
 ctx --no-gitignore --no-default-ignores src/
 ```
 
-Note: `.contextignore` is always respected if present.
+ctx always applies `.contextignore` when it exists.
 
-## Additional Options
+## Other options
 
-### Show File Sizes
+### Show file sizes
 
-Display file sizes in the project tree:
+Show file sizes in the project tree:
 
 ```bash
 ctx --show-sizes src/
@@ -327,9 +340,9 @@ project/
 └── Cargo.toml (423 B)
 ```
 
-### Skip Project Tree
+### Skip the project tree
 
-Omit the tree visualization to save space:
+Leave out the tree to save tokens:
 
 ```bash
 ctx --no-tree src/
@@ -348,11 +361,10 @@ fn main() {
 </context>
 ```
 
-### Buffered vs Streaming Output
+### Buffered or streaming output
 
-By default, ctx streams output as files are processed. This is efficient for piping.
-
-To buffer everything first (e.g., for error checking before output):
+By default, ctx writes each file as soon as it reads it. To build the whole document before
+writing anything:
 
 ```bash
 ctx --no-stream src/
@@ -360,7 +372,7 @@ ctx --no-stream src/
 
 ### Statistics
 
-Print stats to stderr after completion:
+Print statistics to stderr when done:
 
 ```bash
 ctx --stats src/
@@ -371,46 +383,58 @@ Output:
 Generated context: 42 files, 156.3 KB, ~38.9k tokens in 23ms
 ```
 
-Stats go to stderr, so they don't interfere with piping:
+The token figure is an estimate (output bytes divided by 4). Statistics go to stderr, so piping
+copies only the context:
 ```bash
-ctx --stats src/ | pbcopy  # Stats shown, only content copied
+ctx --stats src/ | pbcopy  # stats on screen, context on the clipboard
 ```
 
-The statistics line includes a token estimate alongside the file count, size, and elapsed time.
+### Token counting
 
-### Token Counting
-
-Count the tokens a selection would produce without printing any file contents:
+Count the tokens of a selection with the tokenizer, without printing file contents:
 
 ```bash
 ctx --count-only src/
 ```
 
-This is useful for checking whether a selection fits your model's context window before generating the full output.
+Output:
+```
+Files: 42
+Characters (UTF-8): 155021
+Tokens (cl100k_base): 38410
+```
 
-### Token Budgeting
+Use it to check whether a selection fits a model's context window.
 
-Fit context to a token budget. When `--max-tokens` is set, ctx omits whole files that would push the output over the budget. Files are dropped as a unit; they are never truncated:
+### Token budgets
+
+With `--max-tokens`, ctx keeps files in path order while their contents fit the budget and leaves
+out any file that would exceed it. It never truncates a file, and it prints the number of omitted
+files to stderr. The budget counts file contents only, not the tree or format markup:
 
 ```bash
-# Keep the output under 8000 tokens
+# File contents under 8000 tokens
 ctx --max-tokens 8000 src/
 ```
 
-### Tokenizer Encoding
+`ctx smart`, `ctx diff`, and `ctx review` have their own budget options. For `ctx smart`,
+`--max-tokens` limits the whole rendered output; see [ctx smart](commands/smart.md).
 
-Token counts are computed with a tiktoken-compatible encoding. The default is `cl100k_base`; override it with `--encoding`:
+### Tokenizer encoding
+
+ctx counts tokens with a tiktoken-compatible encoding. The default is `cl100k_base`; change it
+with `--encoding`:
 
 ```bash
 # Use the o200k_base encoding (GPT-4o family)
 ctx --encoding o200k_base --count-only src/
 ```
 
-Available encodings: `cl100k_base` (default), `o200k_base`, `p50k_base`.
+The encodings are `cl100k_base` (default), `o200k_base`, and `p50k_base`.
 
-## Common Workflows
+## Common workflows
 
-### Quick Context for LLM
+### Quick context for an LLM
 
 ```bash
 # macOS
@@ -423,14 +447,14 @@ ctx src/ | xclip -selection clipboard
 ctx src/ | clip.exe
 ```
 
-### Save to File
+### Save to a file
 
 ```bash
 ctx src/ > context.xml
 ctx --format md src/ > CONTEXT.md
 ```
 
-### Targeted Context for a Feature
+### Context for one feature
 
 ```bash
 # Just auth-related files
@@ -440,7 +464,7 @@ ctx "src/auth/**/*.ts" "src/middleware/auth.ts" | pbcopy
 ctx "src/routes/**/*.ts" "src/types/**/*.ts" | pbcopy
 ```
 
-### Full Project Context
+### Most of the project
 
 ```bash
 # Everything except tests
@@ -450,14 +474,14 @@ ctx -i "**/*.test.ts" -i "__tests__/" src/
 ctx src/lib src/core --no-tree
 ```
 
-### Minimal Context (Save Tokens)
+### Minimal context
 
 ```bash
 # No tree, specific files only
 ctx --no-tree src/api.ts src/types.ts src/utils.ts
 ```
 
-### Compare Contexts
+### Compare two contexts
 
 ```bash
 ctx src/ > before.xml
@@ -466,7 +490,7 @@ ctx src/ > after.xml
 diff before.xml after.xml
 ```
 
-### Count Tokens
+### Count tokens
 
 ```bash
 # Exact token count (no file contents printed)
@@ -477,7 +501,7 @@ ctx src/ | wc -w   # word count
 ctx src/ | wc -c   # character count
 ```
 
-### Pipe to Other Tools
+### Pipe to other tools
 
 ```bash
 # Syntax highlighting
@@ -487,15 +511,16 @@ ctx src/main.rs | bat --language=xml
 ctx src/ | grep -A5 "handleAuth"
 ```
 
-## Output Format Summary
+## Output format summary
 
-| Format | Flag | Use Case |
-|--------|------|----------|
-| XML | `--format xml` (default) | Most LLMs, clear structure |
-| Markdown | `--format md` / `--format markdown` | Chat UIs, readable output |
-| Plain | `--format plain` | Simple tools, minimal overhead |
+| Format | Flag | Use |
+|--------|------|-----|
+| XML | `--format xml` (default) | Most LLMs; explicit file boundaries |
+| Markdown | `--format md` or `--format markdown` | Chat interfaces that render Markdown |
+| Plain | `--format plain` or `--format text` | Piping to tools; fewest extra tokens |
+| JSON | `--format json` | Programs that read the files |
 
-## CLI Reference
+## CLI reference
 
 ```
 ctx [OPTIONS] [PATTERNS]...
@@ -507,7 +532,7 @@ Arguments:
 
 Options:
   -f, --format <FORMAT>     Output format [default: xml]
-                            Possible values: xml, markdown, md, plain, json
+                            Possible values: xml, markdown, md, plain, text, json
       --no-gitignore        Disable .gitignore pattern matching
   -i, --ignore <PATTERN>    Additional ignore patterns (can be repeated)
       --no-default-ignores  Disable built-in ignore patterns
@@ -516,7 +541,7 @@ Options:
       --no-stream           Buffer all output before printing
       --stats               Print stats (file count, size, time, token estimate)
       --count-only          Count tokens only; do not print file contents
-      --max-tokens <N>      Omit whole files to fit a token budget (never truncates a file)
+      --max-tokens <N>      Leave out whole files to keep file contents within N tokens
       --encoding <ENCODING> Tokenizer encoding [default: cl100k_base]
                             Possible values: cl100k_base, o200k_base, p50k_base
   -h, --help                Print help

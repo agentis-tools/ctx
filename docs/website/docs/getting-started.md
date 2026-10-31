@@ -1,21 +1,21 @@
 ---
 id: getting-started
-title: Getting Started
+title: Getting started
 sidebar_position: 2
 ---
 
-# Getting Started
+# Getting started
 
-This guide walks you through installing ctx and using it to generate context for LLMs and build a searchable code intelligence index.
+This guide installs ctx, generates context for an LLM, and builds the code index that the
+intelligence and governance commands read.
 
 ## Installation
 
 ### Package managers (recommended)
 
-The crate is published as `agentis-ctx`, but it installs a binary named `ctx`:
+The crates.io package is named `agentis-ctx`. Every channel installs an executable named `ctx`:
 
 ```bash
-# From crates.io (installs the `ctx` binary)
 cargo install agentis-ctx
 cargo binstall agentis-ctx
 brew install agentis-tools/tap/ctx
@@ -29,34 +29,34 @@ scoop bucket add agentis-tools https://github.com/agentis-tools/scoop-bucket
 scoop install ctx
 ```
 
-Debian and RPM packages are attached to GitHub Releases:
+Each GitHub release also carries Debian and RPM packages:
 
 ```bash
 sudo apt install ./ctx_VERSION_amd64.deb
 sudo dnf install ./ctx-VERSION-1.x86_64.rpm
 ```
 
-The Homebrew tap, AUR package, and Scoop bucket live in separate package-index repositories.
-Prebuilt releases currently support Linux GNU x86-64, macOS Intel and Apple Silicon, and Windows
-x86-64. Linux ARM64 and musl are not currently published.
+The Homebrew tap, AUR package, and Scoop bucket are published from separate package-index
+repositories. Prebuilt release binaries exist for Linux GNU x86-64, macOS Intel and Apple Silicon,
+and Windows x86-64. Linux ARM64 and musl binaries are not published.
 
-Only direct GitHub binary installations should use `ctx self-update`. Cargo, Homebrew, Arch,
-Scoop, Debian, and RPM installations must be upgraded through their package manager.
+Use `ctx self-update` only for a binary you downloaded directly from GitHub Releases. Upgrade
+Cargo, Homebrew, Arch, Scoop, Debian, and RPM installations with the package manager that owns
+them; `ctx self-update` refuses to overwrite them.
 
-### From a local checkout
+### Without DuckDB
 
-```bash
-cargo install --path .
-```
-
-On Windows without the MSVC C++ build tools, disable the default DuckDB analytics
-feature (call graphs, impact analysis, and complexity then return empty results):
+The default build includes the DuckDB analytics backend. The Windows and Intel macOS release
+binaries are built without it. If it does not compile on your machine, install without it:
 
 ```bash
 cargo install agentis-ctx --no-default-features
 ```
 
-### From Source
+In that build, call graphs, impact analysis, and complexity return empty results, and `ctx sql`
+and `ctx snapshot` exit with code 2.
+
+### From source
 
 ```bash
 git clone https://github.com/agentis-tools/ctx
@@ -69,52 +69,57 @@ cp target/release/ctx /usr/local/bin/
 export PATH="$PATH:$(pwd)/target/release"
 ```
 
-To build with the MCP server (`ctx serve --mcp`) enabled:
+`cargo install --path .` from a checkout installs the same binary into Cargo's bin directory.
+
+The MCP server (`ctx serve --mcp`) is behind the `mcp` Cargo feature. Release binaries and a plain
+`cargo install agentis-ctx` do not include it. Build it yourself:
 
 ```bash
 cargo build --release --features mcp
+# or
+cargo install agentis-ctx --features mcp
 ```
 
-### Verify Installation
+### Verify the installation
 
 ```bash
 ctx --version
 # ctx 0.4.0
 ```
 
-## Part 1: Context Generation
+## Part 1: Context generation
 
-The primary use case for ctx is generating formatted context for LLMs.
+Running `ctx` with no subcommand prints the selected files as one formatted document for an LLM.
 
-### Your First Context
+### Your first context
 
-Navigate to any project and generate context:
+Go to a project and run:
 
 ```bash
 cd my-project
 ctx
 ```
 
-This outputs all source files in XML format (the default), ready to paste into an LLM.
+ctx prints every source file it does not ignore, in XML (the default format).
 
-### Copy to Clipboard
+### Copy to the clipboard
 
-**macOS:**
+macOS:
 ```bash
 ctx src/ | pbcopy
 ```
 
-**Linux:**
+Linux:
 ```bash
 ctx src/ | xclip -selection clipboard
 ```
 
-**WSL:**
+WSL:
 ```bash
 ctx src/ | clip.exe
 ```
 
-### Select Specific Files
+### Select files
 
 ```bash
 # Just Rust files
@@ -130,72 +135,67 @@ ctx src/ lib/ tests/
 ctx src/ "tests/**/*.test.ts" package.json
 ```
 
-### Choose Output Format
+### Choose an output format
 
 ```bash
-# XML (default) - best for most LLMs
+# XML (default)
 ctx src/
 
-# Markdown - good for chat interfaces
+# Markdown
 ctx --format markdown src/
 ctx --format md src/       # alias
 
-# Plain text - minimal formatting
+# Plain text
 ctx --format plain src/
 
-# JSON - structured output for tooling
+# JSON, for tools
 ctx --format json src/
 ```
 
-### View Statistics
+### View statistics
 
 ```bash
 ctx --stats src/
-# Generated context: 42 files, 156.3 KB, ~38,900 tokens in 23ms
+# Generated context: 42 files, 156.3 KB, ~38.9k tokens in 23ms
 ```
 
-`--stats` reports the file count, total size, elapsed time, and a token estimate.
+`--stats` writes the file count, total size, an approximate token count (output bytes divided by
+4), and the elapsed time to stderr.
 
-### Count Tokens and Budget Context
-
-New in the 0.2.x line, ctx can count tokens and fit context to a budget:
+### Count tokens and fit a budget
 
 ```bash
-# Count tokens only, without printing file contents
+# Count tokens with the tokenizer, without printing file contents
 ctx --count-only src/
 
-# Omit whole files to stay within a token budget
-# (files are dropped as a unit; they are never truncated)
+# Leave out whole files that would push the file contents past 8,000 tokens
+# (ctx never truncates a file)
 ctx --max-tokens 8000 src/
 
 # Choose the tokenizer encoding (default: cl100k_base)
 ctx --encoding o200k_base --count-only src/
 ```
 
-Available encodings are `cl100k_base` (default), `o200k_base`, and `p50k_base`.
+The encodings are `cl100k_base` (default), `o200k_base`, and `p50k_base`.
 
-## Part 2: Code Intelligence
+## Part 2: Code intelligence
 
-ctx includes a powerful code intelligence system for understanding your codebase.
-
-### Build the Index
+### Build the index
 
 ```bash
 ctx index
 ```
 
-:::tip Run this first — everything below needs it
-`ctx index` is the prerequisite for every intelligence and governance command (`query`, `search`,
-`map`, `check`, `score`, …). Run it once; re-runs are incremental. Keep it live in the background
-with `ctx index --watch` (and `ctx embed --watch` for semantic search). See
-**[Index & embed first](guides/indexing.md)** for the full workflow.
-:::
+> Run this first. Every intelligence and governance command (`query`, `search`, `map`, `check`,
+> `score`, and the rest) reads the index. Later runs only reprocess changed files. To keep it
+> current while you work, run `ctx index --watch`, and `ctx embed --watch` for semantic search.
+> [Index and embed first](guides/indexing.md) describes the full workflow.
 
-This creates `.ctx/codebase.sqlite` containing:
-- **Symbols** - Functions, classes, interfaces, structs, enums, traits
-- **Edges** - Call relationships, imports, extends, implements
-- **Files** - Metadata and compressed source code
-- **FTS Index** - Full-text search across symbol names and documentation
+`ctx index` writes `.ctx/codebase.sqlite`, which holds:
+- symbols: functions, classes, interfaces, structs, enums, traits
+- edges: calls, imports, extends, implements
+- files: metadata and compressed source
+- a full-text index over symbol names and documentation
 
 Example output:
 ```
@@ -213,67 +213,80 @@ Codebase statistics:
   Edges:     2664
 ```
 
-The indexer parses in parallel across CPU cores by default; pass `--serial` for
-single-threaded parsing. It also accepts include patterns (`-p/--pattern`) and
-ignore patterns (`-i/--ignore`):
+The indexer parses files in parallel by default; `--serial` uses one thread. Include patterns
+(`-p/--pattern`, or positional paths) and ignore patterns (`-i/--ignore`) limit what it indexes:
 
 ```bash
 # Only index TypeScript sources
 ctx index -p "src/**/*.ts"
+
+# Positional paths scope the same way
+ctx index src
 ```
 
-### Search Your Code
+If an explicit scope matches no files, `ctx index` exits non-zero and leaves the existing index
+unchanged.
 
-**Keyword search:**
+### Search your code
+
+Keyword search:
 ```bash
 ctx search "handleRequest"
 ctx search "auth"
 ctx search "parse config"
 ```
 
-**Semantic search (requires embeddings):**
+Semantic search needs embeddings:
 ```bash
-# Generate embeddings first (one-time, uses local model ~90MB)
+# Generate embeddings once (the default local model is about 90 MB)
 ctx embed
 
-# Then search with natural language
+# Search with natural language
 ctx semantic "error handling and recovery"
 ctx semantic "functions that validate user input"
 ctx semantic "database connection management"
 ```
 
-### Explore Relationships
+### Explore relationships
 
-**Who calls this function?**
+Who calls this function?
 ```bash
 ctx query callers processPayment
 ```
 
 Output:
 ```
-Functions that call 'processPayment':
+Functions that call 'processPayment' (src/payments/process.ts):
 ------------------------------------------------------------
+
+Distance 1:
   handleOrder (src/orders/handler.ts:45)
     > await processPayment(order.total)
   retryTransaction (src/payments/retry.ts:23)
     > return processPayment(amount)
 ```
 
-**What does this function call?**
+`ctx query callers` follows resolved call edges to a depth of 3 by default and groups results by
+distance; `--depth 1` lists only direct callers. Calls that could not be resolved to this symbol
+appear in a separate "Unresolved same-language call evidence" section.
+
+What does this function call?
 ```bash
 ctx query deps validateInput
 ```
 
 Output:
 ```
-Dependencies of 'validateInput':
+Dependencies of 'validateInput' (src/validation/input.ts):
 ------------------------------------------------------------
+
+Distance 1:
   calls checkRequired (line 12)
   calls sanitize (line 15)
   calls validateSchema (line 18)
 ```
 
-**What would break if I change this?**
+What would break if I change this?
 ```bash
 ctx query impact authenticate
 ```
@@ -295,23 +308,23 @@ Distance 2:
 Total: 4 symbols affected
 ```
 
-### Visualize Call Graphs
+### Visualize call graphs
 
 ```bash
 # Text format (default)
 ctx query graph main --depth 3
 
-# GraphViz DOT format (for visualization)
+# GraphViz DOT
 ctx query graph main --depth 3 --output dot > graph.dot
 dot -Tpng graph.dot -o graph.png
 
-# JSON format (for programmatic use)
+# JSON
 ctx query graph main --depth 3 --output json
 ```
 
-`ctx query graph` accepts `--output <text|json|dot>` and defaults to a depth of 5.
+`ctx query graph` accepts `--output <text|json|dot>`. The default depth is 5.
 
-### Get Detailed Symbol Information
+### Get symbol details
 
 ```bash
 ctx explain handleAuth
@@ -343,7 +356,10 @@ Calls (5):
   ...
 ```
 
-### Retrieve Source Code
+`Calls` lists call edges only. Imports, `extends`, `implements`, and `uses` edges appear under a
+separate `Relationships` section.
+
+### Retrieve source code
 
 ```bash
 ctx source handleAuth
@@ -365,13 +381,11 @@ async function handleAuth(req: Request): Promise<Response> {
 }
 ```
 
-## Part 3: Code Analysis
+## Part 3: Code analysis
 
-ctx includes tools for analyzing code quality.
+### Complexity
 
-### Complexity Analysis
-
-Find functions that call too many other functions (high fan-out):
+List functions that call many other functions (high fan-out):
 
 ```bash
 ctx complexity --warnings-only
@@ -390,11 +404,12 @@ Total: 94 functions analyzed
   0 critical, 2 high complexity functions need attention
 ```
 
-### Duplicate Detection
+The score measures call coupling (fan-out and fan-in), not branches.
 
-Find copy-pasted code, even when variables were renamed or literals changed
-(functions are compared structurally with MinHash fingerprints built during
-`ctx index`):
+### Duplicate detection
+
+`ctx duplicates` finds copied functions even when variables were renamed or literals changed. It
+compares the MinHash fingerprints that `ctx index` builds for each function:
 
 ```bash
 ctx duplicates
@@ -412,43 +427,41 @@ Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 
 Found 1 near-duplicate pair(s).
 ```
 
-Tune it with `--threshold <0.0-1.0>` (Jaccard similarity, default 0.85) and
-`--min-tokens <N>` (default 50, raise it to filter idiomatic boilerplate).
-Use `--against main` to only check functions in changed files, and
-`--fail-on-found` to exit 1 in CI when a pair is reported.
+`--threshold <0.0-1.0>` sets the Jaccard similarity (default 0.85) and `--min-tokens <N>` the
+minimum function size (default 50; raise it to skip idiomatic boilerplate). `--against main`
+reports only pairs that touch changed files, and `--fail-on-found` exits 1 when any pair is
+reported.
 
-### Dependency Graph
+### Dependency graph
 
-Visualize how files depend on each other:
+Show how files depend on each other:
 
 ```bash
 # DOT format (GraphViz)
 ctx graph --by-file > deps.dot
 dot -Tpng deps.dot -o deps.png
 
-# Mermaid format (for markdown)
+# Mermaid, for Markdown
 ctx graph --by-file --output mermaid
 ```
 
-## Part 4: Watch Mode
+## Part 4: Watch mode
 
-Keep the index fresh during development:
+Keep the index current while you work.
 
-**Terminal 1 - Watch for file changes:**
+Terminal 1, reindex on file changes:
 ```bash
 ctx index --watch
 ```
 
-**Terminal 2 - Auto-embed new symbols:**
+Terminal 2, embed new symbols:
 ```bash
 ctx embed --watch
 ```
 
-Now any file changes are automatically indexed and embedded.
+### Filtered watch mode
 
-### Filtered Watch Mode
-
-Watch only specific files or exclude patterns:
+Watch only some files, or exclude patterns:
 
 ```bash
 # Only watch TypeScript files in src/
@@ -461,13 +474,14 @@ ctx index --watch -i "**/*.test.ts" -i "**/*.spec.ts"
 ctx index --watch -p "src/" -i "src/generated/"
 ```
 
-Watch mode respects all the same filtering as initial indexing, including `.gitignore`, `.contextignore`, and built-in ignores.
+Watch mode applies the same filters as a normal index run: `.gitignore`, `.contextignore`, and the
+built-in ignores.
 
-## Part 5: Project Configuration
+## Part 5: Project configuration
 
 ### Create .contextignore
 
-Create a `.contextignore` file for project-specific exclusions:
+Put project-specific exclusions in `.contextignore`:
 
 ```gitignore
 # Test fixtures
@@ -483,57 +497,62 @@ dist/
 *.csv
 ```
 
-### What's Automatically Ignored
+### What ctx ignores by default
 
-ctx automatically excludes:
-- Everything in `.gitignore`
-- 170+ built-in patterns (binaries, node_modules, build outputs, etc.)
-- Files matching `.contextignore`
+ctx excludes:
+- everything in `.gitignore`
+- 164 built-in patterns (binaries, `node_modules`, build outputs, lock files, and similar)
+- files matching `.contextignore`
 
-### Custom Ignores on Command Line
+### Ignore patterns on the command line
 
 ```bash
 ctx -i "*.test.ts" -i "fixtures/" src/
 ```
 
-## Part 6: Smart Context Selection
+## Part 6: Smart context selection
 
-Let ctx intelligently select files based on your task:
+`ctx smart` picks files for a task description:
 
 ```bash
-# Describe what you're working on
+# Describe the task
 ctx smart "add user authentication" --max-tokens 8000
 
-# Preview what would be selected
+# Preview the selection
 ctx smart "fix login bug" --dry-run
 
-# See why each file was selected
+# Show why each file was selected
 ctx smart "refactor parser" --explain
 ```
 
-Smart selection requires an index (`ctx index`) and embeddings (`ctx embed`).
+`ctx smart` needs an index (`ctx index`) and embeddings (`ctx embed`). Without a complete,
+compatible embedding corpus it exits with code 2 and tells you to run
+`ctx embed --force --provider <provider>`. `--max-tokens` (default 8000) is a hard limit on the
+whole rendered output, including the tree and format wrappers. A top-ranked file larger than the
+budget is left out unless you pass `--include-oversized-top`. In v0.4.0, `--max-tokens` counted
+file contents only and the top file was always included.
 
-## Part 7: Diff-Aware Context
+## Part 7: Diff-aware context
 
-Generate context focused on code changes:
+`ctx diff` builds context around code changes:
 
 ```bash
 # Changes since the previous commit (default revision: HEAD~1)
 ctx diff
 
-# Changes vs main branch
+# Changes against main
 ctx diff main
 
 # Only staged changes
 ctx diff --staged
 
-# Include change summary
+# Add a change summary (on stderr)
 ctx diff --summary
 ```
 
-## Part 8: PR Review Context
+## Part 8: Pull request review context
 
-Generate context for GitHub pull request review:
+`ctx review` builds context for a GitHub pull request:
 
 ```bash
 # Review PR #123
@@ -542,56 +561,51 @@ ctx review 123
 # Include PR comments
 ctx review 123 --include-comments
 
-# With change summary
+# Add a change summary
 ctx review 123 --summary
 ```
 
-**Note:** Requires GitHub CLI (`gh`) to be installed and authenticated.
+`ctx review` needs the GitHub CLI (`gh`), installed and authenticated.
 
-## Part 9: Code Quality Audit
-
-Run automated quality analysis:
+## Part 9: Code quality audit
 
 ```bash
 # Full quality report
 ctx audit
 
-# Quality gate for CI
+# Fail when the score is below 7.0
 ctx audit --min-score 7.0
 
-# JSON output for automation
+# JSON output
 ctx audit --output json
 ```
 
-## Part 10: Interactive Shell
-
-Explore your codebase interactively:
+## Part 10: Interactive shell
 
 ```bash
 ctx shell
 ```
 
 Shell commands:
-- `find <pattern>` - Find symbols
-- `search <query>` - Hybrid search
-- `callers <fn>` - Show callers
-- `callees <fn>` - Show callees
-- `source <symbol>` - Show source
-- `explain <symbol>` - Explain symbol
-- `impact <symbol>` - Impact analysis
-- `stats` - Codebase statistics
-- `help` - Show all commands
+- `find <pattern>`: find symbols
+- `search <query>`: search symbols
+- `callers <fn>`: show callers
+- `callees <fn>`: show callees
+- `source <symbol>`: show source
+- `explain <symbol>`: show symbol details
+- `impact <symbol>`: impact analysis
+- `stats`: codebase statistics
+- `help`: list all commands
 
-## Part 11: MCP Server (Claude Desktop)
+## Part 11: MCP server (Claude Desktop)
 
-Integrate ctx with Claude Desktop. The MCP server is only available when ctx is
-built with the `mcp` feature:
+The MCP server needs a build with the `mcp` feature (see [From source](#from-source)):
 
 ```bash
 # Build with MCP support
 cargo build --release --features mcp
 
-# Run MCP server
+# Run the MCP server
 ctx serve --mcp
 ```
 
@@ -608,27 +622,27 @@ Configure Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-## Common Workflows
+## Common workflows
 
-### Workflow 1: Quick LLM Context
+### Quick LLM context
 
 ```bash
-# Generate context for current bug/feature
+# Context for the code you are working on
 ctx "src/auth/**/*.ts" | pbcopy
 
-# Paste into ChatGPT, Claude, etc.
+# Paste it into a chat
 ```
 
-### Workflow 2: Understanding New Codebase
+### Learn a new codebase
 
 ```bash
 # Index the codebase
 ctx index
 
-# Get an overview
+# Overview
 ctx query stats
 
-# Find entry points
+# Look for entry points
 ctx search "main"
 ctx search "app"
 
@@ -636,69 +650,69 @@ ctx search "app"
 ctx query graph main --depth 4
 ```
 
-### Workflow 3: Safe Refactoring
+### Refactor safely
 
 ```bash
-# Before changing a function, check impact
+# Before changing a function, check its impact
 ctx query impact authenticate --depth 5
 
 # See who calls it
 ctx query callers authenticate
 
-# Make changes, then reindex
+# After editing, reindex
 ctx index
 ```
 
-### Workflow 4: Code Review Prep
+### Prepare a code review
 
 ```bash
-# Find complex functions that might need review
+# Functions with high fan-out
 ctx complexity --warnings-only
 
-# Find near-duplicate functions (structural match, renames ignored)
+# Near-duplicate functions (structural match, renames ignored)
 ctx duplicates --threshold 0.9
 
-# Understand file dependencies
+# File dependencies
 ctx graph --by-file --output mermaid
 ```
 
-### Workflow 5: Smart Context for Tasks
+### Context for a task
 
 ```bash
-# Let ctx select relevant files for your task
+# Let ctx select files for the task
 ctx smart "add caching to the database layer" --max-tokens 10000 | pbcopy
 
-# Preview selection first
+# Preview the selection first
 ctx smart "fix authentication bug" --dry-run --explain
 ```
 
-### Workflow 6: PR Review
+### Pull request review
 
 ```bash
-# Get context for reviewing a PR
+# Context for reviewing a PR
 ctx review 42 --summary --include-comments
 
-# Focus on just the changed files
+# Only the changed files
 ctx review 42 --changes-only
 ```
 
-### Workflow 7: CI/CD Integration
+### CI
 
 ```bash
-# Quality gate in CI pipeline
+# Quality gate in a CI pipeline
 ctx audit --min-score 7.0 --output json > quality-report.json
 
 # Pre-commit hook
 ctx audit --min-score 7.0 || exit 1
 ```
 
-> **Note:** `ctx audit --incremental` (auditing only changed files) is not yet
-> implemented; the audit always analyzes the full indexed codebase.
+`ctx audit --incremental` is accepted but not implemented: the audit always analyzes the whole
+index.
 
-## Next Steps
+## Next steps
 
-- [Context Generation](context-generation.md) - All output formats and filtering options
-- [Code Intelligence](code-intelligence.md) - Deep dive into indexing and querying
-- [Configuration](configuration.md) - .contextignore and environment variables
-- [Language Support](language-support.md) - What's extracted from each language
-- [Architecture](architecture.md) - How ctx works under the hood
+- [Context generation](context-generation.md): output formats and filtering options
+- [Code intelligence](code-intelligence.md): indexing and queries in depth
+- [Configuration](configuration.md): `.contextignore` and environment variables
+- [Language support](language-support.md): what ctx extracts from each language
+- [Architecture](architecture.md): how ctx works inside

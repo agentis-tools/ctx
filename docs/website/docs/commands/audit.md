@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # ctx audit
 
-Run automated code quality analysis with scoring for CI integration.
+Score code quality across five categories and fail CI below a threshold.
 
 ## Synopsis
 
@@ -16,12 +16,12 @@ ctx audit [OPTIONS]
 
 ## Description
 
-The `audit` command analyzes your codebase for quality metrics and generates a report with scores. Use it to:
+`ctx audit` analyzes the indexed codebase and prints a report with a score from 0 to 10 per category and overall. Use it to:
 
-- **Quality gates** - Block commits/deploys below a threshold
-- **CI integration** - Automated quality checks in pipelines  
-- **Progress tracking** - Monitor code quality over time
-- **Pre-commit hooks** - Catch issues before committing
+- block commits or deploys below a score threshold,
+- run quality checks in CI pipelines,
+- track the score over time,
+- catch issues in a pre-commit hook.
 
 ## Prerequisites
 
@@ -31,33 +31,32 @@ Index your codebase first:
 ctx index
 ```
 
-For full analysis (complexity, modularity), the index creates the analytics database automatically. This uses the DuckDB analytics backend, which is part of the default build.
+The complexity and modularity categories use the DuckDB analytics backend, which is part of the default build. The index creates the analytics database on demand.
 
 ## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-o, --output <FORMAT>` | Output format: text, json, markdown | text |
-| `--min-score <SCORE>` | Minimum score threshold for the CI gate (0.0-10.0) | none |
+| `--min-score <SCORE>` | Exit 1 when the overall score is below this value (0.0-10.0) | none |
 | `--categories <LIST>` | Categories to check (comma-separated) | all |
-| `--incremental` | Only audit changed files — **not yet implemented** | false |
+| `--incremental` | Limit some categories to changed files (partial, see below) | false |
 
-> **Note:** `--incremental` is accepted but not yet implemented. The audit always
-> analyzes the full indexed codebase regardless of this flag.
+`--incremental` is only partly implemented, although `ctx audit --help` still calls it "not yet implemented". It collects staged, unstaged, and untracked files from git. The duplication, coverage, and naming categories then look only at symbols in those files, while complexity and modularity still read the whole index. With no changed files the audit reports a score of 10.0 without analyzing anything.
 
 ## Categories
 
 | Category | Weight | Description |
 |----------|--------|-------------|
 | `complexity` | 25% | Function complexity (fan-out) |
-| `duplication` | 20% | Code duplication patterns |
+| `duplication` | 20% | Functions with similar names (a heuristic, unlike the MinHash search in [`ctx duplicates`](./duplicates.md)) |
 | `coverage` | 20% | Documentation coverage |
 | `modularity` | 20% | Module coupling |
 | `naming` | 15% | Naming convention adherence |
 
 ## Examples
 
-### Basic Audit
+### Basic audit
 
 ```bash
 ctx audit
@@ -86,7 +85,7 @@ Warnings (8):
   ...
 ```
 
-### Quality Gate
+### Quality gate
 
 ```bash
 # Fail if score below 7.0
@@ -96,28 +95,28 @@ ctx audit --min-score 7.0
 echo $?  # 0 = passed, 1 = failed
 ```
 
-### Specific Categories
+### Specific categories
 
 ```bash
 # Only check complexity and naming
 ctx audit --categories complexity,naming
 ```
 
-### JSON Output
+### JSON output
 
 ```bash
 # For programmatic processing
 ctx audit --output json > audit-report.json
 ```
 
-### Markdown Report
+### Markdown report
 
 ```bash
 # For PR comments or documentation
 ctx audit --output markdown > AUDIT.md
 ```
 
-## CI Integration
+## CI integration
 
 ### GitHub Actions
 
@@ -142,14 +141,14 @@ jobs:
         run: ctx audit --min-score 7.0 --output markdown >> $GITHUB_STEP_SUMMARY
 ```
 
-### Pre-commit Hook
+### Pre-commit hook
 
 Add to `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
   - repo: https://github.com/agentis-tools/ctx
-    rev: v0.3.0
+    rev: v0.4.0
     hooks:
       - id: ctx-audit
         args: [--min-score, "7.0"]
@@ -164,27 +163,27 @@ ctx audit --min-score 7.0
 
 ## Scoring
 
-Each category produces a score from 0.0 to 10.0:
+Each category gets a score from 0.0 to 10.0:
 
-| Score | Quality Level |
+| Score | Quality level |
 |-------|---------------|
 | 9-10 | Excellent |
 | 7-8 | Good |
 | 5-6 | Acceptable |
-| 3-4 | Needs Improvement |
+| 3-4 | Needs improvement |
 | 0-2 | Poor |
 
-The overall score is a weighted average of all categories.
+The overall score is the weighted average of the categories.
 
 ## Tips
 
-- Start with a realistic threshold (e.g., 6.0) and increase over time
-- Use `--output json` for custom reporting
-- Run the audit in CI as a quality gate with `--min-score`
-- Focus on critical issues first
+- Start with a threshold you already meet (for example 6.0) and raise it over time.
+- Use `--output json` for custom reports.
+- Run the audit in CI with `--min-score` as a quality gate.
+- Fix critical issues first.
 
-## See Also
+## See also
 
-- [Pre-commit Integration](../integrations/ci-cd.md#pre-commit-hooks)
-- [CI/CD Examples](../integrations/ci-cd.md)
+- [Pre-commit integration](../integrations/ci-cd.md#pre-commit-hooks)
+- [CI/CD examples](../integrations/ci-cd.md)
 - [Configuration](../configuration.md)

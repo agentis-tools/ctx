@@ -8,7 +8,7 @@ sidebar_position: 8
 
 A release health report should explain how the codebase changed, what deserves attention, and what
 the available measurements cannot establish. It should not collapse growth, complexity, coupling,
-duplication, hotspots, and architecture policy into one unexplained “health score.”
+duplication, hotspots, and architecture policy into one unexplained "health score."
 
 This recipe turns snapshot history and focused investigations into a compact engineering decision
 artifact for maintainers, reviewers, and future agents.
@@ -41,8 +41,8 @@ Every report should contain:
 5. classifications and uncertainty;
 6. actions, monitoring decisions, or accepted intentional cases.
 
-Keep observations separate from interpretations and recommendations. “Total complexity rose 5.7%”
-is an observation. “Design quality declined” is an interpretation that needs more evidence.
+Keep observations separate from interpretations and recommendations. "Total complexity rose 5.7%"
+is an observation. "Design quality declined" is an interpretation that needs more evidence.
 
 ## 1. Resolve immutable release points
 

@@ -6,158 +6,127 @@ sidebar_position: 7
 
 # Architecture
 
-This document explains how ctx works under the hood, the design decisions made, and how the components fit together.
+This page describes how ctx works internally: the modules, the storage layout, and how indexing, search, and analytics fit together.
 
-## High-Level Overview
+## Overview
 
-ctx is built around two main capabilities:
+ctx has two parts:
 
-1. **Context Generation** - Walk files, apply filters, format output
-2. **Code Intelligence** - Parse code, extract symbols, build queryable database
+1. Context generation walks files, applies ignore rules, and formats the output.
+2. Code intelligence parses code, extracts symbols and relationships, and stores them in a queryable index.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              ctx CLI                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌────────────────────────┐    ┌─────────────────────────────────────────┐  │
-│  │  Context Generation    │    │           Code Intelligence             │  │
-│  │                        │    │                                         │  │
-│  │  ┌──────────────────┐  │    │  ┌─────────────────────────────────┐    │  │
-│  │  │  File Walker     │  │    │  │         Tree-sitter              │   │  │
-│  │  │  (ignore crate)  │  │    │  │    (Multi-language parsing)      │   │  │
-│  │  └────────┬─────────┘  │    │  └──────────────┬──────────────────┘    │  │
-│  │           │            │    │                 │                       │  │
-│  │  ┌────────▼─────────┐  │    │  ┌──────────────▼──────────────────┐    │  │
-│  │  │  Ignore System   │  │    │  │           SQLite                │    │  │
-│  │  │  (.gitignore,    │  │    │  │  • Symbols table                │    │  │
-│  │  │   .contextignore,│  │    │  │  • Edges table (call graph)     │    │  │
-│  │  │   built-in)      │  │    │  │  • FTS5 search index            │    │  │
-│  │  └────────┬─────────┘  │    │  │  • Embeddings table             │    │  │
-│  │           │            │    │  │  • Compressed source            │    │  │
-│  │  ┌────────▼─────────┐  │    │  └──────────────┬──────────────────┘    │  │
-│  │  │   Formatters     │  │    │                 │                       │  │
-│  │  │  (XML, Markdown, │  │    │  ┌──────────────▼──────────────────┐    │  │
-│  │  │   Plain)         │  │    │  │          DuckDB                 │    │  │
-│  │  └────────┬─────────┘  │    │  │  (In-memory analytical queries) │    │  │
-│  │           │            │    │  │  • Recursive CTEs               │    │  │
-│  │  ┌────────▼─────────┐  │    │  │  • Graph traversal              │    │  │
-│  │  │  Output Stream   │  │    │  │  • Aggregations                 │    │  │
-│  │  └──────────────────┘  │    │  └─────────────────────────────────┘    │  │
-│  └────────────────────────┘    └─────────────────────────────────────────┘  │
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                        Embeddings Module                              │  │
-│  │  ┌─────────────────────┐    ┌─────────────────────────────────────┐   │  │
-│  │  │   Local Provider    │    │         OpenAI Provider             │   │  │
-│  │  │   (fastembed)       │    │    (text-embedding-3-small)         │   │  │
-│  │  │   384 dimensions    │    │         1536 dimensions             │   │  │
-│  │  └─────────────────────┘    └─────────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                ctx CLI                                   │
+├──────────────────────────────┬───────────────────────────────────────────┤
+│  Context generation          │  Code intelligence                        │
+│                              │                                           │
+│  File walker (ignore crate)  │  Parsers: tree-sitter (Rust, TS/JS,       │
+│          │                   │  Python, Go, Zig, C, C++), solang-parser  │
+│  Ignore rules (.gitignore,   │  (Solidity), optional LSP servers         │
+│  .contextignore, built-in)   │          │                                │
+│          │                   │  SQLite index (.ctx/codebase.sqlite)      │
+│  Formatters (XML, Markdown,  │  symbols, edges, FTS5, embeddings,        │
+│  plain, JSON)                │  fingerprints, compressed source          │
+│          │                   │          │                                │
+│  Streamed output             │  DuckDB analytics (default feature):      │
+│                              │  graph traversal, sql, snapshots          │
+├──────────────────────────────┴───────────────────────────────────────────┤
+│  Embeddings: local fastembed, OpenAI, or Ollama                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Module Structure
+## Module structure
 
 ```
 src/
-├── main.rs           # CLI entry point, command routing
-├── cli.rs            # Argument parsing (clap)
-├── walker.rs         # File discovery (ignore crate)
-├── default_ignores.rs # Built-in ignore patterns (170+)
-├── formatter.rs      # Output formatters (XML, Markdown, Plain)
-├── output.rs         # Context generation logic
-├── tree.rs           # ASCII tree visualization
-├── parser/
-│   ├── mod.rs        # Parser coordinator, shared utilities
-│   ├── rust.rs       # Rust parser (tree-sitter-rust)
-│   ├── typescript.rs # TS/JS parser (tree-sitter-typescript)
-│   ├── python.rs     # Python parser (tree-sitter-python)
-│   ├── go.rs         # Go parser (tree-sitter-go)
-│   ├── yaml.rs       # YAML parser (tree-sitter-yaml)
-│   └── solidity.rs   # Solidity parser (tree-sitter-solidity)
-├── db/
-│   ├── mod.rs        # Database module exports
-│   ├── models.rs     # Data structures (Symbol, Edge, etc.)
-│   └── schema.rs     # SQLite operations
-├── index/
-│   └── mod.rs        # Indexing logic, watch mode
-├── analytics/
-│   └── mod.rs        # DuckDB queries, graph analysis
-└── embeddings/
-    ├── mod.rs        # Embedding traits, similarity search
-    ├── local.rs      # Local fastembed provider
-    └── openai.rs     # OpenAI API provider
+├── main.rs            # CLI entry point, command routing
+├── cli.rs             # Argument parsing (clap)
+├── commands/          # One module per command (index, smart, sql, judge, lsp, ...)
+├── walker.rs          # File discovery (ignore crate)
+├── default_ignores.rs # Built-in ignore patterns (164)
+├── formatter.rs       # Output formatters
+├── output.rs          # Context generation
+├── tree.rs            # Project tree rendering
+├── tokens.rs          # Token counting
+├── parser/            # Rust, TypeScript/JavaScript, Python, Go, Zig, C/C++, Solidity
+├── lsp/               # Optional LSP extraction backend ([lsp.<language>])
+├── db/                # SQLite schema, models, queries
+├── index/             # Indexing, edge resolution, watch mode
+├── analytics/         # DuckDB queries (stub when built without the duckdb feature)
+├── embeddings/        # Provider trait; local, OpenAI and Ollama providers
+├── smart.rs, rank.rs  # Smart context selection; PageRank for ctx map
+├── fingerprint.rs     # MinHash fingerprints for ctx duplicates
+├── check.rs, rules.rs # Architecture rules (ctx check)
+├── score.rs           # Scorecard and gates (ctx score)
+├── snapshot.rs        # Parquet snapshots (ctx snapshot)
+├── judge.rs           # Model-assisted edge resolution (ctx judge edges)
+├── harness/           # Claude Code and Codex hook generation
+├── mcp/               # MCP server (mcp feature)
+└── update.rs          # ctx self-update
 ```
 
-## Storage: Single SQLite File
+## Storage: one SQLite file
 
-All data lives in `.ctx/codebase.sqlite`:
+The index lives in `.ctx/codebase.sqlite`. The schema version is 3; an index with another version reports a mismatch and is rebuilt with `ctx index --force`. The core tables:
 
 ```sql
--- Files table: track what's been indexed
+-- Files: what has been indexed
 CREATE TABLE files (
     path TEXT PRIMARY KEY,
-    content_hash TEXT NOT NULL,      -- SHA256 for change detection
+    content_hash TEXT NOT NULL,      -- SHA-256, used for change detection
     size_bytes INTEGER,
     language TEXT,
     last_indexed INTEGER,
-    source BLOB                      -- gzip compressed source
+    source BLOB                      -- gzip-compressed source
 );
 
--- Symbols table: functions, classes, etc.
+-- Symbols: functions, methods, types, ...
 CREATE TABLE symbols (
-    id TEXT PRIMARY KEY,             -- "file_path::name@line"
+    id TEXT PRIMARY KEY,             -- see "Symbol IDs" below
     file_path TEXT NOT NULL,
     name TEXT NOT NULL,
     qualified_name TEXT,
-    kind TEXT NOT NULL,              -- function, struct, enum, etc.
+    kind TEXT NOT NULL,              -- function, method, struct, enum, ...
     visibility TEXT DEFAULT 'private',
     signature TEXT,
-    brief TEXT,                      -- First line of docstring
+    brief TEXT,                      -- first line of the doc comment
     docstring TEXT,
     line_start INTEGER,
     line_end INTEGER,
     col_start INTEGER,
     col_end INTEGER,
     parent_id TEXT,
-    source TEXT,                     -- Symbol source code
+    source TEXT,                     -- symbol source code
     FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
 );
 
--- Edges table: relationships between symbols
+-- Edges: relationships between symbols
 CREATE TABLE edges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id TEXT NOT NULL,         -- Caller symbol ID
-    target_id TEXT,                  -- Resolved symbol ID (if found)
-    target_name TEXT NOT NULL,       -- Called function name
-    kind TEXT NOT NULL,              -- 'calls', 'extends', 'implements', 'imports'
+    source_id TEXT NOT NULL,         -- calling or referring symbol
+    target_id TEXT,                  -- resolved target symbol, NULL if unresolved
+    target_name TEXT NOT NULL,       -- name as written at the site
+    kind TEXT NOT NULL,              -- calls, imports, uses, extends, implements, ...
     line INTEGER,
     col INTEGER,
-    context TEXT,                    -- Code snippet
+    context TEXT,                    -- source line of the site
     FOREIGN KEY (source_id) REFERENCES symbols(id) ON DELETE CASCADE
 );
 
--- Modules table: file-level import/export info
+-- Modules: file-level imports and exports
 CREATE TABLE modules (
     file_path TEXT PRIMARY KEY,
     module_name TEXT,
     exports TEXT,                    -- JSON array
-    imports TEXT,                    -- JSON array of ImportInfo
+    imports TEXT,                    -- JSON array
     FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
-);
-
--- FTS5 virtual table for full-text search
-CREATE VIRTUAL TABLE symbol_fts USING fts5(
-    id, name, kind, signature, brief, docstring,
-    content='symbols',
-    content_rowid='rowid'
 );
 
 -- Embeddings for semantic search
 CREATE TABLE embeddings (
     symbol_id TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,          -- 'local' or 'openai'
+    provider TEXT NOT NULL,          -- local, openai or ollama
     model TEXT NOT NULL,
     dimension INTEGER NOT NULL,
     vector TEXT NOT NULL,            -- JSON array of floats
@@ -166,376 +135,146 @@ CREATE TABLE embeddings (
 );
 ```
 
-### Why SQLite?
+Other tables:
 
-1. **Single file** - Easy to manage, backup, delete, share
-2. **ACID transactions** - Safe concurrent access
-3. **FTS5** - Built-in full-text search with BM25 ranking
-4. **Widespread support** - Can inspect with any SQLite tool
-5. **Fast writes** - Optimized for insert-heavy indexing
-6. **No server** - No daemon processes needed
+- `symbol_fts` is an FTS5 table over symbol name, kind, signature and docs, kept in sync by triggers. Keyword search uses it.
+- `symbol_fingerprints` stores MinHash signatures for `ctx duplicates` and `ctx score`.
+- `symbol_rank` caches PageRank scores for `ctx map`. Indexing clears it; the next `ctx map` recomputes it.
+- `symbol_vectors` is a sqlite-vec `vec0` table for 1536-dimension vectors (see [Similarity search](#similarity-search)).
+- `judgments` caches `ctx judge edges` answers, keyed by a SHA-256 hash of the question, the state shown to the model, and the model. It does not reference symbols, so re-indexing keeps the answers.
+
+Storing a file is all-or-nothing: each file is written inside one SAVEPOINT, so a failure partway leaves no partial file record.
+
+SQLite fits because the index is one file you can delete, copy or inspect with any SQLite tool, it needs no server, and FTS5 gives BM25 keyword ranking.
 
 ## Analytics: DuckDB
 
-For complex analytical queries (recursive CTEs, graph traversal), we use DuckDB as an in-memory query engine:
+Commands that need analytical queries (`ctx sql`, `ctx query`, `ctx snapshot`, `ctx smart`, `ctx diff`, and parts of `ctx audit`) use an in-memory DuckDB connection over the SQLite index. DuckDB is part of the default build (`duckdb` feature). A build with `--no-default-features` (used for Windows MSVC, where DuckDB doesn't compile) replaces it with a stub that returns empty analytics results; `ctx sql` and `ctx snapshot` exit 2 there.
 
-```rust
-// Open in-memory DuckDB
-let conn = Connection::open_in_memory()?;
+DuckDB reads SQLite through its `sqlite_scanner` extension, and ctx never downloads it:
 
-// Attach SQLite database read-only
-conn.execute(
-    "ATTACH 'codebase.sqlite' AS code (TYPE sqlite, READ_ONLY)",
-    [],
-)?;
+1. If the extension is installed locally, ctx attaches the index read-only.
+2. Otherwise ctx copies the tables into a private temporary DuckDB file and attaches that read-only as `code`.
 
-// Run recursive CTE for call graph
-conn.execute("
-    WITH RECURSIVE graph AS (
-        -- Base case: starting symbol
-        SELECT name, file_path, kind, 1 as depth, id
-        FROM code.symbols WHERE name = ?
-        
-        UNION ALL
-        
-        -- Recursive case: follow edges
-        SELECT t.name, t.file_path, t.kind, g.depth + 1, t.id
-        FROM graph g
-        JOIN code.edges e ON e.source_id = g.id
-        LEFT JOIN code.symbols t ON e.target_name = t.name
-        WHERE g.depth < ?
-    )
-    SELECT DISTINCT name, file_path, kind, depth FROM graph
-", [start_name, max_depth])?;
+Both paths work offline and behind egress allowlists. Graph traversal uses recursive CTEs over `code.edges`, for example:
+
+```sql
+WITH RECURSIVE graph AS (
+    SELECT id, name, file_path, kind, 1 AS depth
+    FROM code.symbols WHERE name = ?
+    UNION ALL
+    SELECT t.id, t.name, t.file_path, t.kind, g.depth + 1
+    FROM graph g
+    JOIN code.edges e ON e.source_id = g.id
+    JOIN code.symbols t ON e.target_id = t.id
+    WHERE g.depth < ?
+)
+SELECT DISTINCT name, file_path, kind, depth FROM graph;
 ```
 
-### Why DuckDB?
+## Parsing
 
-1. **Columnar storage** - Efficient for analytical queries
-2. **Recursive CTEs** - Native support for graph traversal
-3. **SQLite attachment** - Query SQLite data directly, no ETL
-4. **In-memory** - No additional files to manage
-5. **OLAP optimized** - Fast aggregations and joins
+ctx parses source with tree-sitter grammars, except Solidity, which uses `solang-parser`. Each parser extracts symbols and edges in one pass over the syntax tree. Cold indexing reuses one parser per worker thread instead of building one per file.
 
-### No Separate File
+| Language | Crate |
+|----------|-------|
+| Rust | `tree-sitter-rust` |
+| TypeScript | `tree-sitter-typescript` |
+| JavaScript | `tree-sitter-javascript` |
+| Python | `tree-sitter-python` |
+| Go | `tree-sitter-go` |
+| Zig | `tree-sitter-zig` |
+| C | `tree-sitter-c` |
+| C++ | `tree-sitter-cpp` |
+| Solidity | `solang-parser` |
 
-DuckDB runs entirely in-memory and reads from SQLite:
-- No data duplication
-- No sync issues
-- Single source of truth
-- Simpler deployment
+YAML files are detected but not parsed. Any language can also be indexed through a language server configured under `[lsp.<language>]`; see [Add a language via LSP](lsp-languages.md).
 
-## Parsing: Tree-sitter
+tree-sitter parses real syntax trees, tolerates incomplete code, and exposes the same API for every grammar.
 
-We use tree-sitter for parsing source code:
+## File walking
 
-```rust
-// Create parser with language grammar
-let mut parser = Parser::new();
-parser.set_language(tree_sitter_rust::language())?;
+The `ignore` crate discovers files. ctx applies three layers of exclusions:
 
-// Parse source into AST
-let tree = parser.parse(source, None)?;
+1. 164 built-in patterns for non-source files (`--no-default-ignores` disables them)
+2. `.gitignore` (`--no-gitignore` disables it)
+3. `.contextignore` for project-specific exclusions
 
-// Query for patterns using S-expression syntax
-let query = Query::new(
-    tree_sitter_rust::language(),
-    r#"
-    (function_item 
-      name: (identifier) @func.name
-      body: (block) @func.body)
-    "#
-)?;
+Binary files are skipped.
 
-// Extract matches
-let mut cursor = QueryCursor::new();
-for match_ in cursor.matches(&query, tree.root_node(), source.as_bytes()) {
-    for capture in match_.captures {
-        let name = &query.capture_names()[capture.index as usize];
-        let text = capture.node.utf8_text(source.as_bytes())?;
-        // Process capture...
-    }
-}
-```
+## Incremental indexing
 
-### Why Tree-sitter?
+ctx stores a SHA-256 hash of each file's content. On the next run it re-parses only files whose hash changed and removes records for deleted files. Content hashes are more reliable than modification times. A no-op refresh also skips the unresolved-edge scan.
 
-1. **Fast** - Incremental parsing, handles large files
-2. **Accurate** - Real parser, not regex-based
-3. **Multi-language** - Same API for all languages
-4. **Error tolerant** - Parses incomplete/invalid code
-5. **Battle-tested** - Used by GitHub, Neovim, Zed, etc.
-
-### Language Crates
-
-| Language | Crate | Grammar |
-|----------|-------|---------|
-| Rust | `tree-sitter-rust` | Official |
-| TypeScript | `tree-sitter-typescript` | Official |
-| JavaScript | `tree-sitter-javascript` | Official |
-| Python | `tree-sitter-python` | Official |
-| Go | `tree-sitter-go` | Official |
-| YAML | `tree-sitter-yaml` | Community |
-| Solidity | `tree-sitter-solidity` | Community |
-
-## File Walking
-
-The `ignore` crate handles file discovery:
-
-```rust
-let mut builder = WalkBuilder::new(root);
-
-// Respect .gitignore
-builder.git_ignore(config.use_gitignore);
-builder.git_global(config.use_gitignore);
-builder.git_exclude(config.use_gitignore);
-
-// Add .contextignore support
-builder.add_custom_ignore_filename(".contextignore");
-
-// Build overrides for default ignores and -i flags
-let mut override_builder = OverrideBuilder::new(&root);
-for pattern in DEFAULT_IGNORES {
-    override_builder.add(&format!("!{}", pattern))?;
-}
-
-builder.overrides(override_builder.build()?);
-
-// Walk and collect files
-for entry in builder.build() {
-    if is_binary_file(&entry.path()) {
-        continue;
-    }
-    // Process file...
-}
-```
-
-### Three-Tier Ignore System
-
-1. **Built-in patterns** - 170+ common non-source patterns
-2. **`.gitignore`** - Standard git ignores (unless `--no-gitignore`)
-3. **`.contextignore`** - Project-specific exclusions
-
-## Incremental Indexing
-
-We track file changes using content hashes:
-
-```rust
-fn compute_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-fn needs_update(&self, path: &str, new_hash: &str) -> bool {
-    match self.get_file_hash(path)? {
-        Some(stored_hash) => stored_hash != new_hash,
-        None => true,  // File not in database
-    }
-}
-```
-
-Benefits:
-- Only changed files are re-parsed
-- Unchanged files are skipped instantly
-- Hash comparison is faster than timestamp checks
-- Content-based (not modified time which can be unreliable)
-
-## Source Compression
-
-We store compressed source for `ctx source` queries:
-
-```rust
-fn compress_source(content: &str) -> Vec<u8> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(content.as_bytes())?;
-    encoder.finish()?
-}
-```
-
-Typical compression: 60-70% size reduction.
+ctx also stores each file's source gzip-compressed in `files.source`, and each symbol's source in `symbols.source`.
 
 ## Symbol IDs
 
-Symbols are identified by a composite key:
+A symbol ID combines the file path, the parent (if any), the name, and usually the start line:
 
 ```
 file_path::name@line
+file_path::Parent::name@line
 ```
 
 Examples:
+
 ```
 src/auth/handler.ts::handleAuth@45
-src/parser/mod.rs::CodeParser::parse@86
-src/db/models.rs::Symbol::make_id@156
+src/server.go::Server::Start
 ```
 
-This ensures uniqueness even with:
-- Same function name in different files
-- Overloaded functions
-- Nested functions
-- Multiple impls of the same name
+Go methods include their receiver type (`A.String` and `B.String` are different symbols, with qualified names `A.String` and `B.String`). When two symbols share a name and line, such as a C struct and its typedef, the ID gets a `#kind` suffix.
 
-## Call Graph Extraction
+## Call graph extraction
 
-We extract calls using tree-sitter queries:
+Parsers record call sites as edges with the name as written (`target_name`), the line and column, and the source line as context. After parsing, the resolver binds `target_id` when it can identify the callee:
 
-```scheme
-; Rust function calls
-(call_expression
-  function: (identifier) @call.name) @call.expr
+- In order: an exact qualified-name match, a call context that names the type (`TypeScriptParser::new()`), a name defined once in the codebase, or a name defined once in the calling file.
+- C and C++ calls to a function declared in a header and defined in one `.c`/`.cc` file bind to the definition.
+- Rust method-call syntax (`x.find(..)`) is never bound to a free function with the same name.
+- Rust free functions passed as values (`spawn(worker::run_main)`) become `uses` edges, not calls, when exactly one function matches.
 
-; Method calls  
-(call_expression
-  function: (field_expression
-    field: (field_identifier) @method_call.name)) @method_call.expr
+Edges that stay unresolved keep `target_id` empty. Two optional steps can bind more of them:
 
-; Scoped calls (module::function)
-(call_expression
-  function: (scoped_identifier
-    name: (identifier) @scoped_call.name)) @scoped_call.expr
+- LSP hybrid mode asks a language server for definitions (`textDocument/definition`) after it reports that loading has finished.
+- `ctx judge edges` sends ambiguous calls to a decision model, which picks a same-named candidate or `external`. Answers are cached in `judgments` and re-applied offline on later runs. See [ctx judge](commands/judge.md).
+
+## Embeddings
+
+### Providers
+
+| Provider | Model | Dimension |
+|----------|-------|-----------|
+| `local` (default) | fastembed all-MiniLM-L6-v2, downloaded on first run | 384 |
+| `openai` | `text-embedding-3-small` (needs `OPENAI_API_KEY`) | 1536 |
+| `ollama` | `nomic-embed-text` by default (`OLLAMA_EMBED_MODEL`) | probed from the model |
+
+Each embedding row records its provider, model and dimension. Semantic commands refuse to rank a query against a corpus from another provider, model or dimension; rebuild it with `ctx embed --force --provider <provider>`.
+
+### Similarity search
+
+The `symbol_vectors` table is a sqlite-vec `vec0` index for 1536-dimension vectors. When vectors of that size are indexed, semantic search runs a KNN query inside SQLite:
+
+```sql
+SELECT symbol_id, distance
+FROM symbol_vectors
+WHERE embedding MATCH ?
+ORDER BY distance
+LIMIT ?
 ```
 
-Edges are stored with context:
-```rust
-edges.push(Edge {
-    source_id: caller_id,
-    target_id: resolved_target,  // If found in codebase
-    target_name: "processData",
-    kind: EdgeKind::Calls,
-    line: Some(15),
-    col: Some(4),
-    context: Some("let result = processData(input);"),
-});
-```
+ctx converts the L2 distance to a score with `1 / (1 + distance)`. For other dimensions (the default 384-dimension local model, most Ollama models), or when the extension can't load, ctx loads the stored vectors and ranks them by cosine similarity in Rust.
 
-## Embeddings Architecture
+## Output streaming
 
-### Provider Trait
+Context generation writes the tree first, then each file as soon as it is formatted, and flushes stdout after each file. `--no-stream` buffers the whole output instead.
 
-```rust
-pub trait EmbeddingProvider: Send + Sync {
-    fn name(&self) -> &str;
-    fn dimension(&self) -> usize;
-    fn embed(&self, text: &str) -> Result<Embedding>;
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
-}
-```
+## Performance
 
-### Local Provider (fastembed)
+### Latency budgets
 
-```rust
-pub struct LocalProvider {
-    model: TextEmbedding,
-}
-
-impl LocalProvider {
-    pub fn new() -> Result<Self> {
-        // Downloads ~90MB model on first run
-        let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
-        )?;
-        Ok(Self { model })
-    }
-}
-```
-
-### OpenAI Provider
-
-```rust
-pub struct OpenAIProvider {
-    api_key: String,
-    model: String,  // "text-embedding-3-small"
-}
-
-impl OpenAIProvider {
-    pub fn embed(&self, text: &str) -> Result<Embedding> {
-        // HTTPS request to OpenAI API
-        let response = self.client.post("https://api.openai.com/v1/embeddings")
-            .json(&json!({
-                "model": self.model,
-                "input": text
-            }))
-            .send()?;
-        // Parse response...
-    }
-}
-```
-
-### Similarity Search
-
-Embeddings are stored in a [**sqlite-vec**](https://github.com/asg017/sqlite-vec) `vec0` virtual
-table (`symbol_vectors`), so nearest-neighbour search runs as an **indexed vector query inside
-SQLite** rather than a full scan in application code:
-
-```rust
-// Vectors live in a vec0 virtual table created at index time:
-//   CREATE VIRTUAL TABLE symbol_vectors USING vec0(embedding float[384]);
-// Semantic search is then a KNN query against that index:
-pub fn semantic_search(
-    db: &Database,
-    query_embedding: &Embedding,
-    limit: usize,
-) -> Result<Vec<SearchResult>> {
-    // Uses the sqlite-vec `MATCH ... ORDER BY distance LIMIT k` KNN query
-    // when the extension is available (registered via init_vec_extension()).
-    db.vec_knn(&query_embedding.vector, limit)
-}
-```
-
-The sqlite-vec extension is registered at startup (`init_vec_extension()` in `src/db/schema.rs`). If
-it can't be loaded on a given platform, ctx falls back to loading the stored vectors and ranking them
-by cosine similarity in Rust — correct, just without the index:
-
-```rust
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot / (norm_a * norm_b)
-}
-```
-
-## Output Streaming
-
-Context generation streams output for efficiency:
-
-```rust
-pub fn stream_context(
-    root: &Path,
-    entries: &[FileEntry],
-    format: &OutputFormat,
-    include_tree: bool,
-    show_sizes: bool,
-) -> io::Result<ContextResult> {
-    let formatter = get_formatter(format);
-    
-    // Generate and output tree
-    if include_tree {
-        let tree = generate_tree(root, entries, show_sizes);
-        let tree_block = formatter.format_tree(&tree);
-        print!("{}", formatter.stream_start(Some(&tree_block)));
-    }
-    
-    // Stream each file
-    for entry in entries {
-        let content = fs::read_to_string(&entry.absolute_path)?;
-        let file_block = formatter.format_file(entry, &content);
-        print!("{}{}", formatter.separator(), file_block);
-        io::stdout().flush()?;  // Immediate output
-    }
-    
-    println!("{}", formatter.stream_end());
-    
-    Ok(ContextResult { ... })
-}
-```
-
-## Performance Characteristics
-
-### Enforced latency budgets
-
-These are not aspirations: each number is a budget enforced by the operational perf harness ([`perf/README.md`](https://github.com/agentis-tools/ctx/blob/main/perf/README.md)), which CI runs as an advisory `perf` job on every PR. Each scenario spawns a prebuilt `ctx` binary against a deterministic synthetic fixture of 2,000 files and takes the median of 5 timed runs:
+The perf harness ([`perf/README.md`](https://github.com/agentis-tools/ctx/blob/main/perf/README.md)) enforces these budgets. CI runs it as an advisory `perf` job on every pull request. Each scenario runs a prebuilt `ctx` binary against a deterministic synthetic fixture and takes the median of 5 timed runs:
 
 | Operation | Fixture | Budget |
 |-----------|---------|--------|
@@ -546,66 +285,43 @@ These are not aspirations: each number is a budget enforced by the operational p
 | `ctx sql` (aggregate query over `v1`) | 2,000 files | 500 ms |
 | `ctx index`, cold (full suite only) | ~150k LOC | 60 s |
 
-Peak memory (`ru_maxrss`) across the incremental-index, score, check, and map runs must stay below **300 MB**. CI runners get a 1.5x budget allowance (`CTX_PERF_BUDGET_SCALE`) because hosted runners are slower and noisier, and medians are additionally gated at 1.20x a committed per-runner-class baseline (`perf/baselines/`).
+Peak memory (`ru_maxrss`) across the incremental-index, score, check, and map runs must stay below 300 MB. CI multiplies budgets by 1.5 (`CTX_PERF_BUDGET_SCALE`) because hosted runners are slower and noisier. Medians must also stay within 1.20x of a committed per-runner-class baseline (`perf/baselines/`).
 
-### Storage
-- Symbols: ~500 bytes each (uncompressed)
-- Compressed source: ~30% of original size
-- Embeddings: ~1.5KB per symbol (384d) or ~6KB (1536d)
-- Typical project: 10-50MB database
+## Data flow
 
-## Design Principles
-
-1. **Single file** - One `.ctx/codebase.sqlite`, no complexity
-2. **Incremental** - Only do work when needed
-3. **Portable** - Standard formats, no daemon processes
-4. **Fast** - Rust + SQLite + DuckDB = speed
-5. **Accurate** - Real parsers, not regex hacks
-6. **Offline-first** - Local embeddings work without internet
-
-## Data Flow
-
-### Context Generation
+### Context generation
 
 ```
-User Request → File Patterns → Walker → Ignore Filters → 
-→ Binary Detection → Formatter → Stream Output
+patterns → walker → ignore rules → binary detection → formatter → streamed output
 ```
 
 ### Indexing
 
 ```
-Walker → Parser Selection → Tree-sitter Parse → 
-→ Symbol Extraction → Edge Extraction → 
-→ Hash Check → SQLite Insert → FTS Trigger Update
+walker → hash check → parser → symbols and edges → SQLite (one SAVEPOINT per file)
+       → edge resolution → optional LSP / judge → FTS triggers update
 ```
 
-### Query
+### Queries
 
 ```
-User Query → SQLite FTS5 (keyword) → Results
-     OR
-User Query → Load Embeddings → Cosine Similarity → Results
-     OR  
-User Query → DuckDB Recursive CTE → Graph Traversal → Results
+keyword search   → SQLite FTS5
+semantic search  → sqlite-vec KNN, or cosine similarity in Rust
+graph queries    → DuckDB recursive CTEs over the attached index
 ```
 
 ## Dependencies
 
-Key crates and their roles:
-
 | Crate | Purpose |
 |-------|---------|
 | `clap` | CLI argument parsing |
-| `ignore` | .gitignore-aware file walking |
-| `globset` | Glob pattern matching |
-| `rusqlite` | SQLite database operations |
-| `duckdb` | In-memory analytical queries |
-| `tree-sitter` | AST parsing |
-| `tree-sitter-*` | Language grammars |
-| `flate2` | gzip compression |
-| `sha2` | Content hashing |
-| `fastembed` | Local embedding generation |
-| `native-tls` | HTTPS for OpenAI API |
-| `serde/serde_json` | Serialization |
-| `notify` | File system watching |
+| `ignore`, `globset` | File walking and glob matching |
+| `rusqlite` (bundled SQLite), `sqlite-vec` | Index storage and vector search |
+| `duckdb` | Analytical queries (default feature) |
+| `tree-sitter`, `tree-sitter-*` | Parsing |
+| `solang-parser` | Solidity parsing |
+| `flate2`, `sha2` | Source compression and content hashing |
+| `fastembed` | Local embeddings |
+| `reqwest` | HTTP for OpenAI, Ollama, judge and self-update |
+| `notify` | Watch mode |
+| `rmcp` | MCP server (`mcp` feature) |

@@ -16,12 +16,12 @@ ctx similar "<query>" [PATTERNS]... [OPTIONS]
 
 ## Description
 
-The `similar` command searches the index for functions that already do what you are about to write. Run it before adding a new function: reusing (or extending) an existing implementation is the cheapest way to avoid duplication that `ctx duplicates` and `ctx score` would flag later.
+`ctx similar` searches the index for functions that already do what you are about to write. Run it before adding a new function. Reusing or extending an existing implementation avoids duplication that `ctx duplicates` and `ctx score` would flag later.
 
-By default the search is semantic (embedding-based, requires `ctx embed`); `--keyword` falls back to FTS5 keyword search over names, signatures, and doc comments.
+By default the search is semantic and needs embeddings from `ctx embed`. `--keyword` uses FTS5 keyword search over names, signatures, and doc comments instead.
 
-Optional positional patterns restrict candidates by file path. Literal files,
-directories, and globs are ORed together. With no patterns, `.` searches the
+Optional positional patterns restrict candidates by file path. ctx ORs literal files,
+directories, and globs together. With no patterns, `.` searches the
 whole indexed repository.
 
 ## Options
@@ -30,15 +30,15 @@ whole indexed repository.
 |--------|-------------|---------|
 | `--limit <N>` | Maximum number of results | 10 |
 | `--keyword` | Use keyword (FTS5) search instead of embeddings | false |
-| `--provider <local\|openai\|ollama>` | Embedding backend for the query (must match how the index was embedded); `--openai` is a deprecated alias for `--provider openai` | `local` |
+| `--provider <local\|openai\|ollama>` | Embedding backend for the query. It must match the provider that built the embeddings. `--openai` is a deprecated alias for `--provider openai` | `local` |
 | `--json` | Machine-readable output (global flag) | false |
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success (informational command) |
-| 2 | Operational error (missing index, missing embeddings for semantic mode) |
+| 2 | Operational error (missing index, missing or incompatible embeddings in semantic mode) |
 
 ## Examples
 
@@ -61,11 +61,12 @@ ctx similar "token counting" --json
 
 ## Caveats
 
-- Semantic mode requires embeddings: run `ctx embed` (local model, or `--provider openai`/`--provider ollama`) first; the query provider must match how the index was embedded. Without embeddings, use `--keyword`.
-- Results rank by meaning, not correctness - always read the candidate before reusing it.
+- Semantic mode requires embeddings. Run `ctx embed` first (local model by default, or `--provider openai` or `--provider ollama`). Without embeddings, use `--keyword`.
+- Semantic mode refuses to query a corpus built by a different provider, model, or dimension. Rebuild it with `ctx embed --force --provider <provider>`.
+- Results rank by meaning, not correctness. Read a candidate before you reuse it.
 
-## See Also
+## See also
 
-- [ctx duplicates](./duplicates.md) - structural (after-the-fact) duplicate detection
-- [Semantic Search in Code Intelligence](../code-intelligence.md)
-- [Quality Gates](../integrations/quality-gates.md)
+- [ctx duplicates](./duplicates.md): structural duplicate detection after the fact
+- [Semantic search in code intelligence](../code-intelligence.md)
+- [Quality gates](../integrations/quality-gates.md)

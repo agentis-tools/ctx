@@ -1,6 +1,6 @@
 # ctx hotspots
 
-Rank files and symbols by churn × size (default) or churn × complexity (`--signal complexity`) to find refactoring hotspots.
+Rank files and symbols by churn × size (default) or churn × complexity (`--signal complexity`) to find refactoring candidates.
 
 ## Synopsis
 
@@ -10,7 +10,11 @@ ctx hotspots [OPTIONS]
 
 ## Description
 
-The `hotspots` command combines git history (how often code changes) with index metrics (how complex it is) to rank the places where refactoring pays off most. Code that is both complex **and** frequently touched is where bugs cluster and where extraction into smaller modules helps first.
+`ctx hotspots` multiplies git churn (how often code changes) by a structural signal from the index and ranks the result. The default signal is size in lines: a symbol's span, or for a file the sum of its symbols' spans. `--signal complexity` uses the index's complexity metric instead.
+
+Size is the default because it predicted bug fixes better. In time-split backtests on 10 repositories (Rust, Python, TypeScript, Go, C, C++), size beat complexity at predicting which functions later got bug fixes in all 10, and churn × size beat churn × complexity in 9 of 10. Treat the ranking as a list of places to look, not as proof that the code is wrong.
+
+ctx v0.4.0 and earlier rank by churn × complexity and have no `--signal` option.
 
 ## Prerequisites
 
@@ -24,14 +28,15 @@ ctx index
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--since <SPEC>` | Git date spec bounding the churn window (e.g. `"6 months ago"`, `2025-01-01`) | `6 months ago` |
+| `--signal <SIGNAL>` | Structural signal multiplied with churn: `lines` or `complexity` | `lines` |
+| `--since <SPEC>` | Git date spec bounding the churn window (for example `"6 months ago"`, `2025-01-01`) | `6 months ago` |
 | `--limit <N>` | Maximum number of results | 20 |
-| `--by <SCOPE>` | Rank by `file` or `symbol` | `file` |
+| `--by <SCOPE>` | Rank by `file` or `symbol`. A symbol's churn is its file's churn | `file` |
 | `--min-churn <N>` | Ignore entries with fewer than N commits in the window | 2 |
 | `--against <REF>` | Only rank files changed relative to REF | none |
 | `--json` | Machine-readable output (global flag) | false |
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -43,6 +48,9 @@ ctx index
 ```bash
 # Top refactoring candidates over the last 6 months
 ctx hotspots
+
+# Rank by churn × complexity instead of churn × size
+ctx hotspots --signal complexity
 
 # Symbol-level hotspots in the last quarter
 ctx hotspots --since "3 months ago" --by symbol --limit 10
@@ -56,11 +64,12 @@ ctx hotspots --json
 
 ## Caveats
 
-- Churn counts commits per file from `git log`; renames are not followed, so a renamed file's history restarts.
-- Complexity uses the shared fan-in/fan-out formula from the index; dynamic calls and macro-generated code are not tracked.
+- Churn counts commits per file from `git log`. Renames are not followed, so a renamed file's history restarts.
+- With `--by symbol`, every symbol in a file gets the file's churn.
+- Complexity is the index's coupling formula (fan-out and same-file fan-in), not control-flow complexity. ctx does not track dynamic calls or macro-generated code.
 
-## See Also
+## See also
 
 - [ctx score](./score.md)
-- [ctx complexity in Code Intelligence](../code-intelligence.md)
-- [Quality Gates](../integrations/quality-gates.md)
+- [ctx complexity in code intelligence](../code-intelligence.md)
+- [Quality gates](../integrations/quality-gates.md)

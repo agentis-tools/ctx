@@ -6,24 +6,23 @@ sidebar_position: 5
 
 # Configuration
 
-ctx uses a minimal configuration approach based on ignore files. There are no complex config files to manage - just familiar gitignore-style patterns.
-
-## Overview
-
-ctx configuration consists of:
-1. **`.contextignore`** - Project-specific ignore patterns
-2. **`.gitignore`** - Standard git ignores (respected by default)
-3. **Built-in ignores** - 170+ common patterns (enabled by default)
-4. **Command-line flags** - Runtime overrides
-5. **Environment variables** - API keys for embeddings
+ctx reads these sources:
+1. `.contextignore`: project-specific ignore patterns
+2. `.gitignore`: standard git ignores (respected by default)
+3. 164 built-in ignore patterns (enabled by default)
+4. command-line flags
+5. environment variables: API keys, embedding hosts, and gate switches
+6. `.ctx/config.toml`: optional committed project defaults for embeddings, model-assisted edge
+   resolution, and language servers
+7. `.ctx/rules.toml`: the committed architecture policy for `ctx check` and `ctx score`
 
 ## .contextignore
 
-Create a `.contextignore` file in your project root to exclude files from both context generation and code intelligence indexing.
+A `.contextignore` file in the project root excludes files from both context generation and indexing.
 
 ### Syntax
 
-Uses the same syntax as `.gitignore`:
+It uses `.gitignore` syntax:
 
 ```gitignore
 # Comments start with #
@@ -46,7 +45,7 @@ build/
 !important.test.ts
 ```
 
-### Pattern Types
+### Pattern types
 
 | Pattern | Matches |
 |---------|---------|
@@ -58,9 +57,9 @@ build/
 | `**/tests/` | Any tests directory |
 | `!important.ts` | Include important.ts (negation) |
 
-### Common Patterns by Project Type
+### Common patterns by project type
 
-#### JavaScript/TypeScript Projects
+#### JavaScript and TypeScript projects
 
 ```gitignore
 # Dependencies (usually in .gitignore, but be explicit)
@@ -94,7 +93,7 @@ jest.config.js
 tsconfig.json
 ```
 
-#### Rust Projects
+#### Rust projects
 
 ```gitignore
 # Build output
@@ -110,7 +109,7 @@ benches/
 examples/
 ```
 
-#### Python Projects
+#### Python projects
 
 ```gitignore
 # Virtual environments
@@ -134,7 +133,7 @@ htmlcov/
 .ipynb_checkpoints/
 ```
 
-#### Solidity Projects
+#### Solidity projects
 
 ```gitignore
 # Foundry
@@ -152,7 +151,7 @@ lib/solmate/
 typechain-types/
 ```
 
-#### Monorepo Projects
+#### Monorepos
 
 ```gitignore
 # All node_modules
@@ -172,13 +171,14 @@ packages/*/coverage/
 apps/*/storybook-static/
 ```
 
-## Built-in Ignores
+## Built-in ignores
 
-ctx automatically excludes 170+ common non-source patterns. These are always applied unless you use `--no-default-ignores`.
+ctx excludes 164 common non-source patterns unless you pass `--no-default-ignores`. The categories
+below show a selection.
 
 ### Categories
 
-**Version Control:**
+Version control:
 ```
 .git/
 .svn/
@@ -188,7 +188,7 @@ ctx automatically excludes 170+ common non-source patterns. These are always app
 .husky/
 ```
 
-**IDE & Editor:**
+IDE and editor:
 ```
 .vscode/
 .idea/
@@ -199,7 +199,7 @@ ctx automatically excludes 170+ common non-source patterns. These are always app
 *.swo
 ```
 
-**Lock Files:**
+Lock files:
 ```
 *.lock
 *.lockb
@@ -213,7 +213,7 @@ Pipfile.lock
 bun.lockb
 ```
 
-**Dependencies & Build:**
+Dependencies and build:
 ```
 node_modules/
 vendor/
@@ -232,7 +232,7 @@ coverage/
 .nyc_output/
 ```
 
-**Cache & Temp:**
+Cache and temp:
 ```
 .cache/
 cache/
@@ -248,7 +248,7 @@ temp/
 .rollup.cache/
 ```
 
-**Environment & Secrets:**
+Environment and secrets:
 ```
 .env
 .env.*
@@ -257,7 +257,7 @@ secrets/
 private/
 ```
 
-**Binary Files - Images:**
+Binary files: images:
 ```
 *.png
 *.jpg
@@ -270,7 +270,7 @@ private/
 *.svg
 ```
 
-**Binary Files - Media:**
+Binary files: media:
 ```
 *.mp3
 *.mp4
@@ -282,7 +282,7 @@ private/
 *.m4v
 ```
 
-**Binary Files - System:**
+Binary files: system:
 ```
 *.so
 *.dll
@@ -292,7 +292,7 @@ private/
 *.bin
 ```
 
-**Archives:**
+Archives:
 ```
 *.tar
 *.gz
@@ -310,7 +310,7 @@ private/
 *.img
 ```
 
-**Compiled Files:**
+Compiled files:
 ```
 *.pyc
 *.pyo
@@ -322,7 +322,7 @@ private/
 *.ear
 ```
 
-**Data Files:**
+Data files:
 ```
 *.h5
 *.hdf5
@@ -336,7 +336,7 @@ private/
 *.npy
 ```
 
-**Font Files:**
+Font files:
 ```
 *.woff
 *.woff2
@@ -345,21 +345,21 @@ private/
 *.otf
 ```
 
-**Security Files:**
+Security files:
 ```
 *.crt
 *.pem
 *.key
 ```
 
-**System Files:**
+System files:
 ```
 .DS_Store
 Thumbs.db
 Desktop.ini
 ```
 
-**Backup & Temp:**
+Backup and temp:
 ```
 *.tmp
 *.temp
@@ -370,14 +370,14 @@ Desktop.ini
 *.rej
 ```
 
-**Documentation Builds:**
+Documentation builds:
 ```
 docs/_build/
 site/
 _site/
 ```
 
-**Package Artifacts:**
+Package artifacts:
 ```
 *.whl
 *.egg-info/
@@ -385,15 +385,15 @@ _site/
 *.dist-info/
 ```
 
-### Viewing the Full List
+### The full list
 
 See [src/default_ignores.rs](https://github.com/agentis-tools/ctx/blob/main/src/default_ignores.rs) for the complete list.
 
-## Command-Line Configuration
+## Command-line options
 
-### Ignore Patterns
+### Ignore patterns
 
-Add patterns on the fly:
+Add patterns for one run:
 
 ```bash
 # Context generation
@@ -403,11 +403,11 @@ ctx -i "*.test.ts" -i "fixtures/" src/
 ctx index -i "*.test.ts" -i "fixtures/"
 ```
 
-Multiple `-i` flags are combined with other ignore sources.
+`-i` can be repeated and adds to the other ignore sources.
 
-### Include Patterns (Index Only)
+### Include patterns (index only)
 
-Limit indexing to specific patterns:
+Limit indexing to matching files:
 
 ```bash
 # Only index Rust files in src/
@@ -418,14 +418,19 @@ ctx index -p "src/**/*.ts" -p "lib/**/*.ts"
 
 # Mix globs and literal paths
 ctx index -p "src/**/*.rs" -p "Cargo.toml"
+
+# Positional paths scope the same way as -p
+ctx index src
 ```
 
-Include patterns support:
-- Glob patterns: `src/**/*.rs`, `*.ts`
-- Literal paths: `src/`, `lib/main.rs`
-- Absolute paths: `/home/user/project/src/**/*.rs`
+Include patterns accept:
+- globs: `src/**/*.rs`, `*.ts`
+- literal paths: `src/`, `lib/main.rs`
+- absolute paths: `/home/user/project/src/**/*.rs`
 
-### Disabling Ignores
+If an explicit scope matches no files, `ctx index` exits non-zero and leaves the index unchanged.
+
+### Disabling ignores
 
 ```bash
 # Context generation
@@ -441,18 +446,19 @@ ctx --no-gitignore --no-default-ignores src/
 ctx index --no-gitignore --no-default-ignores
 ```
 
-Note: `.contextignore` is always respected if present.
+ctx always applies `.contextignore` when it exists.
 
-### Output Format
+### Output format
 
 ```bash
 ctx --format xml src/      # Default
 ctx --format markdown src/ # Markdown
 ctx --format md src/       # Alias for markdown
 ctx --format plain src/    # Plain text
+ctx --format json src/     # JSON
 ```
 
-### Other Options
+### Other options
 
 ```bash
 ctx --show-sizes src/      # Show file sizes in tree
@@ -461,41 +467,63 @@ ctx --no-stream src/       # Buffer output before printing
 ctx --stats src/           # Print statistics
 ```
 
-## Environment Variables
-
-ctx uses minimal environment variables:
+## Environment variables
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `OPENAI_API_KEY` | OpenAI embeddings via `ctx embed --provider openai` | Only for the OpenAI provider |
-| `OLLAMA_HOST` | Ollama server URL (default `http://localhost:11434`) | Only for the Ollama provider |
-| `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) | Only for the Ollama provider |
-| `OLLAMA_API_KEY` | Optional bearer token for a remote/authenticated Ollama host | No |
-| `CTX_LSP_REGISTRY_BASE_URL` | Alternate base URL for the `ctx lsp` community registry (mirrors/testing) | No |
+| `OPENAI_API_KEY` | OpenAI embeddings (`--provider openai`) | Only for the OpenAI provider |
+| `OLLAMA_HOST` | Ollama server URL (default `http://localhost:11434`) | No |
+| `OLLAMA_EMBED_MODEL` | Ollama embedding model (default `nomic-embed-text`) | No |
+| `OLLAMA_API_KEY` | Bearer token for a remote Ollama host that requires one | No |
+| `JEV_API_KEY` | API key for `ctx judge edges` and `[judge] edges = true`; never read from a config file | Only for model-assisted edge resolution |
+| `CTX_GATE_BLOCKING` | `1` makes the generated Stop hooks block on failed gates | No |
+| `CTX_GATE_LOG` | Appends one JSONL record per `ctx score` gate evaluation (`1` or `true` writes `.ctx/gate-log.jsonl`; another value is a path) | No |
+| `CTX_SQL_MEMORY_LIMIT` | DuckDB memory limit for `ctx sql` (default `512MB`) | No |
+| `CTX_NO_UPDATE_CHECK` | Any non-empty value turns off the passive update notice | No |
+| `CTX_LSP_REGISTRY_BASE_URL` | Alternate base URL for the `ctx lsp` community registry (mirrors, testing) | No |
 
 ### Project config (`.ctx/config.toml`)
 
-Per-project defaults live in an optional, **committed** `.ctx/config.toml` so a
-team shares one setup instead of passing flags/env vars every time. It
-configures the embedding backend and registers language servers for LSP-backed
-indexing:
+Per-project defaults live in an optional, committed `.ctx/config.toml`. It sets the embedding
+backend used by `ctx embed`, `semantic`, `smart`, and `similar`, turns on model-assisted edge
+resolution, and registers language servers for LSP-backed indexing:
 
 ```toml
 [embedding]
-provider = "ollama"            # local (default) | openai | ollama
-model = "qwen3-embedding:8b"   # Ollama/OpenAI model name
-# host = "http://localhost:11434"  # Ollama only
+provider = "ollama"                 # local (default) | openai | ollama
+model = "qwen3-embedding:8b"        # Ollama/OpenAI model name
+# host = "http://localhost:11434"   # Ollama only
 ```
 
-Resolution is always **CLI flag > environment variable > `.ctx/config.toml` >
-built-in default**, so the file never overrides an explicit request. `.ctx/` is
-otherwise git-ignored; the repo's `.gitignore` keeps `config.toml` and `rules.toml` tracked.
+Resolution order is CLI flag, then environment variable, then `.ctx/config.toml`, then the built-in
+default, so the file never overrides an explicit flag. ctx ignores a malformed config file with a
+warning. After changing the provider or model, rebuild the embeddings, because vectors from
+different models are not interchangeable:
+
+```bash
+ctx embed --force
+```
+
+### Model-assisted edge resolution (`[judge]`)
+
+```toml
+[judge]
+edges = true            # run `ctx judge edges` after every `ctx index` (default false)
+min_confidence = 0.7    # answers below this leave the edge unchanged (default 0.7)
+# model = "jev-latest"  # model id sent to the decision API (default jev-latest)
+```
+
+With `edges = true`, each `ctx index` asks the TypeSafe Jev model to resolve call edges whose name
+matches more than one in-repo function, then rewrites the edge. Answers are cached in the index,
+so a reindex of unchanged code makes no network calls. The API key comes only from `JEV_API_KEY`;
+without it, `ctx index` applies cached answers and makes no calls. See
+[`ctx judge`](commands/judge.md) and the [privacy policy](privacy.md) for what is sent.
 
 ### Language servers (`[lsp.<language>]`)
 
-Each `[lsp.<language>]` table registers a stdio language server that `ctx index` uses to
-extract (or refine) code intelligence for the files it claims. The table key is the language
-name stored on indexed files and symbols:
+Each `[lsp.<language>]` table registers a stdio language server. `ctx index` uses it to extract or
+refine code intelligence for the files it claims. The table key is the language name stored on
+indexed files and symbols:
 
 ```toml
 [lsp.kotlin]
@@ -511,33 +539,34 @@ args = ["--stdio"]
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `command` | string | — (required) | Server executable; resolved via `PATH` unless it contains a path separator |
+| `command` | string | none (required) | Server executable; resolved via `PATH` unless it contains a path separator |
 | `args` | array of strings | `[]` | Arguments passed to the server |
 | `extensions` | array of strings | built-in set for built-in language names | File extensions (without dots) this server claims; required for non-built-in language names |
 | `root_markers` | array of strings | `[]` | Workspace-root marker files; informational, reported by `ctx lsp doctor` |
 | `capabilities` | array of strings | `[]` | Capabilities the server is expected to advertise; checked by `ctx lsp doctor` |
-| `backend` | string | `"hybrid"` | `"tree-sitter"`, `"lsp"`, or `"hybrid"` — see [Add a language via LSP](lsp-languages.md#backend-modes) |
+| `backend` | string | `"hybrid"` | `"tree-sitter"`, `"lsp"`, or `"hybrid"`; see [Add a language via LSP](lsp-languages.md#backend-modes) |
 | `initialization_options` | any value | unset | Passed verbatim as LSP `initializationOptions` |
 | `env` | table of strings | `{}` | Extra environment variables for the server process |
 | `timeout_ms` | integer | `10000` | Per-request timeout in milliseconds |
+| `ready_timeout_ms` | integer | `300000` | How long cross-file resolution waits for the server to finish loading the workspace (`experimental/serverStatus` or the end of all `$/progress` reports); rust-analyzer answers `null` to definition requests until then |
 | `source` | string | unset | Provenance written by `ctx lsp add` (`"registry"` marks the entry as registry-managed); accepted and ignored by the indexer |
 | `source_server` | string | unset | Provenance written by `ctx lsp add`: the registry server name the entry was installed from |
 
-Entries installed with [`ctx lsp add`](commands/lsp.md) carry the `source` / `source_server`
-provenance keys so `ctx lsp update` can refresh them later; entries without
-`source = "registry"` are treated as hand-written and never touched by those commands.
+Entries installed with [`ctx lsp add`](commands/lsp.md) carry the `source` and `source_server`
+provenance keys, which `ctx lsp update` uses to refresh them. `ctx lsp update` never changes an
+entry without `source = "registry"`.
 
-`[lsp.*]` configuration is **never fatal** to indexing:
+`[lsp.*]` configuration never makes indexing fail:
 
-- An invalid block (empty `command`, or missing `extensions` for a non-built-in language name)
-  is skipped with a stderr warning; the remaining blocks and the built-in grammars keep working.
-- Unknown keys are tolerated, so configs written by newer ctx versions still load.
-- When two blocks claim the same extension, the first block in table-key order wins and a
-  warning names both blocks.
-- A configured server that is missing or crashes degrades gracefully at index time: warning on
-  stderr, tree-sitter fallback for built-in languages, exit code unaffected.
+- ctx skips an invalid block (empty `command`, or no `extensions` for a non-built-in language
+  name) with a warning on stderr. The other blocks and the built-in grammars keep working.
+- Unknown keys are allowed, so configs written by newer ctx versions still load.
+- When two blocks claim the same extension, the first block in table-key order wins and a warning
+  names both.
+- If a configured server is missing or crashes, `ctx index` prints a warning, falls back to
+  tree-sitter for built-in languages, and keeps its exit code.
 
-Without any `[lsp.*]` block the LSP subsystem is completely inert — no server is ever spawned.
+Without any `[lsp.*]` block, ctx never starts a language server.
 
 ### Architecture policy (`.ctx/rules.toml`)
 
@@ -550,8 +579,8 @@ ctx check --list
 ctx check --against origin/main
 ```
 
-`ctx harness init` never overwrites an existing `rules.toml`, even with `--force`. See the
-[`ctx check` rules-file reference](commands/check.md#rules-file) for layers, forbidden
+`ctx harness init` never overwrites an existing `rules.toml`, even with `--force`. The
+[`ctx check` rules-file reference](commands/check.md#rules-file) documents layers, forbidden
 dependencies, allowed dependents, metric limits, and frozen paths.
 
 ### Embedding providers
@@ -559,12 +588,12 @@ dependencies, allowed dependents, metric limits, and frozen paths.
 `ctx embed`, `ctx semantic`, `ctx smart`, and `ctx similar` accept
 `--provider <local|openai|ollama>` (or set a default in `.ctx/config.toml`):
 
-- **`local`** (default) — [fastembed](https://github.com/Anush008/fastembed-rs)
-  `all-MiniLM-L6-v2`, 384-dim. Offline; downloads a ~90 MB model on first run.
-- **`openai`** — `text-embedding-3-small`, 1536-dim. Requires `OPENAI_API_KEY`.
-- **`ollama`** — any local [Ollama](https://ollama.com) embedding model
-  (`nomic-embed-text`, `mxbai-embed-large`, `qwen3-embedding:8b`, …). Fully
-  offline and free; dimension is derived from the model.
+- `local` (default): [fastembed](https://github.com/Anush008/fastembed-rs) `all-MiniLM-L6-v2`,
+  384 dimensions. Runs offline after downloading a model of about 90 MB on first use.
+- `openai`: `text-embedding-3-small`, 1536 dimensions. Requires `OPENAI_API_KEY`.
+- `ollama`: any [Ollama](https://ollama.com) embedding model (`nomic-embed-text`,
+  `mxbai-embed-large`, `qwen3-embedding:8b`, and others). Runs on your own Ollama server; ctx
+  reads the dimension from the model.
 
 ```bash
 # Ollama (start the daemon and pull a model first)
@@ -577,35 +606,35 @@ OLLAMA_EMBED_MODEL=qwen3-embedding:8b ctx embed --provider ollama
 OLLAMA_HOST=http://gpu-box:11434 ctx embed --provider ollama
 ```
 
-> Embeddings from different providers/models occupy different vector spaces, so
-> switching providers or models requires re-embedding (`ctx embed --provider … --force`).
-> Semantic commands fail with exit code 2 when the query provider/model/dimension
-> doesn't match the index.
+Vectors from different providers or models are not comparable, so switching requires
+`ctx embed --provider <provider> --force`, which clears the stored corpus before rebuilding.
+Semantic commands exit with code 2 when the query provider, model, or dimension does not match the
+stored corpus, and `ctx smart` also exits 2 when embeddings are missing or incomplete.
 
 `--openai` is still accepted as a deprecated alias for `--provider openai`.
 
 ### Setting OPENAI_API_KEY
 
-**Temporary (current session):**
+For the current shell session:
 ```bash
 export OPENAI_API_KEY=sk-...
-ctx embed --openai
+ctx embed --provider openai
 ```
 
-**Permanent (add to shell profile):**
+Permanently, in your shell profile:
 ```bash
 # ~/.bashrc or ~/.zshrc
 export OPENAI_API_KEY=sk-...
 ```
 
-**Per-command:**
+For one command:
 ```bash
-OPENAI_API_KEY=sk-... ctx embed --openai
+OPENAI_API_KEY=sk-... ctx embed --provider openai
 ```
 
-## Database Location
+## Database location
 
-The code intelligence database is stored at:
+The index lives at:
 
 ```
 your-project/
@@ -613,38 +642,30 @@ your-project/
     └── codebase.sqlite
 ```
 
-This single file contains:
-- Symbol definitions
-- Call graph edges
-- Compressed source code
-- FTS5 search index
-- Embedding vectors (if generated)
+This one file holds:
+- symbol definitions
+- call graph edges
+- compressed source code
+- the FTS5 search index
+- embedding vectors, once generated
+- cached `ctx judge` answers, if used
 
-### Git Recommendations
+### Git
 
-**Ignore (Recommended for most projects):**
-
-Add to `.gitignore`:
+Most projects should ignore the index. Add to `.gitignore`:
 ```gitignore
 .ctx/*
 !.ctx/config.toml
 !.ctx/rules.toml
 ```
 
-This is recommended because:
-- Database can be rebuilt with `ctx index`
-- Avoids large binary files in git
-- Each developer can have their own index
-- Project defaults and architecture policy remain shared
+`ctx index` rebuilds the database, it is a large binary file, and each developer can keep their
+own. The project defaults and architecture policy stay shared.
 
-**Commit (For shared code intelligence):**
+Commit `.ctx/` instead if you want to share one index across the team or CI, or skip the rebuild on
+new clones.
 
-Don't ignore `.ctx/` if you want to:
-- Share the index across the team
-- Include code intelligence in CI/CD
-- Avoid rebuild time for new clones
-
-### Backing Up
+### Backing up
 
 ```bash
 # Simple backup
@@ -657,39 +678,40 @@ cp -r .ctx/ ".ctx-backup-$(date +%Y%m%d)"
 ### Resetting
 
 ```bash
-# Remove database and re-index
+# Remove the database and reindex
+# (this also deletes config.toml and rules.toml if you keep them in .ctx/)
 rm -rf .ctx/
 ctx index
 ```
 
-Or use the force flag:
+`ctx index --force` clears only the database and rebuilds it:
 ```bash
 ctx index --force
 ```
 
-## Configuration Precedence
+## Ignore precedence
 
-When determining whether to include a file:
+ctx applies the ignore sources in this order:
 
-1. **Built-in ignores** - Applied first (unless `--no-default-ignores`)
-2. **`.gitignore`** - Applied second (unless `--no-gitignore`)
-3. **`.contextignore`** - Applied third (always respected)
-4. **Command-line `-i` patterns** - Applied last
+1. built-in ignores (unless `--no-default-ignores`)
+2. `.gitignore` (unless `--no-gitignore`)
+3. `.contextignore` (always)
+4. command-line `-i` patterns
 
-A file is excluded if **any** of these rules match.
+A file is excluded if any of these sources excludes it.
 
 ## Tips
 
-### Debugging Ignore Patterns
+### Debugging ignore patterns
 
-If a file isn't appearing:
+If a file is missing from the output:
 
-1. Check if it matches built-in patterns:
+1. Check whether a built-in pattern matches it:
    ```bash
    ctx --no-default-ignores src/
    ```
 
-2. Check if it's in `.gitignore`:
+2. Check whether `.gitignore` excludes it:
    ```bash
    ctx --no-gitignore src/
    ```
@@ -701,27 +723,27 @@ If a file isn't appearing:
 
 ### Performance
 
-Excluding more files = faster indexing/context generation:
+Fewer files means faster indexing and context generation:
 
 ```gitignore
-# Good: exclude large vendored dependencies
+# Large vendored dependencies
 lib/forge-std/
 lib/openzeppelin-*/
 
-# Good: exclude generated files
+# Generated files
 *.generated.ts
 typechain-types/
 
-# Good: exclude test fixtures
+# Test fixtures
 fixtures/
 __mocks__/
 ```
 
-### Project Templates
+### Team templates
 
-Create a standard `.contextignore` for your team:
+Share one `.contextignore` across your projects:
 
 ```bash
-# Copy from an existing project
+# Copy it from an existing project
 cp path/to/good/.contextignore .contextignore
 ```

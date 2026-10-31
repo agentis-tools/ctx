@@ -98,7 +98,7 @@ Add metadata that the trusted workflow can compare with its own event:
 ```
 
 Give the artifact a run-specific name, set a short retention period, and fail when expected files
-are missing. Never let the publisher choose “the latest artifact” by an attacker-controlled name.
+are missing. Never let the publisher choose "the latest artifact" by an attacker-controlled name.
 
 ## 4. Publish only trusted code
 

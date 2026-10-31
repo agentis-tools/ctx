@@ -11,7 +11,7 @@ ctx snapshot backfill --since <REF> [--every <N>] [--churn-window <SPEC>] [--jso
 
 ## Description
 
-Point-in-time commands like [`ctx score`](./score.md) answer "did *this change* make the code better or worse?". `ctx snapshot` answers the longitudinal version: **is the codebase trending better or worse over weeks and months?** Each run exports the current commit's per-file and per-symbol metrics, near-duplicate pairs, and capture metadata as one Parquet partition:
+Point-in-time commands like [`ctx score`](./score.md) answer "did this change make the code better or worse?". `ctx snapshot` answers the question over time: is the codebase getting better or worse over weeks and months? Each run exports the current commit's per-file and per-symbol metrics, near-duplicate pairs, and capture metadata as one Parquet partition:
 
 ```text
 .ctx/snapshots/sha=<sha>/symbols.parquet     per-symbol metrics
@@ -20,11 +20,11 @@ Point-in-time commands like [`ctx score`](./score.md) answer "did *this change* 
 .ctx/snapshots/sha=<sha>/meta.parquet        capture metadata (1 row)
 ```
 
-Accumulate partitions over time (one per commit), then query them with [`ctx sql --snapshots`](#querying-snapshots-with-ctx-sql) to plot duplication, violation, and hotspot trends across the history.
+Collect partitions over time (one per commit), then query them with [`ctx sql --snapshots`](#querying-snapshots-with-ctx-sql) to plot duplication, violation, and hotspot trends across the history.
 
-A bare `ctx snapshot` captures HEAD: the index is refreshed incrementally first (same as `ctx score`), then the four Parquet files are written to a staging directory and moved into place with an atomic rename — readers never observe a half-written partition. If a partition for HEAD's sha already exists the command is a no-op (exit 0); `--force` rewrites it. When the working tree is dirty, a stderr warning notes that the snapshot is labeled with HEAD's sha but reflects the working tree.
+A bare `ctx snapshot` captures HEAD. It first refreshes the index incrementally (as `ctx score` does), then writes the four Parquet files to a staging directory and moves them into place with an atomic rename, so readers never see a half-written partition. If a partition for HEAD's sha already exists, the command does nothing and exits 0. `--force` rewrites it. When the working tree is dirty, a stderr warning says that the snapshot carries HEAD's sha but reflects the working tree.
 
-Snapshot capture requires the `duckdb` feature (on by default); builds without it exit 2.
+Snapshot capture requires the `duckdb` feature (on by default). Builds without it exit 2.
 
 ## Options
 
@@ -38,23 +38,23 @@ Snapshot capture requires the `duckdb` feature (on by default); builds without i
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--since <REF>` | Starting commit/ref — the walk covers `REF..HEAD` first-parent, plus `REF` itself when it names a commit | required |
-| `--every <N>` | Sample every Nth commit; sampling counts backwards from HEAD so the newest commit is always included | 1 |
+| `--since <REF>` | Starting commit or ref. The walk covers `REF..HEAD` first-parent, plus `REF` itself when it names a commit | required |
+| `--every <N>` | Sample every Nth commit. Sampling counts backwards from HEAD, so the newest commit is always included | 1 |
 
 ## Partition contents
 
-Every row of every table is denormalized with the partition stamp, so partitions union cleanly across commits with a single `read_parquet('.ctx/snapshots/*/*.parquet')` glob per table:
+Every row of every table carries the partition stamp, so one `read_parquet('.ctx/snapshots/*/*.parquet')` glob per table unions the partitions across commits:
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `commit_sha` | VARCHAR | Full sha of the snapshotted commit |
 | `committed_at` | TIMESTAMP | Committer date of that commit, normalized to UTC |
 
-### `symbols.parquet` — one row per symbol
+### `symbols.parquet`: one row per symbol
 
-Stamp columns plus `id`, `name`, `qualified_name`, `kind`, `file`, `line_start`, `line_end`, `is_public`, `complexity`, `fan_in`, `fan_out` — the same columns (and types) as the `v1.symbols` SQL view, minus `doc`.
+Stamp columns plus `id`, `name`, `qualified_name`, `kind`, `file`, `line_start`, `line_end`, `is_public`, `complexity`, `fan_in`, `fan_out`. These are the columns and types of the `v1.symbols` SQL view, minus `doc`.
 
-### `files.parquet` — one row per file
+### `files.parquet`: one row per file
 
 Stamp columns plus:
 
@@ -68,7 +68,7 @@ Stamp columns plus:
 | `churn_commits` | INTEGER | Commits touching the file within the churn window |
 | `violation_count` | INTEGER | Architecture-rule violations in the file (0 when `.ctx/rules.toml` is absent) |
 
-### `dup_pairs.parquet` — one row per near-duplicate pair
+### `dup_pairs.parquet`: one row per near-duplicate pair
 
 Stamp columns plus:
 
@@ -81,7 +81,7 @@ Stamp columns plus:
 
 Pairs use the same detector and thresholds as [`ctx score`](./score.md)'s `new_duplication` (Jaccard >= 0.85, >= 50 tokens).
 
-### `meta.parquet` — one row per partition
+### `meta.parquet`: one row per partition
 
 Stamp columns plus:
 
@@ -94,7 +94,7 @@ Stamp columns plus:
 
 ## Backfilling history
 
-`ctx snapshot backfill --since <REF>` captures partitions for historical commits so trend queries have a past to look at. It walks the **first-parent** range `REF..HEAD` oldest-first (including `REF` itself when it resolves to a commit), checks each missing commit out into a randomized private temporary `git worktree`, snapshots it into *this* repository's `.ctx/snapshots/`, and removes the worktree again — your working tree is never touched.
+`ctx snapshot backfill --since <REF>` captures partitions for past commits so trend queries have history to work with. It walks the first-parent range `REF..HEAD` oldest first (including `REF` itself when it resolves to a commit). For each missing commit it checks the commit out into a private temporary `git worktree` with a random name, snapshots it into this repository's `.ctx/snapshots/`, and removes the worktree. It never touches your working tree.
 
 ```bash
 ctx snapshot backfill --since v0.1.0             # every first-parent commit since v0.1.0
@@ -103,9 +103,9 @@ ctx snapshot backfill --since main~200 --every 5 # sample every 5th commit
 
 Caveats:
 
-- **First-parent only.** Commits that live on merged side branches are not walked; a squash/merge-based history is covered completely, a fast-forward-heavy one is not.
-- **The churn window's lower bound is relative to now.** `--churn-window` is a `git log --since` date spec, and git resolves relative specs like `"90 days ago"` against the wall clock — even in backfill mode, where only the *upper* bound is anchored to each commit's date. For old commits, a relative window therefore spans more than 90 days of their history; pass an absolute date if that matters to your analysis.
-- **Per-commit failures are skipped, not fatal.** A commit that fails to index or export is logged to stderr and the walk continues; the final report covers the captured and already-existing partitions only. Existing partitions are always skipped (no `--force` in backfill mode).
+- Backfill walks first-parent commits only. It skips commits on merged side branches, so it covers a squash or merge-commit history completely but not a history with many fast-forwards.
+- The churn window's lower bound is relative to now. `--churn-window` is a `git log --since` date spec, and git resolves relative specs like `"90 days ago"` against the wall clock, even in backfill mode, where only the upper bound is anchored to each commit's date. For old commits a relative window therefore spans more than 90 days of their history. Pass an absolute date if that matters to your analysis.
+- A commit that fails to index or export is logged to stderr and skipped, and the walk continues. The final report covers only captured and already existing partitions. Backfill always skips existing partitions (it has no `--force`).
 
 ## JSON output
 
@@ -166,7 +166,7 @@ Caveats:
 }
 ```
 
-When `skipped_existing` is true the partition was left untouched and its row counts are reported as zero — they are not re-read from the existing Parquet files. See [JSON Output](../json-output.md).
+When `skipped_existing` is true, ctx left the partition untouched and reports its row counts as zero. It does not re-read them from the existing Parquet files. See [JSON output](../json-output.md).
 
 ## Querying snapshots with `ctx sql`
 
@@ -180,11 +180,11 @@ GROUP BY commit_sha
 ORDER BY committed_at;"
 ```
 
-The `snap.*` column reference and more canned trend queries (duplication trend, hotspot mass) live in the SQL schema reference — run `ctx sql --schema`, or see [SQL Schema (v1)](https://docs.agentis.tools/sql-schema) on the docs site.
+The `snap.*` column reference and more ready-made trend queries (duplication trend, hotspot mass) are in the SQL schema reference. Run `ctx sql --schema`, or see [SQL schema (v1)](https://docs.agentis.tools/docs/sql-schema) on the docs site.
 
 ## Snapshots in CI (data branch)
 
-To build the trend history automatically, capture one partition per merge to your default branch and append it to an orphan *data branch*, keeping metric history out of your main history. ctx's own repository does this in `.github/workflows/snapshot.yml`: on every push to `main` it runs `ctx index && ctx snapshot --json`, checks the `ctx-snapshots` orphan branch out into a linked worktree, copies the new partition in, and pushes (runs are serialized via a concurrency group, and re-runs on the same sha are no-ops). Analyze the accumulated history from any machine:
+To build the trend history automatically, capture one partition per merge to your default branch and append it to an orphan data branch, which keeps metric history out of your main history. ctx's own repository does this in `.github/workflows/snapshot.yml`. On every push to `main` it runs `ctx index && ctx snapshot --json`, checks the `ctx-snapshots` orphan branch out into a linked worktree, copies the new partition in, and pushes. A concurrency group serializes the runs, and a re-run on the same sha does nothing. Analyze the history from any machine:
 
 ```bash
 git fetch origin ctx-snapshots
@@ -192,7 +192,7 @@ git worktree add ../snapshots ctx-snapshots
 ctx sql --snapshots=../snapshots/snapshots "SELECT ..."
 ```
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -211,9 +211,9 @@ ctx snapshot backfill --since main~20 --every 5
 ctx sql --snapshots "SELECT commit_sha, count(*) FROM snap.dup_pairs GROUP BY commit_sha"
 ```
 
-## See Also
+## See also
 
-- [ctx score](./score.md) — the point-in-time quality delta the snapshots accumulate over history
-- [ctx duplicates](./duplicates.md) — the near-duplicate detector behind `dup_pairs.parquet`
-- [ctx check](./check.md) — the architecture rules behind `violation_count`
-- [JSON Output](../json-output.md)
+- [ctx score](./score.md): the point-in-time quality delta
+- [ctx duplicates](./duplicates.md): the near-duplicate detector behind `dup_pairs.parquet`
+- [ctx check](./check.md): the architecture rules behind `violation_count`
+- [JSON output](../json-output.md)

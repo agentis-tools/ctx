@@ -58,8 +58,8 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
 **Ground — the right context, in:**
 - **Smart context** — `ctx smart "<task>"` ranks by meaning + call-graph relevance, then fits
   whole files to a token budget.
-- **Token control** — `--count-only --encoding cl100k_base` measures file content; `--max-tokens`
-  budgets selected content, while rendered wrappers and the optional tree add output tokens.
+- **Token control** — `--count-only --encoding cl100k_base` measures file content; `ctx smart --max-tokens`
+  is a hard limit on the complete rendered context, wrappers and tree included.
 
 **Govern — guardrails, on what changes:**
 - **Architecture rules** — `ctx check` enforces `.ctx/rules.toml` (layers, forbidden deps, limits)
@@ -67,13 +67,15 @@ ctx builds the world model once (`ctx index`), then uses it to both ground and g
 - **Composite gate** — `ctx score --fail-on` folds check violations, new duplication, and
   complexity/fan-out deltas into one pass/fail scorecard.
 - **Impact, hotspots, duplicates** — `ctx query impact` (blast radius), `ctx hotspots`
-  (churn × complexity), MinHash `ctx duplicates --fail-on-found`.
+  (churn × size by default, `--signal complexity` for churn × complexity), MinHash
+  `ctx duplicates --fail-on-found`.
 - **In the agent loop** — `ctx harness init --target claude` wires check/score/map into Claude Code
   hooks; exit codes are the contract (0 clean / 1 findings / 2 error).
-- *Forthcoming (not yet shipped): `ctx sql` repo-committed SQL gates (`.ctx/gates/*.sql`), trend snapshots.*
+- **SQL gates and trends** — `ctx sql --fail-on-rows --file .ctx/gates/<name>.sql` runs
+  repo-committed SQL gates; `ctx snapshot` captures per-commit Parquet metrics for trend queries.
 
-**Agent-native** — `ctx serve --mcp` exposes the whole world model as MCP tools; `--output json`
-everywhere. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
+**Agent-native** — `ctx serve --mcp` exposes the world model as eight MCP tools (built with the
+`mcp` feature, which release binaries don't include); `--json` on every command. **Local by default** — Rust, one SQLite file, local embeddings; the v0.4.0 tag
 indexed 2,701 symbols and 18,730 extracted edges in this repository. Configured providers may
 have their own local or network dependencies.
 
@@ -97,7 +99,7 @@ semantic, agent-first, local.*
 
 ## Proof points (ctx v0.4.0 tag on the ctx repo; see the reproducible commands below)
 
-- **Ground:** the v0.4.0 tag at `1425cfc5a5ba96802a7adf7a9271bd1f1c3c1dda` reports **502,856
+- **Ground:** the v0.4.0 tag (commit `0f4eea866055baa4e3e0aa4740a4b7e179a5779f`) reports **502,856
   file-content tokens** from
   `ctx --count-only --encoding cl100k_base` at the repository root; wrappers and the tree are
   excluded.
