@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- `ctx index` no longer panics on a Python docstring whose indentation contains
+  a non-ASCII space such as U+00A0. The docstring dedent counted indentation in
+  bytes and could slice inside a character, which aborted the whole index (for
+  example on astral-sh/ruff). Indentation is now counted in characters; ASCII
+  docstrings clean up exactly as before.
 - `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
   DuckDB update the previous debug fallback would have printed the new
   decimal type's internals.
