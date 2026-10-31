@@ -2,7 +2,7 @@
 set -u
 ctx harness compat --require "{{CTX_VERSION}}" >/dev/null 2>&1 || { cat >/dev/null 2>&1 || true; exit 0; }
 cat >/dev/null 2>&1 || true
-result=$(ctx score --against {{DEFAULT_BRANCH}} --fail-on "check_violations>0,new_duplication>0" 2>&1)
+result=$(ctx score --against {{DEFAULT_BRANCH}} --fail-on "check_violations>0" 2>&1)
 status=$?
 escaped=$(printf '%s' "$result" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS="\\n"}{print}')
 if [ "$status" -eq 1 ]; then

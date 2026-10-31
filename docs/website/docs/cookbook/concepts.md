@@ -72,4 +72,4 @@ can mean no finding, no applicable policy, incomplete coverage, or stale evidenc
 
 Cookbook measurements are pinned to the named ctx commit or release and the date stated in the
 recipe. Your repository and a newer ctx build will produce different totals. The durable part of a
-recipe is the evidence loop, command contract, and interpretation method—not the sample number.
+recipe is the evidence loop, command contract, and interpretation method, not the sample number.

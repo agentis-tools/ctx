@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -40,7 +40,7 @@ jobs:
           test "$tagged_commit" = "$GITHUB_SHA"
           git merge-base --is-ancestor "$tagged_commit" origin/main
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
           components: rustfmt, clippy
@@ -94,11 +94,11 @@ jobs:
             features: "--no-default-features"
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
           targets: ${{ matrix.target }}
@@ -144,7 +144,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -216,10 +216,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
       - name: Verify plugin/binary lockstep and package plugins
@@ -242,7 +242,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -267,19 +267,29 @@ jobs:
             "ctx-${version}-1.x86_64.rpm"
           )
           while IFS= read -r checksum; do
-            (cd "$(dirname "$checksum")" && sha256sum -c "$(basename "$checksum")")
+            (cd "$(dirname "$checksum")" && sha256sum --strict --check "$(basename "$checksum")")
           done < <(find downloaded -type f -name '*.sha256' | LC_ALL=C sort)
-          (cd downloaded/ctx-agent-plugins && sha256sum -c plugin-SHA256SUMS)
+          test -f downloaded/ctx-agent-plugins/plugin-SHA256SUMS
+          (cd downloaded/ctx-agent-plugins && sha256sum --strict --check plugin-SHA256SUMS)
           for artifact in "${expected[@]}"; do
             mapfile -t matches < <(find downloaded -type f -name "$artifact")
             test "${#matches[@]}" -eq 1
+            # Plugins are covered by plugin-SHA256SUMS and the .deb/.rpm by the
+            # combined native-packages.sha256 (both verified above); every other
+            # artifact ships its own .sha256 sidecar.
+            if [[ "$artifact" != ctx-claude-plugin-*.zip && "$artifact" != ctx-codex-plugin-*.zip \
+                  && "$artifact" != *.deb && "$artifact" != *.rpm ]]; then
+              sidecar="${matches[0]}.sha256"
+              test -f "$sidecar"
+              (cd "$(dirname "$sidecar")" && sha256sum --strict --check "$(basename "$sidecar")")
+            fi
             cp "${matches[0]}" "dist/$artifact"
           done
           find downloaded -type f -name '*.sha256' -exec cp {} dist/ \;
           cp downloaded/ctx-agent-plugins/plugin-SHA256SUMS dist/
           (
             cd dist
-            find . -maxdepth 1 -type f -printf '%f\n' \
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
               | LC_ALL=C sort \
               | xargs sha256sum > SHA256SUMS
           )
@@ -320,10 +330,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
       - name: Publish agentis-ctx
@@ -340,7 +350,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -357,12 +367,12 @@ jobs:
           path: reviewed-notes
 
       - name: Attest release artifact provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/SHA256SUMS
 
       - name: Create GitHub Release from reviewed changelog notes
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           body_path: reviewed-notes/release-notes.md
           files: |

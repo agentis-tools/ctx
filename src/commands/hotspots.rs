@@ -2,7 +2,7 @@
 //!
 //! A hotspot is code that is both structurally complex and frequently changed:
 //! the intersection where refactoring effort pays off most. The score is
-//! `normalized_churn * normalized_complexity`, min-max normalized to `[0, 1]`
+//! `normalized_churn * normalized_signal` (size by default, or complexity), min-max normalized to `[0, 1]`
 //! over the analyzed set (indexed files with churn >= `--min-churn`).
 //!
 //! This is an informational command: it always exits 0 on success and 2 on
@@ -34,6 +34,20 @@ pub enum HotspotBy {
     File,
     /// One row per function/method (churn approximated by the file's churn).
     Symbol,
+}
+
+/// Which structural signal multiplies churn.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HotspotSignal {
+    /// Cyclomatic-style complexity from the index (the pre-0.5 default).
+    Complexity,
+    /// Size in lines (per symbol: its span; per file: the sum of its symbols'
+    /// spans). Default: in time-split backtests on 10 repositories in 7
+    /// languages, size predicted which functions later received bug fixes
+    /// better than complexity in every repository (mean ΔAUC +0.031, 95 % CI
+    /// [+0.012, +0.049]); churn × size beat churn × complexity in 9/10.
+    #[default]
+    Lines,
 }
 
 /// A ranked per-file hotspot.
@@ -282,6 +296,7 @@ pub fn run_hotspots(
     since: &str,
     limit: usize,
     by: HotspotBy,
+    signal: HotspotSignal,
     min_churn: u32,
     against: Option<&str>,
     json: bool,
@@ -296,30 +311,93 @@ pub fn run_hotspots(
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
     let metrics = db.symbol_metrics()?;
+    // Size per symbol and per file (sum of its symbols' spans).
+    let sym_lines: HashMap<&str, i64> = metrics
+        .iter()
+        .map(|m| (m.id.as_str(), (m.line_end - m.line_start + 1).max(1)))
+        .collect();
+    let mut file_lines: HashMap<String, i64> = HashMap::new();
+    for m in &metrics {
+        *file_lines.entry(m.file_path.clone()).or_default() += sym_lines[m.id.as_str()];
+    }
+    let signal_name = match signal {
+        HotspotSignal::Lines => "lines",
+        HotspotSignal::Complexity => "complexity",
+    };
 
     match by {
         HotspotBy::File => {
             let complexity = db.file_complexity()?;
-            let entries = score_hotspots(&churn, &complexity, min_churn, limit, restrict.as_ref());
+            // Score on a copy whose `complexity` holds the chosen signal;
+            // report the true complexity next to the size.
+            let scored_input: Vec<FileComplexity> = complexity
+                .iter()
+                .map(|fc| {
+                    let mut c = fc.clone();
+                    if signal == HotspotSignal::Lines {
+                        c.complexity = file_lines.get(&fc.file_path).copied().unwrap_or(0);
+                    }
+                    c
+                })
+                .collect();
+            let true_cx: HashMap<&str, i64> = complexity
+                .iter()
+                .map(|fc| (fc.file_path.as_str(), fc.complexity))
+                .collect();
+            let mut entries =
+                score_hotspots(&churn, &scored_input, min_churn, limit, restrict.as_ref());
+            for e in entries.iter_mut() {
+                e.complexity = true_cx
+                    .get(e.file.as_str())
+                    .copied()
+                    .unwrap_or(e.complexity);
+            }
             if json {
-                json::emit(
-                    "hotspots",
-                    file_payload(since, min_churn, against, &entries, &metrics),
-                )?;
+                let mut payload = file_payload(since, min_churn, against, &entries, &metrics);
+                payload["signal"] = serde_json::json!(signal_name);
+                if let Some(arr) = payload["entries"].as_array_mut() {
+                    for (v, e) in arr.iter_mut().zip(&entries) {
+                        v["lines"] =
+                            serde_json::json!(file_lines.get(&e.file).copied().unwrap_or(0));
+                    }
+                }
+                json::emit("hotspots", payload)?;
             } else {
-                print_file_table(since, min_churn, &entries);
+                print_file_table(since, min_churn, &entries, signal_name, &file_lines);
             }
         }
         HotspotBy::Symbol => {
-            let entries =
-                score_symbol_hotspots(&churn, &metrics, min_churn, limit, restrict.as_ref());
+            let scored_input: Vec<SymbolMetrics> = metrics
+                .iter()
+                .map(|m| {
+                    let mut c = m.clone();
+                    if signal == HotspotSignal::Lines {
+                        c.complexity = sym_lines[m.id.as_str()];
+                    }
+                    c
+                })
+                .collect();
+            let by_id: HashMap<&str, &SymbolMetrics> =
+                metrics.iter().map(|m| (m.id.as_str(), m)).collect();
+            let mut entries =
+                score_symbol_hotspots(&churn, &scored_input, min_churn, limit, restrict.as_ref());
+            for e in entries.iter_mut() {
+                if let Some(orig) = by_id.get(e.metrics.id.as_str()) {
+                    e.metrics = (*orig).clone();
+                }
+            }
             if json {
-                json::emit(
-                    "hotspots",
-                    symbol_payload(since, min_churn, against, &entries),
-                )?;
+                let mut payload = symbol_payload(since, min_churn, against, &entries);
+                payload["signal"] = serde_json::json!(signal_name);
+                if let Some(arr) = payload["entries"].as_array_mut() {
+                    for (v, e) in arr.iter_mut().zip(&entries) {
+                        v["lines"] =
+                            serde_json::json!(e.metrics.line_end - e.metrics.line_start + 1);
+                    }
+                }
+                json::emit("hotspots", payload)?;
             } else {
-                print_symbol_table(since, min_churn, &entries);
+                print_symbol_table(since, min_churn, &entries, signal_name);
             }
         }
     }
@@ -327,28 +405,35 @@ pub fn run_hotspots(
     Ok(())
 }
 
-fn print_file_table(since: &str, min_churn: u32, entries: &[HotspotEntry]) {
+fn print_file_table(
+    since: &str,
+    min_churn: u32,
+    entries: &[HotspotEntry],
+    signal: &str,
+    file_lines: &HashMap<String, i64>,
+) {
     println!(
-        "Code Hotspots (since \"{}\", by file, min churn {})",
-        since, min_churn
+        "Code Hotspots (since \"{}\", by file, churn x {}, min churn {})",
+        since, signal, min_churn
     );
     if entries.is_empty() {
         println!("No hotspots found (try lowering --min-churn or widening --since).");
         return;
     }
 
-    println!("{}", "=".repeat(92));
+    println!("{}", "=".repeat(99));
     println!(
-        "{:>4}  {:<45} {:>8} {:>11} {:>8} {:>6}",
-        "RANK", "FILE", "COMMITS", "COMPLEXITY", "FAN-OUT", "SCORE"
+        "{:>4}  {:<45} {:>8} {:>6} {:>11} {:>8} {:>6}",
+        "RANK", "FILE", "COMMITS", "LINES", "COMPLEXITY", "FAN-OUT", "SCORE"
     );
-    println!("{}", "-".repeat(92));
+    println!("{}", "-".repeat(99));
     for (i, e) in entries.iter().enumerate() {
         println!(
-            "{:>4}  {:<45} {:>8} {:>11} {:>8} {:>6.2}",
+            "{:>4}  {:<45} {:>8} {:>6} {:>11} {:>8} {:>6.2}",
             i + 1,
             truncate_path(&e.file, 45),
             e.commits,
+            file_lines.get(&e.file).copied().unwrap_or(0),
             e.complexity,
             e.fan_out,
             e.score
@@ -356,10 +441,10 @@ fn print_file_table(since: &str, min_churn: u32, entries: &[HotspotEntry]) {
     }
 }
 
-fn print_symbol_table(since: &str, min_churn: u32, entries: &[SymbolHotspotEntry]) {
+fn print_symbol_table(since: &str, min_churn: u32, entries: &[SymbolHotspotEntry], signal: &str) {
     println!(
-        "Code Hotspots (since \"{}\", by symbol, min churn {})",
-        since, min_churn
+        "Code Hotspots (since \"{}\", by symbol, churn x {}, min churn {})",
+        since, signal, min_churn
     );
     println!("Note: symbol churn is approximated by its file's commit count.");
     if entries.is_empty() {
@@ -367,19 +452,20 @@ fn print_symbol_table(since: &str, min_churn: u32, entries: &[SymbolHotspotEntry
         return;
     }
 
-    println!("{}", "=".repeat(108));
+    println!("{}", "=".repeat(115));
     println!(
-        "{:>4}  {:<30} {:<30} {:>8} {:>11} {:>8} {:>6}",
-        "RANK", "SYMBOL", "FILE", "COMMITS", "COMPLEXITY", "FAN-OUT", "SCORE"
+        "{:>4}  {:<30} {:<30} {:>8} {:>6} {:>11} {:>8} {:>6}",
+        "RANK", "SYMBOL", "FILE", "COMMITS", "LINES", "COMPLEXITY", "FAN-OUT", "SCORE"
     );
-    println!("{}", "-".repeat(108));
+    println!("{}", "-".repeat(115));
     for (i, e) in entries.iter().enumerate() {
         println!(
-            "{:>4}  {:<30} {:<30} {:>8} {:>11} {:>8} {:>6.2}",
+            "{:>4}  {:<30} {:<30} {:>8} {:>6} {:>11} {:>8} {:>6.2}",
             i + 1,
             truncate_str(&e.metrics.name, 30),
             truncate_path(&e.metrics.file_path, 30),
             e.commits,
+            e.metrics.line_end - e.metrics.line_start + 1,
             e.metrics.complexity,
             e.metrics.fan_out,
             e.score

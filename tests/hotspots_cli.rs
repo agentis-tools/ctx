@@ -86,6 +86,8 @@ fn test_hot_file_outranks_single_dimension_files() {
         &[
             "hotspots",
             "--json",
+            "--signal",
+            "complexity",
             "--since",
             "20 years ago",
             "--min-churn",
@@ -94,6 +96,7 @@ fn test_hot_file_outranks_single_dimension_files() {
     );
     let envelope = parse_envelope(&out);
     assert_eq!(envelope["command"], "hotspots");
+    assert_eq!(envelope["data"]["signal"], "complexity");
 
     let data = &envelope["data"];
     assert_eq!(data["by"], "file");
@@ -129,6 +132,7 @@ fn test_hot_file_outranks_single_dimension_files() {
             "complexity",
             "fan_out",
             "file",
+            "lines",
             "score",
             "symbols"
         ]
@@ -157,6 +161,8 @@ fn test_by_symbol_ranks_symbols_with_file_churn() {
         &[
             "hotspots",
             "--json",
+            "--signal",
+            "complexity",
             "--by",
             "symbol",
             "--since",
@@ -189,6 +195,7 @@ fn test_by_symbol_ranks_symbols_with_file_churn() {
             "complexity",
             "fan_out",
             "file",
+            "lines",
             "score",
             "symbol"
         ]
@@ -277,4 +284,41 @@ fn test_min_churn_excludes_low_churn_files_end_to_end() {
     assert_eq!(files.len(), 2);
     assert!(files.contains(&"hot.rs"));
     assert!(files.contains(&"churn_only.rs"));
+}
+
+#[test]
+fn test_default_signal_is_lines_and_output_reports_both() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = ranking_fixture(dir.path());
+    let out = ctx_in(
+        &repo.root,
+        &[
+            "hotspots",
+            "--json",
+            "--by",
+            "symbol",
+            "--since",
+            "20 years ago",
+            "--min-churn",
+            "1",
+        ],
+    );
+    let envelope = parse_envelope(&out);
+    let data = &envelope["data"];
+    assert_eq!(data["signal"], "lines");
+    let entries = data["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    for e in entries {
+        assert!(e["lines"].as_i64().unwrap() >= 1);
+        assert!(
+            e["complexity"].as_i64().is_some(),
+            "true complexity is still reported"
+        );
+    }
+    // Scores are ordered by churn x lines.
+    let scores: Vec<f64> = entries
+        .iter()
+        .map(|e| e["score"].as_f64().unwrap())
+        .collect();
+    assert!(scores.windows(2).all(|w| w[0] >= w[1]));
 }

@@ -67,6 +67,18 @@ fn run_init(
     };
     let actions = harness::write_plan(root, &plan, force)?;
 
+    if std::env::var("CTX_GATE_BLOCKING").ok().as_deref() == Some("1") {
+        let hooks = harness::doctor::blocking_duplication_hooks(root);
+        if !hooks.is_empty() {
+            eprintln!(
+                "warning: CTX_GATE_BLOCKING=1 and {} stop hook{} still gate on new_duplication ({}); remove that condition or disable blocking mode while calibrating the heuristic",
+                hooks.len(),
+                if hooks.len() == 1 { "" } else { "s" },
+                hooks.join(", ")
+            );
+        }
+    }
+
     // Human-facing status always goes to stderr so stdout stays reserved
     // for model-bound / machine-bound content (snippet, guidance, JSON).
     for (rel, action) in &actions {

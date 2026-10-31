@@ -14,6 +14,7 @@ pub mod harness;
 pub mod hotspots;
 pub mod index;
 pub mod interactive;
+pub mod judge;
 pub mod lsp;
 pub mod map;
 pub mod query;
@@ -39,6 +40,7 @@ pub use index::{merge_include_patterns, run_index, IndexConfig};
 #[cfg(feature = "mcp")]
 pub use interactive::run_serve;
 pub use interactive::run_shell;
+pub use judge::run_judge;
 pub use lsp::run_lsp;
 pub use map::{run_map, MapFormat};
 pub use query::run_query;

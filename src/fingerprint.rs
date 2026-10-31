@@ -460,27 +460,43 @@ pub fn find_near_duplicates(
         }
     }
 
+    // --against filter: at least one endpoint must be in a changed file.
+    // Only pairs with a changed endpoint are enumerated, so a bucket without
+    // changed members costs nothing. Enumerating every pair of every bucket
+    // and filtering afterwards made `ctx score` quadratic in the size of the
+    // largest bucket of the whole repository, not of the change (#23, #96).
+    let in_changed: Option<Vec<bool>> = changed_files.map(|changed| {
+        fingerprints
+            .iter()
+            .map(|fp| changed.contains(&fp.file_path))
+            .collect()
+    });
     let mut candidates: HashSet<(usize, usize)> = HashSet::new();
+    let mut insert = |i: usize, j: usize| {
+        if i != j {
+            candidates.insert(if i < j { (i, j) } else { (j, i) });
+        }
+    };
     for members in buckets.values() {
         if members.len() < 2 {
             continue;
         }
-        for (n, &i) in members.iter().enumerate() {
-            for &j in &members[n + 1..] {
-                let pair = if i < j { (i, j) } else { (j, i) };
-                if pair.0 != pair.1 {
-                    candidates.insert(pair);
+        match &in_changed {
+            None => {
+                for (n, &i) in members.iter().enumerate() {
+                    for &j in &members[n + 1..] {
+                        insert(i, j);
+                    }
+                }
+            }
+            Some(in_changed) => {
+                for &i in members.iter().filter(|&&i| in_changed[i]) {
+                    for &j in members {
+                        insert(i, j);
+                    }
                 }
             }
         }
-    }
-
-    // --against filter: at least one endpoint must be in a changed file.
-    if let Some(changed) = changed_files {
-        candidates.retain(|&(i, j)| {
-            changed.contains(&fingerprints[i].file_path)
-                || changed.contains(&fingerprints[j].file_path)
-        });
     }
 
     // Verify candidates with exact Jaccard over re-derived shingle sets.

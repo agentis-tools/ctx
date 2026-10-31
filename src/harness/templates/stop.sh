@@ -30,7 +30,7 @@ cat > /dev/null 2>&1 || true
 #   CTX_GATE_LOG        -- consumed by `ctx score` itself (not this script):
 #                          when set, each gate evaluation is appended to a
 #                          local JSONL log (default .ctx/gate-log.jsonl).
-ctx score --against {{DEFAULT_BRANCH}} --fail-on "check_violations>0,new_duplication>0"
+ctx score --against {{DEFAULT_BRANCH}} --fail-on "check_violations>0"
 score_status=$?
 if [ "$score_status" -eq 1 ]; then
     if [ "${CTX_GATE_BLOCKING:-0}" = "1" ]; then
