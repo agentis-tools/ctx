@@ -1,48 +1,53 @@
 # ctx diff
 
-Generate context for changed files with their related dependencies.
+Generate context for changed files and the code they affect.
 
 ## Synopsis
 
 ```bash
-ctx diff [REF] [PATTERNS]... [OPTIONS]
+ctx diff [REVISION] [PATTERNS]... [OPTIONS]
 ```
 
 ## Description
 
-The `diff` command identifies changed files compared to a git reference and includes context about the symbols and dependencies affected by those changes. This is useful for:
+`ctx diff` finds the files that changed relative to a git revision and adds the symbols and files those changes affect. Use it to:
 
-- **Code review** - Get context for reviewing a PR or commit
-- **Change impact** - Understand what's affected by your changes
-- **Pre-commit** - Verify changes before committing
+- get context for reviewing a pull request or commit,
+- see what your changes affect,
+- check changes before you commit them.
 
-Optional positional patterns restrict both changed files and graph-expanded
-context. Literal files, directories, and globs are ORed together. Renames match
-when either the old or new path is in scope; deletions remain visible in the
+Optional positional patterns restrict both the changed files and the graph-expanded
+context. ctx ORs literal files, directories, and globs together. A rename matches
+when either the old or the new path is in scope, and deletions stay visible in the
 change summary. With no patterns, `.` includes all changed paths.
 
 ## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `REF` | Git reference to compare against | HEAD |
+| `REVISION` | Git revision to compare the working tree against | `HEAD~1` |
 | `--max-tokens <N>` | Maximum tokens in output | 8000 |
-| `--depth <N>` | Depth for finding related symbols | 2 |
-| `--summary` | Include a change summary on stderr | false |
-| `--count-only` | Count selected, budgeted files instead of streaming contents | false |
-| `--encoding <ENCODING>` | Tokenizer used for budgeting and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
+| `--depth <N>` | Call graph depth for related symbols | 1 |
+| `--changes-only` | Only include changed files, without related context | false |
+| `--staged` | Compare staged changes instead of a revision | false |
+| `--summary` | Print a change summary on stderr | false |
+| `-f, --format <FORMAT>` | Output format (xml, markdown, md, plain, json) | xml |
+| `--show-sizes` | Show file sizes in the project tree | false |
+| `--no-tree` | Disable the project tree in output | false |
+| `--count-only` | Count the selected, budgeted files instead of streaming contents | false |
+| `--encoding <ENCODING>` | Tokenizer for budgeting and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
 | `--stats` | Print count timing to stderr with `--count-only` | false |
 
 ## Examples
 
-### Changes Since Last Commit
+### Changes since the previous commit
 
 ```bash
-# See what changed since HEAD
+# Compare the working tree with HEAD~1 (the default)
 ctx diff
 ```
 
-### Compare with Branch
+### Compare with a branch
 
 ```bash
 # Changes compared to main branch
@@ -55,87 +60,90 @@ ctx diff origin/main
 ctx diff origin/main "src/**/*.rs" docs/configuration.md
 ```
 
-### Review a Specific Commit
+### Staged changes
 
 ```bash
-# Changes in the last commit
-ctx diff HEAD~1
+# Only the changes you have staged
+ctx diff --staged
 ```
 
-### Token-Limited Output
+### Token-limited output
 
 ```bash
-# Limit output for smaller context windows
+# Limit output for smaller context windows, or measure that selected pack
 ctx diff --max-tokens 4000
-
-# Count the files selected by that budget without streaming them
 ctx diff --max-tokens 4000 --count-only --encoding o200k_base
 ```
 
-With `--count-only`, the count summary is written to stdout. `--summary` and
-`--stats` remain diagnostics on stderr, so stdout can be piped independently.
-
-### Summary Mode
+### Summary mode
 
 ```bash
-# Just see what changed without file contents
-ctx diff --summary
+# Count selected files on stdout while retaining the summary on stderr
+ctx diff --summary --changes-only --no-tree --count-only
 ```
 
-Output:
-```
-Changed files (5):
-  M src/auth.rs       - 3 symbols affected
-  M src/handlers.rs   - 2 symbols affected
-  A src/cache.rs      - new file
-  D src/legacy.rs     - removed
+`--summary` adds diagnostics on stderr and does not suppress context by itself.
+`--count-only` suppresses streamed contents and writes the count summary to
+stdout. `--stats` adds timing on stderr. The same `--encoding` drives both
+budget selection and the reported count.
 
-Related symbols:
-  - authenticate (src/auth.rs:42) - modified
-  - handleLogin (src/handlers.rs:15) - calls authenticate
-  - UserSession (src/models.rs:8) - used by authenticate
+Summary output:
+```
+Changes in main: 3 files changed
+
+Changed files:
+  src/auth.rs (+12 -3)
+  src/cache.rs (+40 -0)
+  src/legacy.rs (deleted)
+
+Affected symbols:
+  authenticate (function) in src/auth.rs
+  Cache (struct) in src/cache.rs
+
+Context: 5 files (3120 tokens)
 ```
 
-### Deep Dependency Analysis
+### Deeper dependency analysis
 
 ```bash
-# Find more related context
+# Follow the call graph further for related context
 ctx diff main --depth 4
 ```
 
-## How It Works
+## How it works
 
-1. **Detect Changes**: Uses `git diff` to find modified, added, and deleted files
-2. **Parse Hunks**: Identifies which lines/symbols changed
-3. **Find Related**: Follows call graph to find dependent symbols
-4. **Generate Context**: Outputs changed files plus relevant context
+1. ctx runs `git diff --name-status` to find added, modified, renamed, and deleted files.
+2. It parses the hunks to find which symbols changed.
+3. It follows the call graph to related symbols, up to `--depth`.
+4. It writes the changed files plus related context, within `--max-tokens`.
 
 ## Output
 
 The output includes:
-- Changed files with their full contents
-- Related files containing symbols affected by the changes
-- Context limited to `--max-tokens`
+- changed files with their full contents,
+- related files containing symbols affected by the changes (unless you pass `--changes-only`),
+- no more than `--max-tokens` in total.
 
-## Integration with Code Review
+## Pull request context
+
+`ctx review` builds on `diff` to fetch a GitHub pull request and generate its
+context. It requires the GitHub CLI (`gh`), installed and authenticated:
 
 ```bash
 # Get context for a GitHub PR
 ctx review 123
-
-# This is equivalent to:
-ctx diff $(gh pr view 123 --json baseRefName -q .baseRefName)
 ```
+
+`ctx review` accepts `--repo <owner/name>`, `--include-comments`, `--max-tokens`,
+`--depth`, `--changes-only`, and `--summary`.
 
 ## Tips
 
-- Use `--summary` first to understand scope of changes
-- Increase `--depth` for refactoring tasks
-- Combine with `--format markdown` for PR descriptions
-- Use in CI to generate change documentation
+- Run with `--summary` first to see the scope of the change.
+- Increase `--depth` for refactoring tasks.
+- Combine with `--format markdown` for PR descriptions.
 
-## See Also
+## See also
 
-- [ctx review](./review.md) - GitHub PR context helper
-- [ctx smart](./smart.md) - Task-based file selection
-- [ctx query impact](../code-intelligence.md#impact-analysis) - Impact analysis
+- [ctx smart](./smart.md): task-based file selection
+- [Impact analysis](../code-intelligence.md#impact-analysis): what a change affects

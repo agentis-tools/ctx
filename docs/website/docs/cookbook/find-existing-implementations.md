@@ -11,8 +11,8 @@ or embedded inside a neighboring workflow. Finding it is not merely a search pro
 decide whether the existing semantics, ownership boundary, tests, and consumers make it safe to
 reuse.
 
-This recipe was exercised against ctx itself using the hypothetical task **“verify generated plugin
-files by comparing embedded checksums.”** The investigation found an existing complete workflow,
+This recipe was exercised against ctx itself using the hypothetical task **"verify generated plugin
+files by comparing embedded checksums."** The investigation found an existing complete workflow,
 not just a similarly named helper.
 
 ## Quickest version
@@ -40,7 +40,7 @@ Never overwrite user-modified or foreign files silently.
 ```
 
 This description leaves room to discover a better repository-native abstraction. A query such as
-“add `verify_plugin_checksum()`” prematurely assumes both a name and a new function boundary.
+"add `verify_plugin_checksum()`" prematurely assumes both a name and a new function boundary.
 
 ## 1. Search semantically for the behavior
 
@@ -57,9 +57,9 @@ ctx similar \
 The project `.ctx/config.toml` can provide the provider, so the flag is optional when the configured
 model matches the index. The worked query ranked these existing functions highly:
 
-- `recorded_checksum` — extracts an embedded `ctx:checksum` value;
-- `content_checksum` — hashes content while excluding checksum-header lines;
-- `Database::needs_update` — a related hash-comparison idea, but for index freshness rather than
+- `recorded_checksum`: extracts an embedded `ctx:checksum` value;
+- `content_checksum`: hashes content while excluding checksum-header lines;
+- `Database::needs_update`: a related hash-comparison idea, but for index freshness rather than
   generated-file ownership.
 
 The third result is conceptually similar but semantically wrong for this task. Similarity generates
@@ -76,7 +76,7 @@ ctx similar \
 ```
 
 In ctx itself, that query ranked the existing private `classify` function first even though its
-actual name contains neither “verify” nor “generated file.”
+actual name contains neither "verify" nor "generated file."
 
 ## 2. Use keyword mode with repository vocabulary
 
@@ -89,7 +89,7 @@ ctx similar "content checksum" --keyword --limit 10 --json
 
 These queries found `recorded_checksum`, `content_checksum`, `finalize`, and their tests without
 contacting an embedding provider. The shorter terms worked better than the original sentence
-“verify generated plugin files by comparing embedded checksums,” whose generic words promoted
+"verify generated plugin files by comparing embedded checksums," whose generic words promoted
 plugin planners above the checksum implementation.
 
 Vary the query deliberately:

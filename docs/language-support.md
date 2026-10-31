@@ -1,27 +1,29 @@
-# Language Support
+# Language support
 
-ctx uses tree-sitter for parsing, providing accurate symbol extraction across multiple programming languages. This page details what's extracted from each language and how relationships are tracked. Languages without a built-in grammar can be added declaratively through any stdio language server — see [Languages beyond the built-in set (LSP)](#languages-beyond-the-built-in-set-lsp).
+ctx parses source with tree-sitter (Solidity with `solang-parser`). This page lists what ctx extracts from each language and which relationships it records. To index a language without a built-in parser, register a stdio language server; see [Languages beyond the built-in set (LSP)](#languages-beyond-the-built-in-set-lsp).
 
-## Supported Languages Overview
+## Supported languages
 
-| Language | Extensions | Symbol Extraction | Edge Tracking | Status |
-|----------|-----------|-------------------|---------------|--------|
-| Rust | `.rs` | Full | Calls, Implements, Imports | Full |
-| TypeScript | `.ts` | Full | Calls, Extends, Implements, Imports | Full |
-| TSX | `.tsx` | Full | Calls, Extends, Implements, Imports | Full |
-| JavaScript | `.js`, `.mjs`, `.cjs` | Full | Calls, Extends, Imports | Full |
-| JSX | `.jsx` | Full | Calls, Extends, Imports | Full |
-| Python | `.py`, `.pyi` | Full | Calls, Extends, Imports | Full |
-| Go | `.go` | Full | Calls, Imports | Full |
-| C | `.c`, `.h` when selected as C | Full | Calls, Includes | Full |
-| C++ | `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`, `.ipp`, `.tpp`, `.h` when selected as C++ | Full | Calls, Includes | Full |
-| Zig | `.zig` | Full | Calls, Imports | Full |
-| Solidity | `.sol` | Full | Calls | Full |
-| YAML | `.yaml`, `.yml` | File tracking only | N/A | Partial |
+| Language | Extensions | Symbols | Edges | Status |
+|----------|-----------|---------|-------|--------|
+| Rust | `.rs` | Full | Calls, Implements, Uses | Full |
+| TypeScript | `.ts` | Full | Calls, Extends, Implements | Full |
+| TSX | `.tsx` | Full | Calls, Extends, Implements | Full |
+| JavaScript | `.js`, `.mjs`, `.cjs` | Full | Calls, Extends | Full |
+| JSX | `.jsx` | Full | Calls, Extends | Full |
+| Python | `.py`, `.pyi` | Full | Calls, Extends | Full |
+| Go | `.go` | Full | Calls | Full |
+| C | `.c`, `.h` when selected as C | Full | Calls | Full |
+| C++ | `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`, `.ipp`, `.tpp`, `.h` when selected as C++ | Full | Calls | Full |
+| Zig | `.zig` | Full | Calls | Full |
+| Solidity | `.sol` | Full | Calls, Uses | Full |
+| YAML | `.yaml`, `.yml` | File tracking only | None | Partial |
+
+Every parsed language also records its imports (includes for C and C++) per file in module metadata (the `modules` table), not as edges. Architecture checks read them from there.
 
 ## Languages beyond the built-in set (LSP)
 
-Any language with a stdio language server can be indexed by registering the server under `[lsp.<language>]` in `.ctx/config.toml` — Kotlin, Scala, Ruby, Zig, and so on. ctx then extracts symbols via `textDocument/documentSymbol`, call edges via the call-hierarchy requests, and resolves cross-file references via `textDocument/definition`:
+To index a language with a stdio language server, such as Kotlin, Scala or Ruby, register the server under `[lsp.<language>]` in `.ctx/config.toml`. ctx then extracts symbols with `textDocument/documentSymbol`, call edges with the call-hierarchy requests, and cross-file references with `textDocument/definition`:
 
 ```toml
 [lsp.kotlin]
@@ -30,13 +32,13 @@ extensions = ["kt", "kts"]
 backend = "lsp"
 ```
 
-For languages covered by the community registry, `ctx lsp add <language>` writes this block for you after showing what it would install. Server failures never break indexing: a missing or crashed server produces a stderr warning and ctx falls back to tree-sitter (built-in languages) or file-only records (dynamic languages).
+For languages in the community registry, `ctx lsp add <language>` shows what it would install and then writes this block. Server failures never fail indexing: a missing or crashed server prints a warning on stderr, and ctx falls back to tree-sitter (built-in languages) or file-only records (other languages).
 
 See [Add a language via LSP](lsp-languages.md) for the full key reference, and [`ctx lsp`](commands/lsp.md) for the registry commands.
 
 ### Hybrid mode for built-in languages
 
-The built-in languages above can also be paired with a language server using `backend = "hybrid"` (the default for configured blocks). Tree-sitter still does the extraction — fast and offline — and the server is consulted only afterwards, to resolve cross-file references that static name resolution left unresolved or ambiguous (see [Cross-File Resolution](#cross-file-resolution) below). This tightens the call graph without giving up tree-sitter's speed:
+You can pair a built-in language with a language server using `backend = "hybrid"` (the default for configured blocks). tree-sitter still extracts symbols and edges offline. Afterwards ctx asks the server to resolve the cross-file references that static name resolution left unresolved or ambiguous (see [Cross-file resolution](#cross-file-resolution)). ctx waits for the server to finish loading the workspace first (`ready_timeout_ms`, default 300 s), because servers such as rust-analyzer answer `null` until then:
 
 ```toml
 [lsp.python]
@@ -45,11 +47,11 @@ args = ["--stdio"]
 # backend = "hybrid" is the default; extensions default to ["py", "pyi"]
 ```
 
-Without any `[lsp.*]` block, nothing changes: no server is ever spawned and indexing behaves exactly as described on this page.
+Without an `[lsp.*]` block, ctx starts no server and indexing works as described on this page.
 
 ## Rust
 
-### Extracted Symbols
+### Extracted symbols
 
 | Kind | Example | Notes |
 |------|---------|-------|
@@ -62,7 +64,7 @@ Without any `[lsp.*]` block, nothing changes: no server is ever spawned and inde
 | Const | `const MAX: i32` | Constants |
 | Static | `static GLOBAL: &str` | Static variables |
 
-### Visibility Detection
+### Visibility
 
 - `pub` -> public
 - `pub(crate)` -> crate
@@ -117,33 +119,34 @@ impl Authenticate for User {
 - `User::verify` calls `validate`
 - `User` implements `Authenticate`
 
-### Documentation Extraction
+Method-call syntax (`self.validate()`, `x.find(..)`) is never bound to a free function with the same name. A free function passed as a value (`spawn(worker::run_main)`, `.map(transform)`) becomes a `uses` edge when exactly one Rust function matches.
 
-Rust doc comments (`///` and `//!`) are extracted:
-- First line becomes the `brief` field
-- Full content becomes `docstring`
+### Documentation
+
+ctx extracts Rust doc comments (`///` and `//!`). The first sentence becomes `brief` and the full comment becomes `docstring`.
 
 ## TypeScript
 
-### Extracted Symbols
+### Extracted symbols
 
 | Kind | Example | Notes |
 |------|---------|-------|
 | Function | `function foo()` | Named functions |
-| Arrow Function | `const foo = () => {}` | With const declaration |
+| Function expression | `const foo = () => {}`, `var foo = function () {}` | Arrow functions and function expressions assigned with `const`, `let` or `var` |
+| Property function | `exports.parse = () => ...`, `X.prototype.use = function () {}` | Functions assigned to a property; the symbol takes the property name |
 | Class | `class User` | Class declarations |
 | Method | `authenticate()` | Class methods |
 | Interface | `interface IUser` | Interface declarations |
 | Type Alias | `type UserId = string` | Type definitions |
 | Enum | `enum Status` | Enum declarations |
 
-### Visibility Detection
+### Visibility
 
 - `export` -> public
 - No `export` -> private
-- `private` keyword in class -> private
-- `public` keyword in class -> public
-- `protected` keyword in class -> protected
+- `private` keyword in a class -> private
+- `public` keyword in a class -> public
+- `protected` keyword in a class -> protected
 
 ### Example
 
@@ -189,17 +192,15 @@ type UserId = string;
 - `authenticate` calls `findUser`
 - `decodeToken` calls `jwt.decode`
 
-### JSDoc Extraction
+### Documentation
 
-JSDoc comments (`/** */`) are extracted:
-- `@description` or first line -> `brief`
-- Full content -> `docstring`
+ctx extracts JSDoc comments (`/** */`). The first sentence becomes `brief` and the full comment becomes `docstring`.
 
-## JavaScript / JSX
+## JavaScript and JSX
 
-Same as TypeScript, minus type-specific constructs (interfaces, type aliases, enums).
+JavaScript gets the same extraction as TypeScript, without the type-only constructs (interfaces, type aliases, enums).
 
-### Additional JSX Support
+### JSX components
 
 ```jsx
 // Function component
@@ -222,7 +223,7 @@ export const Card = ({ title, children }) => (
 
 ## TSX
 
-Combines TypeScript and JSX support:
+TSX combines TypeScript and JSX extraction:
 
 ```tsx
 interface ButtonProps {
@@ -241,7 +242,7 @@ export const Button: React.FC<ButtonProps> = ({ label, onClick }) => {
 
 ## Python
 
-### Extracted Symbols
+### Extracted symbols
 
 | Kind | Example | Notes |
 |------|---------|-------|
@@ -253,7 +254,7 @@ export const Button: React.FC<ButtonProps> = ({ label, onClick }) => {
 | Class Method | `@classmethod def from_dict(cls):` | Class methods |
 | Constant | `MAX_RETRIES = 3` | UPPER_CASE names at module level |
 
-### Visibility Detection
+### Visibility
 
 - Names starting with `_` -> private
 - Names starting with `__` (not `__dunder__`) -> private (name mangling)
@@ -317,11 +318,71 @@ async def fetch_user(user_id: int) -> User:
 - `fetch_user` calls `db.get`
 - `fetch_user` calls `User.from_dict`
 
-### Docstring Extraction
+### Documentation
 
-Python docstrings (triple-quoted strings) are extracted:
-- First line -> `brief`
-- Full content -> `docstring`
+ctx extracts Python docstrings (triple-quoted strings). The first sentence becomes `brief` and the full docstring becomes `docstring`.
+
+## Go
+
+### Extracted symbols
+
+| Kind | Example | Notes |
+|------|---------|-------|
+| Function | `func Handle()` | Top-level functions |
+| Method | `func (s *Server) Start()` | The receiver type is part of the ID and qualified name (`Server.Start`) |
+| Struct | `type User struct {}` | Struct types |
+| Interface | `type Reader interface {}` | Interface types |
+| Type | `type ID string` | Other type definitions |
+| Const | `const MaxRetries = 3` | Constants |
+| Variable | `var defaultClient = ...` | Top-level variables |
+
+Methods with the same name on different receivers are different symbols: `A.String` and `B.String` each have their own ID, callers and source.
+
+### Visibility
+
+- Exported identifiers (capitalized first letter) -> public
+- Unexported identifiers (lowercase first letter) -> private
+
+### Example
+
+```go
+package auth
+
+// User represents an account in the system.
+type User struct {
+    ID   uint64
+    Name string
+}
+
+// Authenticator verifies credentials.
+type Authenticator interface {
+    Verify(token string) (*User, error)
+}
+
+// NewUser creates a user with a generated ID.
+func NewUser(name string) *User {
+    return &User{ID: generateID(), Name: name}
+}
+
+func (u *User) validate() bool {
+    return len(u.Name) > 0
+}
+```
+
+**Extracted symbols:**
+- `User` (struct, public)
+- `Authenticator` (interface, public)
+- `NewUser` (function, public)
+- `User.validate` (method, private)
+
+**Extracted edges:**
+- `NewUser` calls `generateID`
+
+Imports are recorded in module metadata.
+
+### Documentation
+
+ctx extracts Go doc comments (`//` lines directly above a declaration). The first sentence becomes `brief` and the full comment becomes `docstring`.
 
 ## C and C++
 
@@ -348,15 +409,19 @@ build-path-dependent includes remain unresolved; `compile_commands.json`,
 type inference, overload resolution, template instantiation, and preprocessor
 expansion are outside static analysis.
 
+During indexing, a call to a function that is declared in a header and defined
+in exactly one `.c`/`.cc` file is bound to the definition. `ctx judge edges`
+does not offer a header prototype as a candidate next to its own definition.
+
 C/C++ functions participate in `ctx duplicates`; identifiers and literals are
 normalized and comments are removed.
 
 ## Zig
 
-Zig `.zig` files are fully indexed. (`.zon` files remain ordinary context
-content and are not parsed as Zig source.)
+Zig `.zig` files are fully indexed. `.zon` files stay ordinary context
+content and are not parsed as Zig source.
 
-### Extracted Symbols
+### Extracted symbols
 
 | Kind | Example | Notes |
 |------|---------|-------|
@@ -380,13 +445,13 @@ imports such as `@import("std")`, missing files, dynamic imports, and paths
 escaping the index root remain unresolved.
 
 Zig functions participate in `ctx duplicates`; identifiers and literals are
-normalized and comments are removed like the other Tree-sitter languages.
+normalized and comments are removed, as for the other tree-sitter languages.
 Static analysis does not perform type inference, computed-call resolution,
 comptime expansion, or Zig package-manager dependency resolution.
 
 ## Solidity
 
-### Extracted Symbols
+### Extracted symbols
 
 | Kind | Example | Notes |
 |------|---------|-------|
@@ -398,7 +463,7 @@ comptime expansion, or Zig package-manager dependency resolution.
 | Enum | `enum Status` | Enum definitions |
 | Error | `error Unauthorized` | Custom errors |
 
-### Visibility Detection
+### Visibility
 
 - `public` -> public
 - `external` -> public
@@ -449,40 +514,35 @@ contract Token {
 - `Transfer` (event)
 - `InsufficientBalance` (error)
 
-### NatSpec Extraction
+**Extracted edges:**
+- `Token.transfer` calls `Token.onlyPositive`. Modifier applications produce `calls` edges, so `ctx query callers`, `ctx query impact` and `v1.edges` can answer access-control questions. Constructor base-contract invocations produce `calls` edges too.
+- Qualified library calls (`Lib.fn()`) resolve to the library function.
+- A `using Lib for Type` directive produces a `uses` edge from the contract.
 
-NatSpec comments (`///` and `/** */`) are extracted:
-- `@title` or `@notice` -> `brief`
-- Full content -> `docstring`
+### Documentation
+
+ctx extracts NatSpec comments (`///` and `/** */`). The first sentence becomes `brief` and the full comment becomes `docstring`.
 
 ## YAML
 
-YAML files are tracked but not parsed for symbols (YAML doesn't have functions/classes).
+ctx tracks YAML files but does not parse them for symbols. The index stores the file path, content hash and language, so YAML files appear in `ctx query files` and in context generation.
 
-**What's indexed:**
-- File path
-- File hash (for change detection)
-- Language type
+## Edge types
 
-**Use cases:**
-- Include config files in `ctx query files`
-- Track changes to CI/CD configs
-- Include in context generation for reference
-
-## Edge Types Summary
-
-| Edge Type | Languages | Description |
+| Edge type | Languages | Description |
 |-----------|-----------|-------------|
-| `calls` | All | Function/method calls |
-| `extends` | TS, JS, Python | Class inheritance |
-| `implements` | TS, Rust | Interface/trait implementation |
-| `imports` | Rust, TS/JS, Python, Go, Zig, C/C++ | Module imports or includes |
+| `calls` | All parsed languages | Function and method calls |
+| `extends` | TypeScript, JavaScript, Python | Class inheritance |
+| `implements` | TypeScript, Rust | Interface or trait implementation |
+| `uses` | Rust, Solidity | Rust function values passed as arguments; Solidity `using ... for` |
+
+Imports and includes are module metadata, not edges (see [Supported languages](#supported-languages)).
 
 ## Limitations
 
-### Cross-File Resolution
+### Cross-file resolution
 
-Call targets are resolved by name within the same codebase. External calls (to libraries) show as unresolved:
+ctx resolves call targets by name within the indexed codebase. Calls into libraries stay unresolved:
 
 ```
 ctx query deps myFunction
@@ -492,11 +552,14 @@ Dependencies of 'myFunction':
   calls externalLib (line 15)         # Unresolved (external)
 ```
 
-Registering a language server with `backend = "hybrid"` narrows this limitation: after tree-sitter extraction, references that stayed unresolved are resolved via the server's `textDocument/definition` (see [Hybrid mode for built-in languages](#hybrid-mode-for-built-in-languages)).
+Two opt-in steps resolve more edges:
 
-### Dynamic Calls
+- A language server with `backend = "hybrid"` resolves references that stayed unresolved after tree-sitter extraction, using `textDocument/definition` (see [Hybrid mode for built-in languages](#hybrid-mode-for-built-in-languages)).
+- `ctx judge edges` asks a decision model to pick the real callee among same-named candidates, or `external`. See [ctx judge](commands/judge.md).
 
-Dynamic or computed calls cannot be tracked:
+### Dynamic calls
+
+ctx can't track dynamic or computed calls:
 
 ```typescript
 // Static call - tracked
@@ -512,7 +575,7 @@ obj[methodName]();
 
 ### Macros (Rust)
 
-Macro-generated code is not analyzed:
+ctx does not analyze macro-generated code:
 
 ```rust
 // The generated impl is not indexed
@@ -525,7 +588,7 @@ println!("Hello");  // Not tracked as a call
 
 ### Decorators (Python)
 
-Decorated functions are tracked, but decorator calls are not:
+ctx tracks decorated functions but not the decorator calls:
 
 ```python
 @cache  # Not tracked as a call
@@ -533,9 +596,9 @@ def expensive_operation():
     pass
 ```
 
-### Type Inference
+### Type inference
 
-We don't perform type inference, so method calls on inferred types may not resolve:
+ctx does not infer types, so method calls on values with inferred types may not resolve:
 
 ```typescript
 // Resolved (explicit type)
@@ -544,14 +607,14 @@ user.validate();  // Knows validate is on User
 
 // May not resolve (inferred type)
 const user = getUser();
-user.validate();  // We don't know user is User
+user.validate();  // ctx doesn't know user is a User
 ```
 
-### Indirect Calls
+### Indirect calls
 
-Calls through variables, closures, or arbitrary dynamic dispatch are not
-tracked as calls. Rust free-function items passed directly as callback values
-are recorded separately as `uses` when exactly one Rust function matches:
+ctx does not record calls through variables, closures or dynamic dispatch.
+A Rust free function passed directly as a callback value is recorded as a
+`uses` edge when exactly one Rust function matches:
 
 ```rust
 // Dynamic invocation through a variable is not tracked
@@ -562,11 +625,11 @@ callback(input);
 [1, 2, 3].into_iter().map(transform);
 ```
 
-## Adding Language Support
+## Adding language support
 
-The fastest way to add a language is to register its language server in `.ctx/config.toml` — no code involved; see [Add a language via LSP](lsp-languages.md).
+The fastest way to add a language is to register its language server in `.ctx/config.toml`, with no code changes. See [Add a language via LSP](lsp-languages.md).
 
-To add **built-in** tree-sitter support for a new language:
+To add built-in tree-sitter support for a new language:
 
 1. Add the tree-sitter crate to `Cargo.toml`:
    ```toml
@@ -590,9 +653,9 @@ To add **built-in** tree-sitter support for a new language:
 
 See `src/parser/rust.rs` or `src/parser/typescript.rs` for examples.
 
-## Language Detection
+## Language detection
 
-ctx detects language by file extension:
+ctx detects the language from the file extension:
 
 ```rust
 match extension {
@@ -612,4 +675,4 @@ match extension {
 }
 ```
 
-Unknown extensions are skipped during indexing but included in context generation — unless an `[lsp.<language>]` block in `.ctx/config.toml` claims them, in which case they are indexed through the registered language server.
+Indexing skips unknown extensions, but context generation includes them. If an `[lsp.<language>]` block in `.ctx/config.toml` claims an extension, ctx indexes those files through the registered language server.
