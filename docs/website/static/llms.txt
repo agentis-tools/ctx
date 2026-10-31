@@ -5,7 +5,8 @@
 > call graphs, relationships, semantics), then uses it to (1) GROUND an agent — feed it accurate,
 > token-budgeted context selected by meaning and call-graph relevance ("read the right ~2,000 lines,
 > not the wrong 200,000"), and (2) GOVERN what the agent changes — impact analysis for the blast
-> radius of an edit, plus quality/complexity/duplication gates for CI. Exposed over an MCP server.
+> radius of an edit, plus quality/complexity/duplication gates for CI. An MCP server is available in
+> builds with the `mcp` feature (release binaries don't include it).
 
 ctx works out of the box: `ctx index` builds the world model, then `smart`/`semantic`/`query` ground
 the agent and `query impact`/`check`/`score` govern its changes. `snapshot` plus read-only SQL adds a
@@ -24,7 +25,7 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 
 ## Guides
 
-- [Index & embed first](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/guides/indexing.md): build the index (and embeddings) before anything else; run as background watchers
+- [Index and embed first](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/guides/indexing.md): build the index (and embeddings) before anything else; run as background watchers
 - [Using ctx with agents](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/guides/using-ctx-with-agents.md): the index → embed → query loop, MCP, and JSON output
 - [Context generation](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/context-generation.md): file selection, formats, ignores, token budgeting
 - [Code intelligence](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/code-intelligence.md): indexing, search, callers/deps, impact
@@ -34,6 +35,8 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 - [Interactive shell](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/shell.md): REPL for exploration
 - [Map the codebase](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/map.md): token-budgeted structural overview
 - [Find existing code](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/similar.md): pre-write reuse check
+- [LSP servers (ctx lsp)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/lsp.md): add, list, update and health-check language servers
+- [Edge judge (ctx judge edges)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/judge.md): opt-in re-resolution of ambiguous call edges with a decision model
 
 ## Cookbook
 
@@ -62,7 +65,7 @@ LSP) — it is a code world model, agent-first and local. Links below point to t
 - [Quality gates overview](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/integrations/quality-gates.md): the suite, exit-code contract, CI + agent usage
 - [Architecture rules (ctx check)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/check.md): rules over .ctx/rules.toml
 - [Quality score (ctx score)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/score.md): composite --fail-on gate
-- [Hotspots](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/hotspots.md): churn × complexity ranking
+- [Hotspots](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/hotspots.md): churn × size ranking by default, churn × complexity with `--signal complexity`
 - [Duplicates](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/duplicates.md): MinHash near-duplicate detection
 - [SQL gates (ctx sql)](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/sql.md): raw read-only SQL over the v1 schema, with `--fail-on-rows` for repo-committed gates
 - [Historical snapshots](https://raw.githubusercontent.com/agentis-tools/ctx/main/docs/website/docs/commands/snapshot.md): per-commit Parquet metrics, backfills, data-branch CI, and trend queries

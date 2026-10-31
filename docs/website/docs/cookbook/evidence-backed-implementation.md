@@ -47,8 +47,8 @@ Acceptance examples: two same-named symbols resolve to different targets by file
 Non-goal: redesign graph resolution or the analytics API
 ```
 
-This makes file selection a consequence of behavior and contracts. Starting with “edit the query
-module” would have hidden the public surfaces that later had to change.
+This makes file selection a consequence of behavior and contracts. Starting with "edit the query
+module" would have hidden the public surfaces that later had to change.
 
 ## 1. Isolate an experiment when the repository is already in use
 
@@ -181,7 +181,7 @@ view, while source inspection remained the authority for semantics.
 
 Re-indexing reported zero files processed during the final run because an earlier acceptance command
 had already refreshed the index. Use the resulting index contents and symbol counts to establish
-freshness; do not equate “zero processed” with “the edit was not indexed.”
+freshness; do not equate "zero processed" with "the edit was not indexed."
 
 ## 7. Compare the actual change with the planned change
 
@@ -269,7 +269,7 @@ to another agent or reviewer.
 | Focused baseline tests | Established an eight-test clean starting point | A fresh target directory caused an expensive DuckDB rebuild |
 | Compiled CLI examples | Proved target selection, JSON, help, and no-result behavior | Manual examples should become integration tests before shipping |
 | Canonical contract capture | Kept help output and the CLI snapshot synchronized | It could not detect the changelog entry in the wrong release section |
-| Re-index and query | Confirmed the new resolver and its direct dependency | “Zero files indexed” can mean an earlier command already refreshed it |
+| Re-index and query | Confirmed the new resolver and its direct dependency | "Zero files indexed" can mean an earlier command already refreshed it |
 | `ctx diff` | Summarized and counted the candidate set before choosing a task-appropriate budget | The 8k default omitted seven of eight changed files, so the first pack was incomplete |
 | `ctx score` | Quantified structural movement in changed code | Rising deltas required interpretation, not automatic rejection |
 | All/default-free compilation paths | Verified the feature boundary in both configurations | Focused tests are still narrower than complete CI |
