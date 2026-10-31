@@ -7,8 +7,8 @@ sidebar_position: 7
 # Track duplication trajectories without forcing abstractions
 
 Similar code can mean missed reuse, intentionally parallel implementations, independent tests, or
-the natural shape of a protocol. The useful question is not simply “how many duplicate pairs
-exist?” but **which pairs are new, persistent, growing relative to the codebase, and costly to keep
+the natural shape of a protocol. The useful question is not simply "how many duplicate pairs
+exist?" but **which pairs are new, persistent, growing relative to the codebase, and costly to keep
 in sync?**
 
 This recipe separates current detection, branch review, and longitudinal analysis before deciding
@@ -79,7 +79,7 @@ ctx score --against <base> --json
 | `score.data.metrics.new_duplication` | counts verified pairs that were absent at the base |
 
 The first is useful for reviewing changed code in context, including old similarity. The second is
-the stronger signal for “did this branch introduce a pair?” Use `ctx score` for delta governance
+the stronger signal for "did this branch introduce a pair?" Use `ctx score` for delta governance
 and the full duplicates output to understand the actual implementations.
 
 Even a genuinely new pair may be intentional. Keep it as a review signal until the repository has
@@ -201,7 +201,7 @@ Judge the result by reduced synchronization cost and a clearer contract, not onl
 
 Across the release snapshots, ctx's duplicate-pair count moved only from 137 at v0.3.1 to 139 in
 the latest recorded 0.3.5 state. Indexed symbols grew from 1,648 to 2,161, so duplicate pairs per
-1,000 symbols fell from 83.1 to 64.3—about 23%. “Duplicates increased” is true in absolute terms but
+1,000 symbols fell from 83.1 to 64.3, about 23%. "Duplicates increased" is true in absolute terms but
 misleading as a health conclusion.
 
 Current high-similarity results include several distinct categories:

@@ -62,7 +62,8 @@ ctx hotspots --since "90 days ago" --limit 20
 ctx duplicates --threshold 0.95 --min-tokens 50
 ```
 
-`hotspots` combines normalized churn and complexity. `duplicates` shows candidate pairs for human
+`hotspots` multiplies normalized churn by normalized size in lines. Pass `--signal complexity` to
+rank by churn × complexity, the default up to v0.4.0. `duplicates` shows candidate pairs for human
 inspection. If `.ctx/rules.toml` exists, run `ctx check --list` to verify which architecture policy
 gives meaning to violation counts; if it does not exist, record that policy coverage is absent.
 
@@ -74,10 +75,10 @@ ctx snapshot --json
 
 ctx writes an atomic partition beneath `.ctx/snapshots/sha=<commit>/` containing:
 
-- `files.parquet` — file complexity, churn, and violation counts;
-- `symbols.parquet` — symbol complexity, fan-in, and fan-out;
-- `dup_pairs.parquet` — structural near-duplicate pairs;
-- `meta.parquet` — commit and capture metadata.
+- `files.parquet`: file complexity, churn, and violation counts;
+- `symbols.parquet`: symbol complexity, fan-in, and fan-out;
+- `dup_pairs.parquet`: structural near-duplicate pairs;
+- `meta.parquet`: commit and capture metadata.
 
 Capturing the same commit again is a no-op unless you pass `--force`. A dirty-tree snapshot is
 labelled with `HEAD` but reflects working-tree content, so CI should capture from a clean checkout.
@@ -257,11 +258,11 @@ ctx source <symbol>
 
 Classify the result before recommending work:
 
-- **Intentional complexity** — the function clearly owns an inherently complex operation.
-- **Accidental complexity** — responsibilities or dependencies accumulated without a coherent role.
-- **Intentional similarity** — implementations are parallel but should evolve independently.
-- **Missed reuse** — duplicated behavior should share an established implementation.
-- **Insufficient evidence** — the metric cannot support a safe recommendation yet.
+- **Intentional complexity.** The function clearly owns an inherently complex operation.
+- **Accidental complexity.** Responsibilities or dependencies accumulated without a coherent role.
+- **Intentional similarity.** Implementations are parallel but should evolve independently.
+- **Missed reuse.** Duplicated behavior should share an established implementation.
+- **Insufficient evidence.** The metric cannot support a safe recommendation yet.
 
 Do not split a parser, state machine, transaction boundary, or orchestration function merely to
 lower a score. Do not abstract platform adapters or tests merely because their token shapes match.
@@ -281,7 +282,7 @@ Comparing release snapshots with the latest recorded 0.3.5 state produced:
 | v0.3.4 | 2,048 | 28,127 | 13.73 | 6.16 | 138 | 67.4 |
 | latest 0.3.5 snapshot (`62ba248`) | 2,161 | 29,733 | 13.76 | 6.16 | 139 | 64.3 |
 
-The simplistic conclusion would be “complexity and duplication increased.” The normalized evidence
+The simplistic conclusion would be "complexity and duplication increased." The normalized evidence
 says something different: the indexed symbol count grew by about 31%, average complexity and
 fan-out slightly declined, and duplicate pairs grew by only two. Duplicate pairs per 1,000 symbols
 fell by about 23%.
