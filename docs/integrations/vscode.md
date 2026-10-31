@@ -1,18 +1,10 @@
-# VS Code Integration
+# VS Code integration
 
-Use ctx with Visual Studio Code for enhanced code intelligence.
+ctx has no VS Code extension. You use it from the integrated terminal, from tasks, and alongside AI assistants.
 
-## Overview
+## Terminal commands
 
-While ctx is primarily a CLI tool, it integrates well with VS Code through:
-
-- **Terminal integration** - Run ctx commands directly
-- **Tasks** - Automated indexing and auditing
-- **Extensions** - Use with AI coding assistants
-
-## Terminal Commands
-
-Open the integrated terminal (`Ctrl+`` `) and run ctx commands:
+Open the integrated terminal (``Ctrl+` ``) and run ctx commands:
 
 ```bash
 # Index the workspace
@@ -21,13 +13,13 @@ ctx index
 # Search for symbols
 ctx search "handleRequest"
 
-# Get context for current work
-ctx smart "what I'm working on"
+# Preview which files ctx would select for a task (needs `ctx embed` first)
+ctx smart "add caching to database queries" --dry-run
 ```
 
-## VS Code Tasks
+## Tasks
 
-### Configure Tasks
+### Configure tasks
 
 Create `.vscode/tasks.json`:
 
@@ -84,15 +76,15 @@ Create `.vscode/tasks.json`:
 }
 ```
 
-### Run Tasks
+### Run tasks
 
-1. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS)
-2. Type "Tasks: Run Task"
-3. Select a ctx task
+1. Press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS).
+2. Type "Tasks: Run Task".
+3. Select a ctx task.
 
-### Keyboard Shortcuts
+### Keyboard shortcuts
 
-Add to `.vscode/keybindings.json`:
+Add to your user `keybindings.json` (Command Palette: "Preferences: Open Keyboard Shortcuts (JSON)"):
 
 ```json
 [
@@ -109,76 +101,48 @@ Add to `.vscode/keybindings.json`:
 ]
 ```
 
-## With GitHub Copilot
+## With AI assistants
 
-Use ctx to provide context to Copilot Chat:
+### Selecting files for an assistant
 
-1. Run `ctx smart "your task"` to get relevant files
-2. Open those files in VS Code
-3. Ask Copilot about them with full context
-
-### Workflow Example
+1. Run `ctx smart "your task" --dry-run` to list the relevant files.
+2. Open those files in VS Code.
+3. Ask your assistant (for example, Copilot Chat) about them.
 
 ```bash
-# Get files for your task
+# List the files for your task
 ctx smart "add caching to database queries" --dry-run
 
 # Open the suggested files
 code src/db/queries.rs src/cache.rs
-
-# Now Copilot has the right context!
 ```
 
-## With Continue.dev
+To give the assistant the files' contents directly, drop `--dry-run` and paste or attach the output. `--max-tokens` caps the size of the rendered context (default 8,000).
 
-[Continue](https://continue.dev) is an open-source AI coding assistant that can use ctx.
+### Over MCP
 
-### Configure Continue
+Assistants that support the Model Context Protocol can call ctx tools directly through `ctx serve --mcp`. The MCP server needs a ctx build with the `mcp` feature (`cargo install agentis-ctx --locked --features mcp`). See [ctx serve](../commands/serve.md) for the tools and configuration.
 
-Add to `.continue/config.json`:
+## Navigating from terminal output
 
-```json
-{
-  "contextProviders": [
-    {
-      "name": "ctx",
-      "params": {
-        "command": "ctx smart"
-      }
-    }
-  ]
-}
-```
-
-### Usage
-
-In Continue chat:
-- `@ctx add user authentication` - Get relevant files for the task
-
-## Code Lens Integration
-
-While ctx doesn't provide a VS Code extension directly, you can use the output in your workflow:
-
-### Find Callers
+### Find callers
 
 ```bash
-# Find what calls a function
 ctx query callers handleRequest
-
-# Output shows file:line references
-# Ctrl+click in terminal to navigate
 ```
 
-### Impact Analysis
+Each caller is printed as `name (path:line)`. Ctrl+click (Cmd+click on macOS) the path in the terminal to open it.
+
+### Impact analysis
 
 ```bash
-# See what would be affected by changes
+# See what a change to this symbol would affect
 ctx query impact validateInput
-
-# Review affected files before modifying
 ```
 
-## Workspace Settings
+Review the affected files before you change the symbol.
+
+## Workspace settings
 
 Add to `.vscode/settings.json`:
 
@@ -193,15 +157,17 @@ Add to `.vscode/settings.json`:
 }
 ```
 
-## Auto-Index on Save
+The `PATH` entry is only needed if ctx is installed in a directory VS Code's terminal does not already search. Excluding `.ctx/` stops VS Code from watching the index files.
 
-Create a task that runs on file save:
+## Index automatically
+
+This task refreshes the index each time you open the folder:
 
 ```json
 {
   "label": "ctx: Auto Index",
   "type": "shell",
-  "command": "ctx index --quiet",
+  "command": "ctx index",
   "runOptions": {
     "runOn": "folderOpen"
   },
@@ -211,7 +177,7 @@ Create a task that runs on file save:
 }
 ```
 
-Or use the watch mode:
+To keep the index current while you edit, run watch mode on folder open instead:
 
 ```json
 {
@@ -225,30 +191,30 @@ Or use the watch mode:
 }
 ```
 
+VS Code asks once per workspace before it runs `folderOpen` tasks automatically.
+
 ## Tips
 
-1. **Use watch mode** - Run `ctx index --watch` in a terminal for auto-updates
-2. **Leverage terminal links** - File:line output is clickable
-3. **Create snippets** - Save common ctx commands as VS Code snippets
-4. **Use tasks** - Automate common workflows
-5. **Combine with AI** - Use ctx output to provide context to AI assistants
+1. Run `ctx index --watch` in a terminal so the index updates as you edit.
+2. `path:line` references in ctx output are clickable in the terminal.
+3. Save common ctx commands as tasks.
 
 ## Troubleshooting
 
 ### ctx command not found
 
-1. Ensure ctx is in your PATH
-2. Restart VS Code
-3. Check terminal profile settings
+1. Check that the directory containing `ctx` is on your `PATH`.
+2. Restart VS Code.
+3. Check your terminal profile settings.
 
 ### Slow indexing
 
-1. Add large directories to `.contextignore`
-2. Use `.gitignore` patterns
-3. Enable watch mode for incremental updates
+1. Add large directories to `.contextignore`.
+2. Check that generated and vendored directories are in `.gitignore`.
+3. Use watch mode, which reindexes only changed files.
 
-## See Also
+## See also
 
-- [Getting Started](../getting-started.md)
+- [Getting started](../getting-started.md)
 - [Configuration](../configuration.md)
-- [Claude Desktop Integration](./claude.md)
+- [Claude integration](./claude.md)
