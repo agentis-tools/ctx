@@ -1,6 +1,6 @@
 //! End-to-end coverage for source locations in `ctx query impact --json`.
 
-#![cfg(feature = "duckdb")]
+#![cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 
 use assert_cmd::Command;
 use serde_json::Value;

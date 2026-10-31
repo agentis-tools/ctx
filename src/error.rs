@@ -15,7 +15,7 @@ pub enum CtxError {
     Database(#[from] rusqlite::Error),
 
     /// DuckDB analytics error.
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     #[error("Analytics error: {0}")]
     Analytics(#[from] duckdb::Error),
 

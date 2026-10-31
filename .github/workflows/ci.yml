@@ -68,6 +68,11 @@ jobs:
             features: ""
           - os: windows-latest
             features: "--no-default-features"
+          # Keeps the duckdb-prebuilt development feature building: links the
+          # official libduckdb instead of compiling DuckDB.
+          - os: ubuntu-latest
+            features: "--no-default-features --features duckdb-prebuilt,mcp"
+            prebuilt: true
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,9 +99,13 @@ jobs:
           key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
+        env:
+          DUCKDB_DOWNLOAD_LIB: ${{ matrix.prebuilt && '1' || '' }}
         run: cargo build --locked --verbose ${{ matrix.features }}
 
       - name: Run tests
+        env:
+          DUCKDB_DOWNLOAD_LIB: ${{ matrix.prebuilt && '1' || '' }}
         run: cargo test --locked --verbose ${{ matrix.features }}
 
   lint:
