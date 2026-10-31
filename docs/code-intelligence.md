@@ -1,31 +1,31 @@
-# Code Intelligence
+# Code intelligence
 
-ctx includes a powerful code intelligence system that indexes your codebase, extracts symbols and relationships, and enables sophisticated queries for understanding code structure and dependencies.
+`ctx index` parses your codebase into a local index of symbols and relationships. The commands on this page query that index.
 
 ## Overview
 
-The code intelligence system provides:
-- **Symbol extraction** - Functions, classes, structs, enums, traits, interfaces
-- **Relationship tracking** - Calls, extends, implements, imports
-- **Call graph analysis** - Who calls what, what depends on what
-- **Impact analysis** - What breaks if you change something
-- **Semantic search** - Natural language queries using embeddings
-- **Code quality analysis** - Complexity scoring, duplicate detection
-- **Graph visualization** - DOT, Mermaid, and JSON formats
+With the index you can:
+- find functions, classes, structs, enums, traits and interfaces by name or meaning
+- follow calls, inheritance, trait and interface implementations, and imports
+- list the callers and dependencies of a symbol
+- see which symbols a change to a symbol could affect
+- search with natural-language queries, using embeddings
+- measure coupling and find near-duplicate functions
+- export dependency graphs as DOT, Mermaid or JSON
 
-## Building the Index
+## Building the index
 
-### Basic Indexing
+### Basic indexing
 
 ```bash
 ctx index
 ```
 
-This creates `.ctx/codebase.sqlite` containing:
-- **Symbols** - Functions, classes, interfaces, structs, enums, traits
-- **Edges** - Call relationships, imports, extends, implements
-- **Files** - Metadata and compressed source code
-- **FTS Index** - Full-text search across symbol names and documentation
+This creates `.ctx/codebase.sqlite`, which holds:
+- symbols: functions, classes, interfaces, structs, enums, traits
+- edges: calls, extends, implements, uses
+- files: metadata, imports, and compressed source code
+- a full-text index over symbol names, signatures and documentation
 
 Example output:
 ```
@@ -43,34 +43,35 @@ Codebase statistics:
   Edges:     2664
 ```
 
-### Incremental Updates
+### Incremental updates
 
-By default, ctx only reindexes files that have changed (based on content hash):
+ctx re-parses only files whose content hash changed:
 
 ```bash
 ctx index  # Only processes modified files
 ```
 
-This makes re-indexing fast even for large codebases.
+On the 2,000-file perf fixture an incremental index with one changed file has a 300 ms budget.
 
-After upgrading ctx to a version with changed parser semantics, run `ctx index
---force` once. Content hashes cannot tell that unchanged source files need to
-be parsed again, so an older index will not contain newly recognized
-relationships such as Rust function-item `uses` edges.
+After upgrading ctx to a version with changed parser behavior, run `ctx index
+--force` once. Content hashes can't tell that unchanged files need to be parsed
+again, so an older index lacks newly recognized relationships, such as Rust
+function-item `uses` edges. An index with an older schema version reports a
+mismatch until you rebuild it.
 
-### Force Full Reindex
+### Force a full reindex
 
-When you update `.contextignore` or want a clean slate:
+After you change `.contextignore`, or to start clean:
 
 ```bash
 ctx index --force
 ```
 
-This removes the existing database and rebuilds from scratch.
+This deletes the existing database and rebuilds it.
 
-### Watch Mode
+### Watch mode
 
-Automatically reindex when files change:
+Reindex when files change:
 
 ```bash
 ctx index --watch
@@ -87,9 +88,9 @@ Watching for changes... (press Ctrl+C to stop)
 
 Press `Ctrl+C` to stop.
 
-### Verbose Output
+### Verbose output
 
-See which files are being indexed:
+Print each file as it is indexed:
 
 ```bash
 ctx index --verbose
@@ -103,9 +104,9 @@ Indexing: src/parser/mod.rs
 ...
 ```
 
-### Filtering What Gets Indexed
+### Filtering what gets indexed
 
-By default, `ctx index` respects `.gitignore`, `.contextignore`, and built-in ignores. You can customize this:
+`ctx index` respects `.gitignore`, `.contextignore`, and the built-in ignore patterns. To change what it indexes:
 
 ```bash
 # Ignore additional patterns
@@ -124,6 +125,8 @@ ctx index --no-gitignore
 ctx index --no-default-ignores
 ```
 
+An explicit scope that matches no files is an error: `ctx index` exits 2 and leaves the existing index untouched. The banner shows the effective scope (`Indexing codebase (scoped to: src)...`).
+
 The filtering options work the same way in watch mode:
 
 ```bash
@@ -134,10 +137,10 @@ ctx index --watch -p "src/**/*.ts"
 ctx index --watch -i "**/*.test.ts"
 ```
 
-### Index Options Reference
+### Index options
 
 ```
-ctx index [OPTIONS]
+ctx index [PATTERNS]... [OPTIONS]
 
 Options:
   -w, --watch                    Watch for changes and reindex automatically
@@ -147,20 +150,21 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files (can be repeated)
+      --serial                   Disable parallel indexing (parallel is the default)
 ```
 
 ## Searching
 
-### Basic Search (Keyword)
+### Keyword search
 
 ```bash
 ctx search "handleRequest"
 ```
 
-Returns symbols matching the query using a hybrid approach:
-1. **Exact matches** - Symbols with names matching exactly
-2. **Prefix matches** - Symbols starting with the query
-3. **FTS5 matches** - Keyword matching in names, signatures, and docs
+Results combine three kinds of match, in this order:
+1. exact name matches
+2. names that start with the query
+3. FTS5 keyword matches in names, signatures and docs (labelled `[semantic]` in the output)
 
 Example output:
 ```
@@ -180,9 +184,9 @@ test_parse_struct                        function 43%    src/parser/rust.rs:561
   [semantic] fn test_parse_struct()
 ```
 
-### Natural Language Search (FTS5)
+### Multi-word keyword search
 
-The keyword search understands natural language queries:
+Keyword search also accepts several words:
 
 ```bash
 ctx search "error handling"     # Matches handleError, ErrorHandler, etc.
@@ -190,9 +194,9 @@ ctx search "auth token"         # Matches authentication-related symbols
 ctx search "parse config"       # Finds configuration parsers
 ```
 
-### Semantic Search (Embeddings)
+### Semantic search
 
-For true semantic search based on meaning, use embeddings:
+To search by meaning rather than by words, generate embeddings first:
 
 ```bash
 # Generate embeddings first (one-time)
@@ -204,59 +208,67 @@ ctx semantic "database connection management"
 ctx semantic "error recovery and retry logic"
 ```
 
-This finds symbols based on **meaning**, not just keywords. For example, "authentication functions" finds `login`, `verify_token`, `check_credentials` even if they don't contain "authentication".
+For example, "authentication functions" can find `login`, `verify_token` and `check_credentials`, although none contains the word "authentication".
 
-### Search Options
+### Search options
 
 ```bash
 ctx search "query" --limit 10       # Limit results
 ctx search "query" --output json    # JSON output
 
-ctx semantic "query" --limit 20     # Semantic search with limit
-ctx semantic "query" --output json  # JSON output
-ctx semantic "query" --openai       # Use OpenAI embeddings
+ctx semantic "query" --limit 20            # Semantic search with limit
+ctx semantic "query" --output json         # JSON output
+ctx semantic "query" --provider ollama     # Use an Ollama embedding model
 ```
 
-## Generating Embeddings
+## Generating embeddings
 
-### Basic Embedding Generation
+### Basic embedding generation
+
+Choose a backend with `--provider <local|openai|ollama>` (default `local`):
 
 ```bash
-# Local embeddings (no API key required)
+# Local embeddings (fastembed, no API key; ~90 MB model on first run)
 ctx embed
+
+# Ollama embeddings (offline; start `ollama serve` and pull a model first)
+ollama pull nomic-embed-text
+ctx embed --provider ollama
+OLLAMA_EMBED_MODEL=qwen3-embedding:8b ctx embed --provider ollama
 
 # OpenAI embeddings (requires OPENAI_API_KEY)
 export OPENAI_API_KEY=sk-...
-ctx embed --openai
+ctx embed --provider openai        # `--openai` is a deprecated alias
 ```
 
-This generates embeddings for all symbols. Embeddings are stored in SQLite and only need to be generated once (or when new symbols are added).
+ctx stores the embeddings in the index. Later runs embed only symbols that don't have one yet.
 
-### Embedding Providers
+Each provider and model produces vectors in a different space. Semantic commands refuse to rank against a corpus from another provider, model or dimension and exit 2. To switch, rebuild with `ctx embed --force --provider <provider>`: `--force` clears the stored corpus and the vector-search cache first. It also applies to the initial build of `ctx embed --watch`.
+
+### Embedding providers
 
 | Provider | Model | Dimensions | Requirements |
 |----------|-------|------------|--------------|
 | Local (default) | all-MiniLM-L6-v2 | 384 | ~90MB download on first run |
-| OpenAI | text-embedding-3-small | 1536 | OPENAI_API_KEY env var |
+| OpenAI | text-embedding-3-small | 1536 | `OPENAI_API_KEY` env var |
+| Ollama | `nomic-embed-text` (default) | probed from model | local/remote Ollama server (`OLLAMA_HOST`, default `http://localhost:11434`) |
 
-### Embedding Options
+Select one with `--provider <local|openai|ollama>`. See [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults.
+
+### Embedding options
 
 ```bash
-ctx embed                   # Local model (default)
-ctx embed --openai          # Use OpenAI API
-ctx embed --verbose         # Show progress
-ctx embed --force           # Re-embed all symbols
-ctx embed --batch-size 100  # Process in batches of 100
-ctx embed --watch           # Watch for index changes and auto-embed
+ctx embed                        # Local model (default)
+ctx embed --provider openai      # Use OpenAI API (`--openai` is a deprecated alias)
+ctx embed --provider ollama      # Use a local/remote Ollama server
+ctx embed --serial               # Compute single-threaded (parallel is the default)
+ctx embed --verbose              # Show progress
+ctx embed --force                # Clear the corpus and re-embed all symbols
+ctx embed --batch-size 100       # Process in batches of 100
+ctx embed --watch                # Watch for index changes and auto-embed
 ```
 
-`--force` clears the existing embedding corpus (and the optional vector-search
-cache) before rebuilding it. Use it when switching providers or Ollama models;
-the semantic commands fail with exit code 2 rather than mixing incompatible
-vectors if the corpus does not match the selected provider, model, or
-dimension. `--force` also applies to the initial build of `ctx embed --watch`.
-
-### Watch Mode for Embeddings
+### Watch mode for embeddings
 
 Keep embeddings in sync with the index:
 
@@ -268,22 +280,20 @@ ctx index --watch
 ctx embed --watch
 ```
 
-When the index is updated, the embed watcher automatically generates embeddings for new symbols.
+When the index changes, the embed watcher generates embeddings for the new symbols.
 
-### What Gets Embedded
+### What gets embedded
 
-For each symbol, ctx creates an embedding from:
+For each symbol, ctx builds the embedding text from:
 - Symbol name
 - Symbol kind (function, class, etc.)
 - Function signature
 - Documentation/docstring
 - Semantic hints based on kind
 
-This allows semantic search to understand both code structure and documentation.
+## Query commands
 
-## Query Commands
-
-### Find Symbols
+### Find symbols
 
 Search by name pattern:
 
@@ -302,9 +312,9 @@ handleAuth                               function     public     src/auth/handle
 handleError                              function     public     src/utils/error.ts:8
 ```
 
-### Callers (Who Calls This?)
+### Callers
 
-Find all functions that call a given function:
+List the functions that call a given function:
 
 ```bash
 ctx query callers authenticate
@@ -325,18 +335,18 @@ Distance 1:
     > if (!authenticate(req.token)) return 401
 ```
 
-Resolved callers are identity-based: ctx includes only `calls` edges resolved to the selected
-symbol ID, then follows resolved callers breadth-first up to `--depth`. Cycles and diamonds are
+Callers are matched by symbol identity: ctx includes only `calls` edges resolved to the selected
+symbol ID, then follows resolved callers breadth-first up to `--depth` (default 3). Cycles and diamonds are
 deduplicated by symbol ID at the shortest distance, and the root is excluded. `--file` selects only
-the root; callers in other files remain eligible. Potentially useful same-language name matches
+the root; callers in other files remain eligible. Same-language name matches
 that could not be resolved are shown under `Unresolved same-language call evidence` (and as
 `unresolved_callers` in JSON) at distance 1 only and are never traversed. Verify that evidence
 against source; cross-language matches, qualified calls without matching qualified context, and
 edges resolved to another same-named symbol are excluded. JSON entries include numeric `distance`.
 
-### Dependencies (What Does This Call?)
+### Dependencies
 
-See what a function depends on:
+List what a function calls and refers to:
 
 ```bash
 ctx query deps handleRequest
@@ -352,7 +362,6 @@ Distance 1:
   calls validateInput (line 12)
   calls processData (line 18)
   calls sendResponse (line 25)
-  imports Logger (line 3)
 ```
 
 Dependency traversal follows resolved targets breadth-first across all outgoing relationship kinds
@@ -365,9 +374,9 @@ Rust function item matches.
 Ambiguous matches remain unresolved evidence. These references appear in `query deps` and
 `explain`, but do not become callers or affect call graphs, impact analysis, fan-in, or fan-out.
 
-### Call Graph
+### Call graph
 
-Visualize the call graph from a starting point:
+Print the call graph from a starting point:
 
 ```bash
 # Text format (default)
@@ -409,9 +418,9 @@ digraph call_graph {
 }
 ```
 
-### Impact Analysis
+### Impact analysis
 
-Understand what would be affected by changing a symbol:
+List the symbols a change to a symbol could affect:
 
 ```bash
 ctx query impact validateToken --depth 5
@@ -437,11 +446,11 @@ Distance 3:
 Total: 5 symbols affected
 ```
 
-This is invaluable for safe refactoring - know what breaks before you make changes.
+Run it before a refactor to see which callers to check. The list follows resolved edges only, so verify it against source and tests.
 
 ### Statistics
 
-Get an overview of your codebase:
+Summarize the index:
 
 ```bash
 ctx query stats
@@ -475,9 +484,9 @@ parse                                  20         43
 discover_files                         46          2
 ```
 
-### List Files
+### List files
 
-See all indexed files:
+List the indexed files:
 
 ```bash
 ctx query files
@@ -494,11 +503,11 @@ Indexed files (20):
   ...
 ```
 
-## Symbol Information
+## Symbol information
 
 ### Explain
 
-Get detailed information about a symbol:
+Show the details of a symbol:
 
 ```bash
 ctx explain handleAuth
@@ -530,9 +539,11 @@ Calls (5):
   ...
 ```
 
+`Calls (N)` counts calls only. Other outgoing edges (`extends`, `implements`, `uses`) appear under a separate `Relationships (N)` section. `Called by` counts callers resolved by symbol identity.
+
 ### Source
 
-Retrieve the source code for a symbol:
+Print the stored source code of a symbol:
 
 ```bash
 ctx source handleAuth
@@ -554,11 +565,11 @@ async function handleAuth(req: Request): Promise<Response> {
 }
 ```
 
-## Code Analysis
+## Code analysis
 
-### Complexity Analysis
+### Complexity analysis
 
-Analyze code complexity based on fan-out (outgoing calls) and fan-in (incoming calls):
+ctx's complexity score measures coupling, not control flow: `score = 2 x fan-out + fan-in`, counted over `calls` edges (fan-in counts resolved callers only). A function with many branches and no calls scores 0.
 
 ```bash
 # Full analysis
@@ -574,11 +585,11 @@ ctx complexity --threshold 20
 ctx complexity --output json
 ```
 
-**Severity levels:**
-- **Critical** (red): Fan-out > 50 (function calls too many others)
-- **High** (orange): Fan-out > 30
-- **Medium** (yellow): Fan-out > threshold
-- **Low** (green): Below threshold
+Severity comes from fan-out:
+- critical (red): fan-out above 50
+- high (orange): fan-out above 30
+- medium (yellow): fan-out above `--threshold`
+- low (green): fan-out at or below `--threshold`
 
 Example output:
 ```
@@ -595,16 +606,16 @@ Total: 94 functions analyzed
   0 critical, 3 high complexity functions need attention
 ```
 
-### Duplicate Detection
+### Duplicate detection
 
-Find structurally similar functions using MinHash over normalized token
-shingles. During `ctx index`, every function/method is tokenized with
-tree-sitter and normalized (identifiers -> `ID`, string/number literals ->
-`LIT`, comments dropped), then fingerprinted with a 128-permutation MinHash
-signature. At query time, LSH banding proposes candidate pairs, which are
-verified with the exact Jaccard similarity -- so renamed variables and
-changed literals do not hide duplicates. Solidity functions are skipped
-(no tree-sitter grammar).
+`ctx duplicates` finds structurally similar functions with MinHash over
+normalized token shingles. During `ctx index`, ctx tokenizes every function
+and method, normalizes it (identifiers become `ID`, string and number literals
+become `LIT`, comments are dropped), and stores a 128-permutation MinHash
+signature. At query time, LSH banding proposes candidate pairs and ctx checks
+each with the exact Jaccard similarity, so renamed variables and changed
+literals don't hide duplicates. Every indexed language participates; Solidity
+is tokenized with the solang-parser lexer.
 
 ```bash
 # Default: Jaccard >= 0.85 over 5-token shingles, functions >= 50 tokens
@@ -638,13 +649,13 @@ Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 
 Found 1 near-duplicate pair(s).
 ```
 
-> **Breaking change:** the old line-based `--similarity <PERCENT>` /
-> `--min-lines <N>` flags were removed. Rebuild the index once with
-> `ctx index --force` so fingerprints exist.
+The line-based `--similarity <PERCENT>` and `--min-lines <N>` flags from
+older versions are gone. If your index predates fingerprints, rebuild it once
+with `ctx index --force`.
 
-### Dependency Graph Visualization
+### Dependency graphs
 
-Generate visual dependency graphs in multiple formats:
+Export dependency graphs in DOT, Mermaid or JSON. `--by-file` aggregates calls between files. It also matches unresolved calls to symbols by name, so it can show file links that `ctx query callers` does not:
 
 ```bash
 # File-level dependencies (DOT format for GraphViz)
@@ -667,7 +678,7 @@ ctx graph --filter "main.rs,lib.rs"
 ctx graph --depth 3
 ```
 
-**DOT output:**
+DOT output:
 ```dot
 digraph dependencies {
   rankdir=LR;
@@ -678,30 +689,34 @@ digraph dependencies {
 }
 ```
 
-**Mermaid output:**
+Mermaid output:
 ```mermaid
 graph LR
   A0[main.rs] --> B0[mod.rs]
   A1[mod.rs] --> B1[rust.rs]
 ```
 
-## Edge Types
+## Edge types
 
-The code intelligence system tracks multiple relationship types:
+The index records these relationships between symbols:
 
-| Edge Type | Description | Example |
+| Edge type | Description | Example |
 |-----------|-------------|---------|
-| `calls` | Function/method calls | `foo()` calls `bar()` |
-| `extends` | Class/interface inheritance | `class Dog extends Animal` |
-| `implements` | Interface implementation | `class Foo implements IBar` |
-| `imports` | Module imports | `from typing import List` |
+| `calls` | Function and method calls | `foo()` calls `bar()` |
+| `extends` | Class inheritance | `class Dog extends Animal` |
+| `implements` | Interface or trait implementation | `class Foo implements IBar` |
+| `uses` | Rust function values passed as arguments; Solidity `using ... for` | `.map(transform)` |
 
-These edges enable powerful queries like:
-- Finding all classes that extend a base class
-- Tracking interface implementations
-- Understanding module dependencies
+Imports are stored per file in module metadata, not as edges. `ctx check` reads them for file-level dependency rules.
 
-## Database Location
+An edge whose callee ctx can't identify stays unresolved: it keeps the name as written but no target. Callers, impact analysis, fan-in and fan-out follow resolved edges only. Two opt-in steps bind more edges:
+
+- a language server in `hybrid` mode resolves cross-file references with `textDocument/definition` (see [Add a language via LSP](./lsp-languages.md))
+- `ctx judge edges` asks a decision model to pick the real callee among same-named candidates, or `external`, and caches the answers locally (see [ctx judge](./commands/judge.md))
+
+See [Language support](./language-support.md#edge-types) for which languages produce which edges.
+
+## Database location
 
 The index is stored at `.ctx/codebase.sqlite` in your project root:
 
@@ -711,29 +726,22 @@ your-project/
     └── codebase.sqlite
 ```
 
-This single file contains:
-- Symbol definitions
-- Call graph edges
-- Compressed source code
-- FTS5 search index
-- Embedding vectors (if generated)
+The file holds symbol definitions, edges, compressed source, the FTS5 index, and embeddings if you generated them.
 
-**Git recommendations:**
-- **Ignore** (recommended): Add `.ctx/` to `.gitignore` - database can be rebuilt
-- **Commit** (for shared intelligence): Keep it for team access, CI/CD, etc.
+Add `.ctx/` to `.gitignore`: the index is a build artifact that `ctx index` recreates. Commit `.ctx/config.toml` and `.ctx/rules.toml` if you use them.
 
-## Performance Tips
+## Performance tips
 
-1. **Use `.contextignore`** - Exclude test fixtures, generated code, vendored dependencies
-2. **Incremental indexing** - Let ctx only reindex changed files
-3. **Watch mode for development** - Keep the index fresh automatically
-4. **Force reindex sparingly** - Only when necessary (e.g., after updating ignores)
+1. Exclude test fixtures, generated code and vendored dependencies with `.contextignore`.
+2. Run plain `ctx index`; it re-parses only changed files.
+3. Use `ctx index --watch` during development to keep the index current.
+4. Use `--force` only when needed, for example after changing ignore rules or upgrading ctx.
 
-## CLI Reference
+## CLI reference
 
 ### Index
 ```
-ctx index [OPTIONS]
+ctx index [PATTERNS]... [OPTIONS]
 
 Options:
   -w, --watch                    Watch for changes and reindex automatically
@@ -743,15 +751,16 @@ Options:
       --no-default-ignores       Disable built-in ignore patterns
   -i, --ignore <PATTERN>         Additional ignore patterns (can be repeated)
   -p, --pattern <PATTERN>        Include patterns - only index matching files
+      --serial                   Disable parallel indexing (parallel is the default)
 ```
 
 ### Query
 ```
-ctx query find <PATTERN> [--limit N] [--kind KIND]
-ctx query callers <FUNCTION> [--depth N]
-ctx query deps <SYMBOL> [--depth N]
-ctx query graph <START> [--depth N] [--output FORMAT]
-ctx query impact <SYMBOL> [--depth N]
+ctx query find <PATTERN> [-l, --limit N=20] [-k, --kind KIND] [--file FILE]
+ctx query callers <FUNCTION> [-d, --depth N=3] [--file FILE]
+ctx query deps <SYMBOL> [-d, --depth N=3] [--file FILE] [-k, --kind KIND]
+ctx query graph <START> [-d, --depth N=5] [--output <text|json|dot>]
+ctx query impact <SYMBOL> [-d, --depth N=5]
 ctx query stats
 ctx query files
 ```
@@ -761,25 +770,30 @@ ctx query files
 ctx search <QUERY> [--limit N] [--output FORMAT]
 ```
 
-### Semantic Search
+### Semantic search
 ```
-ctx semantic <QUERY> [--limit N] [--output FORMAT] [--openai]
+ctx semantic <QUERY> [--limit N] [--output FORMAT] [--provider <local|openai|ollama>]
 ```
 
 ### Embeddings
 ```
-ctx embed [--force] [--verbose] [--batch-size N] [--openai] [--watch]
+ctx embed [--force] [--verbose] [--batch-size N] [--serial] [--provider <local|openai|ollama>] [--watch]
 ```
 
-### Code Analysis
+### Code analysis
 ```
 ctx complexity [--threshold N] [--warnings-only] [--output FORMAT]
 ctx duplicates [--threshold F] [--min-tokens N] [--against REF] [--fail-on-found] [--json]
 ctx graph [--output FORMAT] [--by-file] [--filter FILES] [--depth N]
 ```
 
-### Symbol Info
+### Symbol information
 ```
-ctx explain <SYMBOL>
-ctx source <SYMBOL>
+ctx explain <SYMBOL> [--file FILE] [-k, --kind KIND]
+ctx source <SYMBOL> [--file FILE] [-k, --kind KIND]
+```
+
+### Edge resolution
+```
+ctx judge edges [--offline] [--dry-run] [--limit N] [--min-confidence P] [--concurrency N]
 ```

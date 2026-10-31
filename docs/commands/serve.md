@@ -1,6 +1,6 @@
 # ctx serve
 
-Start ctx as an MCP (Model Context Protocol) server for AI assistant integration.
+Run ctx as an MCP (Model Context Protocol) server for AI assistants.
 
 ## Synopsis
 
@@ -8,13 +8,13 @@ Start ctx as an MCP (Model Context Protocol) server for AI assistant integration
 ctx serve --mcp
 ```
 
+> `ctx serve` exists only in builds with the `mcp` feature. The release binaries and a
+> default `cargo install agentis-ctx` do not include it. Build or install with
+> `--features mcp` (for example `cargo install agentis-ctx --features mcp`).
+
 ## Description
 
-The `serve` command runs ctx as an MCP server over stdio, enabling AI assistants like Claude to query your codebase through standardized tools. This provides:
-
-- **Real-time code intelligence** - AI can search symbols, view definitions, analyze call graphs
-- **Context-aware assistance** - AI understands your codebase structure
-- **Smart file selection** - AI can request relevant files for tasks
+`ctx serve --mcp` runs an MCP server over stdio for the project in the current directory. An assistant such as Claude can then call its tools to search symbols, read definitions and files, follow the call graph, and request a token-budgeted set of files for a task.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ The `serve` command runs ctx as an MCP server over stdio, enabling AI assistants
    ctx index
    ```
 
-2. Generate embeddings (for smart context):
+2. Generate embeddings (needed by `smart_context`):
    ```bash
    ctx embed
    ```
@@ -39,71 +39,85 @@ The `serve` command runs ctx as an MCP server over stdio, enabling AI assistants
 |--------|-------------|
 | `--mcp` | Run as MCP server over stdio |
 
-## Available MCP Tools
+`ctx serve` takes no path argument. It serves the directory it starts in.
 
-When running as an MCP server, ctx exposes these tools:
+## MCP tools
 
-### Search Tools
+The server exposes eight tools.
+
+### Search tools
 
 | Tool | Description |
 |------|-------------|
 | `search_symbols` | Search for symbols by name pattern |
-| `get_definition` | Get source code for a symbol |
-| `find_references` | Find all references to a symbol |
+| `get_definition` | Get the source of a definition. Exact name matches win, and up to five same-named definitions are listed |
+| `find_references` | Find references that resolve to the requested definition. Unbound same-name calls are listed separately as possible references |
 
-### File Tools
-
-| Tool | Description |
-|------|-------------|
-| `get_file` | Read a file's contents |
-| `get_file_tree` | List files in the project |
-
-### Analysis Tools
+### File tools
 
 | Tool | Description |
 |------|-------------|
-| `get_callers` | Find functions that call a function |
-| `get_callees` | Find functions called by a function |
-| `smart_context` | Intelligently select files for a task |
+| `get_file` | Read a file under the project root |
+| `get_file_tree` | List files in the project, filtered by path and pattern |
 
-## Claude Desktop Integration
+### Analysis tools
+
+| Tool | Description |
+|------|-------------|
+| `get_callers` | Find callers of the requested definition through resolved edges. `depth` defaults to 3, maximum 5 |
+| `get_callees` | Find calls made by a function, with the definition each call resolved to |
+| `smart_context` | Select files for a task. Takes `task`, `max_tokens` (a hard limit on the whole response, default 8000), `depth` (default 3), `top` (default 10), and `provider` (`local`, `openai`, or `ollama`) |
+
+## Claude Desktop integration
 
 ### Configuration
 
 Add ctx to your Claude Desktop configuration file:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+Claude Desktop starts MCP servers with `/` as the working directory and does not reliably honor a `cwd` key. Start ctx through a shell that changes to the project first:
 
 ```json
 {
   "mcpServers": {
     "ctx": {
-      "command": "ctx",
-      "args": ["serve", "--mcp"],
-      "cwd": "/path/to/your/project"
+      "command": "sh",
+      "args": ["-c", "cd /path/to/your/project && exec ctx serve --mcp"]
     }
   }
 }
 ```
 
-### Multiple Projects
+On Windows:
 
-Configure multiple projects by giving each a unique name:
+```json
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "cmd",
+      "args": ["/c", "cd /d C:\\path\\to\\project && ctx serve --mcp"]
+    }
+  }
+}
+```
+
+### Multiple projects
+
+Give each project its own server name:
 
 ```json
 {
   "mcpServers": {
     "my-app": {
-      "command": "ctx",
-      "args": ["serve", "--mcp"],
-      "cwd": "/path/to/my-app"
+      "command": "sh",
+      "args": ["-c", "cd /path/to/my-app && exec ctx serve --mcp"]
     },
     "shared-lib": {
-      "command": "ctx",
-      "args": ["serve", "--mcp"],
-      "cwd": "/path/to/shared-lib"
+      "command": "sh",
+      "args": ["-c", "cd /path/to/shared-lib && exec ctx serve --mcp"]
     }
   }
 }
@@ -113,13 +127,13 @@ Configure multiple projects by giving each a unique name:
 
 After restarting Claude Desktop:
 
-1. Open a new conversation
-2. You should see a hammer icon indicating MCP tools are available
+1. Open a new conversation.
+2. Check that the tools indicator lists the ctx tools.
 3. Ask Claude: "What tools do you have for exploring my codebase?"
 
-## Example Conversations
+## Example conversations
 
-### Finding Code
+### Finding code
 
 **You**: Where is the authentication logic in my codebase?
 
@@ -128,7 +142,7 @@ After restarting Claude Desktop:
 - `AuthService` struct in `src/services/auth.rs:15`
 - `validateToken` function in `src/middleware.rs:78`
 
-### Understanding Code
+### Understanding code
 
 **You**: Explain how the handleRequest function works
 
@@ -145,7 +159,7 @@ It's called by:
 - The main server loop in `src/main.rs`
 - The test harness in `tests/integration.rs`
 
-### Smart File Selection
+### Selecting files for a task
 
 **You**: I need to add caching to the database queries
 
@@ -157,34 +171,33 @@ It's called by:
 
 ## Troubleshooting
 
-### Server Not Starting
+### Server not starting
 
 Check that:
-1. ctx is in your PATH: `which ctx`
+1. ctx is in your PATH: `which ctx`. Claude Desktop may not see your shell's PATH, so use the full path to `ctx` in the `cd ... && exec` command if needed.
 2. The codebase is indexed: `ctx query stats`
-3. MCP feature is enabled: `ctx serve --mcp` should not error
+3. The build includes MCP: `ctx serve --mcp` should not error. If it does, rebuild with `--features mcp`.
 
-### Tools Not Available
+### Tools not available
 
-1. Restart Claude Desktop after config changes
-2. Check the config file syntax is valid JSON
-3. Verify the `cwd` path exists and is indexed
+1. Restart Claude Desktop after config changes.
+2. Check that the config file is valid JSON.
+3. Check that the path in the `cd` command exists and is indexed.
 
-### Slow Responses
+### Slow responses
 
-1. Ensure embeddings are generated: `ctx embed`
-2. Check index is up to date: `ctx index`
-3. Consider reducing `--depth` in smart_context calls
+1. Make sure embeddings exist: `ctx embed`
+2. Make sure the index is current: `ctx index`
+3. Pass a smaller `depth` to `smart_context`.
 
-## Security Considerations
+## Security considerations
 
-- The MCP server only reads from the indexed database
-- No code execution or file modification capabilities
-- Access limited to the configured project directory
-- Consider using read-only filesystem permissions in production
+- The server reads the index and files under the project root. `get_file` refuses paths outside the root.
+- It has no tool that runs code or modifies files.
+- Consider read-only filesystem permissions in production.
 
-## See Also
+## See also
 
-- [Claude Desktop Integration](../integrations/claude.md)
-- [Code Intelligence](../code-intelligence.md)
-- [Smart Context](./smart.md)
+- [Claude Desktop integration](../integrations/claude.md)
+- [Code intelligence](../code-intelligence.md)
+- [ctx smart](./smart.md)

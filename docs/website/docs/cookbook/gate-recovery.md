@@ -78,7 +78,7 @@ rg -n '<import-or-symbol-name>' <from-file> <to-file>
 ```
 
 Reject same-name graph expansion that source does not support. Also look for relationships ctx may
-miss—dynamic dispatch, macros, reflection, generated registration, persisted names, or external
+miss: dynamic dispatch, macros, reflection, generated registration, persisted names, or external
 consumers. Static evidence can be wrong in either direction.
 
 For a metric limit, inspect the actual symbol, fan-in, fan-out, responsibility, and change pressure.

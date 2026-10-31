@@ -1,18 +1,20 @@
-# `ctx judge`
+# ctx judge
 
-Model-assisted judgments over the index. Opt-in: nothing runs unless you invoke
+Model-assisted judgments over the index. It is opt-in: nothing runs unless you invoke
 it or enable it in `.ctx/config.toml`.
+
+`ctx judge` is not in v0.4.0. It is on `main` and ships in the next release.
 
 ## `ctx judge edges`
 
 Tree-sitter extraction records every call by name. ctx's resolver then binds a
-name to an in-repo function when it can — which goes wrong for common names:
-`map.get(k)` or `iter.find(..)` get bound to whatever function in the repository
-is called `get` or `find`, and calls it cannot disambiguate stay unresolved.
+name to an in-repo function when it can. That goes wrong for common names:
+`map.get(k)` or `iter.find(..)` can be bound to whatever function in the repository
+is called `get` or `find`, and calls the resolver cannot tell apart stay unresolved.
 
 `ctx judge edges` asks a decision model (TypeSafe Jev) one question per call
-whose name matches at least one in-repo function or method: *which definition
-does this call resolve to?* The options are the same-named candidates (up to 30,
+whose name matches at least one in-repo function or method: which definition
+does this call resolve to? The options are the same-named candidates (up to 30,
 same file and same directory first) plus `external`. The answer rewrites the
 edge: bind, re-bind, or unbind as external. Answers below `--min-confidence`
 (default 0.7) leave the edge as the resolver left it.
@@ -37,8 +39,8 @@ ctx judge edges --limit 200     # cap new model calls
 
 Every answer is stored in the `judgments` table, keyed by a SHA-256 of the model
 id, the question version and the exact state sent. `ctx index` rebuilds edges
-for changed files; the next `ctx judge edges` re-applies cached answers for every
-call whose context did not change and only asks about the rest. With
+for changed files. The next `ctx judge edges` re-applies cached answers for every
+call whose context did not change and asks only about the rest. With
 `[judge] edges = true` this happens automatically after `ctx index` (offline if
 `JEV_API_KEY` is not set).
 
@@ -50,7 +52,7 @@ model = "jev-latest"
 min_confidence = 0.7
 ```
 
-The API key is only read from the `JEV_API_KEY` environment variable, never
+ctx reads the API key only from the `JEV_API_KEY` environment variable, never
 from the config file.
 
 ### What is sent
@@ -68,9 +70,11 @@ On ctx's own index (4 082 call edges labelled by rust-analyzer):
 | resolver only | 0.828 | 0.868 | 0.891 | 390 |
 | + `ctx judge edges` | 0.994 | 0.998 | 0.993 | 7 |
 
-A full run over 5 805 edges took 121 s at concurrency 10; an offline replay 4 s.
+A full run over 5 805 edges took 121 s at concurrency 10, and an offline replay took 4 s. These numbers are illustrative, measured on one repository.
 
 ## Exit codes
 
-`0` success (including nothing to judge); `2` operational error (no index,
-missing `JEV_API_KEY`, API failure).
+| Code | Meaning |
+|------|---------|
+| 0 | Success, including nothing to judge |
+| 2 | Operational error (no index, missing `JEV_API_KEY`, API failure) |
