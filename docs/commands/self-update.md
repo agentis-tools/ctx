@@ -1,6 +1,6 @@
 # ctx self-update
 
-Update the ctx binary from GitHub releases — explicitly, never automatically.
+Update the ctx binary from GitHub releases when you run it. ctx never updates itself automatically.
 
 ## Synopsis
 
@@ -15,8 +15,8 @@ ctx --version --check
 
 1. Fetch the latest release (or the release pinned with `--version X.Y.Z`).
 2. Pick the artifact matching this binary's compile-time target (`ctx-v<version>-<target>.tar.gz`, `.zip` on Windows).
-3. Download the release's aggregated `SHA256SUMS` file and the artifact, and verify the artifact's sha256 against it. **On mismatch the update aborts with exit code 2 and the installed binary is untouched.**
-4. Extract the `ctx` binary, write it to a temp file *in the same directory as the current executable*, set executable permissions, and `rename` it over the current binary (atomic on the same filesystem).
+3. Download the release's aggregated `SHA256SUMS` file and the artifact, and verify the artifact's sha256 against it. On a mismatch the update aborts with exit code 2 and leaves the installed binary untouched.
+4. Extract the `ctx` binary, write it to a temp file in the same directory as the current executable, set executable permissions, and `rename` it over the current binary (atomic on the same filesystem).
 
 Self-update bounds release metadata to 1 MiB, the checksum manifest to 4 MiB,
 the compressed archive to 256 MiB, the decompressed archive stream to 512 MiB,
@@ -24,8 +24,8 @@ and the extracted binary to 128 MiB. Staging and writability probes use
 exclusive randomized temporary files, so a predictable pre-created symlink
 cannot redirect an update write.
 
-The checksum manifest and archive are fetched from the same release channel.
-The SHA-256 check therefore detects corruption or tampering in transit but is
+ctx fetches the checksum manifest and the archive from the same release channel.
+The SHA-256 check therefore detects corruption or tampering in transit, but it is
 not an independent release-signing or publisher-provenance check. For
 high-assurance deployments, verify the release provenance outside `ctx` before
 running self-update.
@@ -33,59 +33,59 @@ running self-update.
 If nothing newer exists, it prints `ctx <version> is already up to date` and exits 0. On success it prints the transition:
 
 ```text
-ctx 0.2.1 → 0.3.0
+ctx 0.3.5 → 0.4.0
 ```
 
-`--version X.Y.Z` installs that exact release — including downgrades — instead of the latest.
+`--version X.Y.Z` installs that exact release, including downgrades, instead of the latest.
 
 Before any network work, ctx checks whether the executable belongs to a package manager and verifies
 that a direct-download install location is writable. Cargo, Homebrew, Arch, Debian, RPM, and Scoop
 installations are never overwritten: ctx exits 2 and prints the appropriate package-manager update
-command. Path detection covers Cargo, Homebrew, and Scoop layouts; on Linux, read-only queries to
+command. Path detection covers Cargo, Homebrew, and Scoop layouts. On Linux, read-only queries to
 the local `pacman`, `dpkg`, and RPM package databases identify owned files.
 
 Use `ctx self-update` only for direct GitHub binary installations. Upgrade managed installations
 with `cargo install agentis-ctx`, `brew upgrade ctx`, `yay -Syu ctx-bin`, `scoop update ctx`, or by
 installing a newer `.deb`/`.rpm` through the corresponding system package manager.
 
-On Windows the running `ctx.exe` cannot be overwritten directly, so it is renamed aside to `ctx.exe.old` first; the `.old` file is removed on the next `ctx self-update` (or can be deleted manually).
+Windows does not allow overwriting the running `ctx.exe`, so ctx first renames it to `ctx.exe.old`. The next `ctx self-update` removes the `.old` file, or you can delete it yourself.
 
-Prebuilt artifacts exist for `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc` — the release workflow's build matrix. On other platforms `self-update` exits 2 and points at `cargo install agentis-ctx`.
+The release workflow builds artifacts for `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`. On other platforms `self-update` exits 2 and points to `cargo install agentis-ctx`.
 
 ## The passive update notice
 
-On interactive invocations, ctx checks for a newer release at most **once per 24 hours** (timestamp cache under your user cache directory, e.g. `~/.cache/ctx/` or `~/Library/Caches/ctx/`), with a 1-second network timeout and silent failure. When a newer release exists it prints exactly one line to **stderr**:
+On interactive invocations, ctx checks for a newer release at most once per 24 hours (timestamp cache under your user cache directory, for example `~/.cache/ctx/` or `~/Library/Caches/ctx/`), with a 1-second network timeout and silent failure. When a newer release exists it prints one line to stderr:
 
 ```text
-ctx 0.3.0 available (you have 0.2.1) — run 'ctx self-update'
+ctx 0.4.0 available (you have 0.3.5) — run 'ctx self-update'
 ```
 
-**Determinism rule: ctx never updates itself automatically.** The passive check only prints this notice; installing anything always requires an explicit `ctx self-update`.
+ctx never updates itself automatically. The passive check only prints this notice, and installing anything always requires an explicit `ctx self-update`.
 
-The check is completely skipped — **no network call at all** — when any of these hold:
+ctx skips the check, with no network call, when any of these hold:
 
 - `CTX_NO_UPDATE_CHECK=1` is set;
 - stderr is not a terminal (pipes, CI, test harnesses);
-- `--json` is active (stdout must stay a single JSON document; the notice never reaches stdout either way);
+- `--json` is active (stdout must stay a single JSON document, and the notice never reaches stdout anyway);
 - ctx is running inside a Claude Code hook or session (`CLAUDECODE`, `CLAUDE_PROJECT_DIR`, or `CLAUDE_PLUGIN_ROOT` in the environment);
 - the invocation is `ctx self-update` or `ctx --version` itself.
 
 ## `ctx --version --check`
 
-An explicit, always-allowed comparison against the latest release — exempt from the suppression rules and the 24h cache. It prints its result to **stdout** (it is the primary output, not a notice) and exits 0 whether or not an update exists:
+An explicit comparison against the latest release. It ignores the suppression rules and the 24-hour cache, prints its result to stdout (it is the primary output, not a notice), and exits 0 whether or not an update exists:
 
 ```text
 $ ctx --version --check
-ctx 0.3.0 available (you have 0.2.1) — run 'ctx self-update'
+ctx 0.4.0 available (you have 0.3.5) — run 'ctx self-update'
 # or
-ctx 0.2.1 is up to date
+ctx 0.4.0 is up to date
 ```
 
 Plain `ctx --version` (or `-V`) is unchanged: it prints `ctx <version>` and never touches the network.
 
 ## Updating the Claude Code plugin
 
-The plugin generated by `ctx harness init --mode plugin` is versioned in lockstep with the binary (its `plugin.json` version *is* the generating crate version, asserted by the release pipeline). Update the plugin through Claude Code's own mechanism:
+The plugin generated by `ctx harness init --mode plugin` has the same version as the binary that generated it (its `plugin.json` version is the crate version, and the release pipeline checks this). Update the plugin through Claude Code:
 
 ```text
 /plugin update ctx
@@ -97,7 +97,7 @@ then update the binary with `ctx self-update` and re-run `ctx harness init --mod
 /plugin marketplace add agentis-tools/ctx@<commit-sha>
 ```
 
-Note that harness permissions generated by `ctx harness init` **deny** `Bash(ctx self-update*)`, so an AI agent cannot swap the binary out from under a running session.
+The harness permissions generated by `ctx harness init` deny `Bash(ctx self-update*)`, so an AI agent cannot replace the binary during a running session.
 
 ## JSON output
 
@@ -105,31 +105,31 @@ Note that harness permissions generated by `ctx harness init` **deny** `Bash(ctx
 
 ```json
 {
-  "ctx_version": "0.2.1",
+  "ctx_version": "0.3.5",
   "command": "self_update",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
-    "old_version": "0.2.1",
-    "new_version": "0.3.0",
+    "old_version": "0.3.5",
+    "new_version": "0.4.0",
     "outcome": "updated"
   }
 }
 ```
 
-`outcome` is `updated` or `up_to_date`. `ctx --version --check --json` emits command `version.check` with `current_version`, `latest_version`, and `update_available`. See [JSON Output](../json-output.md).
+`outcome` is `updated` or `up_to_date`. `ctx --version --check --json` emits command `version.check` with `current_version`, `latest_version`, and `update_available`. See [JSON output](../json-output.md).
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Updated successfully, or already up to date |
-| 2 | Operational error (network failure, checksum mismatch, install location not writable, unsupported platform, unknown version) |
+| 2 | Operational error (managed installation, network failure, checksum mismatch, install location not writable, unsupported platform, unknown version) |
 
 ## Examples
 
 ```bash
 ctx self-update                    # update to the latest release
-ctx self-update --version 0.3.0    # install an exact release (downgrades allowed)
+ctx self-update --version 0.3.5    # install an exact release (downgrades allowed)
 ctx self-update --json             # machine-readable result
 ctx --version --check              # just compare, never install
 CTX_NO_UPDATE_CHECK=1 ctx map      # silence the passive notice for one run

@@ -1,15 +1,15 @@
 ---
 id: privacy
-title: Privacy Policy
+title: Privacy policy
 ---
 
-# Privacy Policy
+# Privacy policy
 
 **Effective date:** July 13, 2026
 
 This policy explains how the ctx project handles information when you use the
 ctx command-line tool, its Claude Code and Codex plugins, optional MCP server,
-and this documentation website.
+and the documentation website at [docs.agentis.tools](https://docs.agentis.tools).
 
 ## Summary
 
@@ -43,24 +43,36 @@ binary. They do not add telemetry or send project data to the ctx maintainers.
 ctx makes network requests only for features that require them or that you
 explicitly configure:
 
-- **Update checks and self-update:** ctx may contact GitHub Releases to check
-  for a newer version. `ctx self-update` downloads release files only when you
-  invoke it. GitHub may receive standard request information such as your IP
-  address, user agent, requested version, and platform artifact.
-- **OpenAI embeddings:** when you select the OpenAI embedding provider and
+- **Update checks and self-update.** ctx may contact GitHub Releases to check
+  for a newer version; set `CTX_NO_UPDATE_CHECK=1` to turn the passive check
+  off. `ctx self-update` downloads release files only when you run it. GitHub
+  may receive standard request information such as your IP address, user agent,
+  requested version, and platform artifact.
+- **OpenAI embeddings.** When you select the OpenAI embedding provider and
   supply an `OPENAI_API_KEY`, ctx sends the text being embedded, including
   relevant source-code or query text, to OpenAI's API. OpenAI handles that data
   under its own terms and privacy policy.
-- **Ollama or another configured endpoint:** ctx sends embedding inputs to the
+- **Ollama or another configured endpoint.** ctx sends embedding inputs to the
   endpoint you configure. A local Ollama endpoint keeps that traffic local;
   a remote endpoint is governed by its operator.
-- **Local embedding model download:** the local embedding provider may download
+- **Local embedding model download.** The local embedding provider may download
   model files from its model host on first use. This downloads model data; it
   does not upload your repository for embedding.
-- **MCP and host applications:** if you enable the optional MCP feature, ctx
+- **Model-assisted judgments (`ctx judge`, opt-in).** When you run
+  `ctx judge edges` with `JEV_API_KEY` set, or enable `[judge] edges = true`
+  with that key set, ctx sends TypeSafe's API the following for each ambiguous
+  call: the calling function's source (up to 3,000 characters), its file's
+  import lines, the call-site line, and the names, paths, and signatures of the
+  same-named candidate functions. ctx caches the answers in the local index.
+  With `--offline`, or without `JEV_API_KEY`, ctx sends nothing.
+- **MCP and host applications.** If you enable the optional MCP feature, ctx
   returns requested codebase information to the MCP client you configured.
   That client and any model provider it uses handle the returned information
   under their own privacy terms.
+
+ctx never downloads DuckDB extensions. Analytics commands attach the index
+through a locally installed `sqlite_scanner` extension when one exists, and
+otherwise read a private copy of the index.
 
 Your operating system, package manager, Git host, AI host application, and
 network provider may independently process information as part of their
@@ -77,8 +89,8 @@ code, prompts, or local ctx indexes.
 
 ## Information you submit publicly
 
-Information submitted to the public GitHub repository—including issues, pull
-requests, discussions, and their attachments—is public and retained according
+Information submitted to the public GitHub repository, including issues, pull
+requests, discussions, and their attachments, is public and retained according
 to GitHub's policies and the repository's history. Do not include credentials,
 private source code, or other sensitive information in public submissions.
 

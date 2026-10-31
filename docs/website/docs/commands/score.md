@@ -16,26 +16,26 @@ ctx score [--against <REF>] [--fail-on <EXPR>] [--json]
 
 ## Description
 
-The `score` command compares the working tree (plus commits since the merge base with REF) against REF and prints a compact scorecard. It answers "did this change make the code better or worse?" with numbers:
+`ctx score` compares the working tree (plus commits since the merge base with REF) against REF and prints a short scorecard. It answers "did this change make the code better or worse?" with numbers. Score resolves the merge base once and uses that commit for changed paths, baseline file contents, duplication, and architecture checks. Human output shows the resolved commit, and JSON emits it as `data.baseline`. The scorecard reports:
 
-- **Complexity and fan-out deltas** - per changed file, baseline vs. current
-- **New duplication** - near-duplicate function pairs that did not exist at REF
-- **Architecture violations** - the [`ctx check`](./check.md) rules, scoped to the same REF
-- **Symbols added / removed** - API surface churn
+- complexity and fan-out deltas per changed file, baseline against current,
+- new near-duplicate function pairs that did not exist at REF,
+- [`ctx check`](./check.md) architecture violations, scoped to the same REF,
+- symbols added and removed.
 
-The index is refreshed **incrementally** before scoring (a `note: index refreshed (N files reindexed)` notice goes to stderr). Baseline metrics are computed by parsing each changed file's content at REF **in memory** with the same parser used for indexing - nothing is written to the database, and both sides use the same method so the deltas are honest.
+Before scoring, ctx refreshes the index incrementally and prints `note: index refreshed (N files reindexed)` to stderr. For the baseline it parses each changed file's content at REF in memory with the indexing parser. Nothing is written to the database, and both sides use the same method, so the deltas compare like with like.
 
 ## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--against <REF>` | Git reference to compare against. The default scores uncommitted changes; use your default branch (`main`/`master`) to score a whole branch or PR | `HEAD` |
-| `--fail-on <EXPR>` | Comma-separated conditions `metric OP value` with OP one of `>=`, `<=`, `>`, `<`; exit 1 when any condition holds | none |
+| `--fail-on <EXPR>` | Comma-separated conditions `metric OP value` with OP one of `>=`, `<=`, `>`, `<`; exits 1 when any condition holds | none |
 | `--json` | Machine-readable output (global flag) | false |
 
 ## Metrics
 
-These names are used verbatim in `--fail-on` and under `data.metrics` in JSON:
+Use these names in `--fail-on`. JSON reports them under `data.metrics`:
 
 | Metric | Meaning |
 |--------|---------|
@@ -47,17 +47,17 @@ These names are used verbatim in `--fail-on` and under `data.metrics` in JSON:
 | `symbols_removed` | Symbols present at REF but not now |
 | `files_changed` | Changed source files that were scored |
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Clean (or no `--fail-on` given: the command is informational) |
+| 0 | Clean, or no `--fail-on` given (the command is then informational) |
 | 1 | At least one `--fail-on` condition was met (the failed conditions are listed on stderr) |
 | 2 | Operational error (not a git repo, bad reference, malformed `--fail-on`, invalid rules file) |
 
 ## Examples
 
-### Score Uncommitted Changes
+### Score uncommitted changes
 
 ```bash
 ctx score
@@ -65,7 +65,7 @@ ctx score
 
 Output:
 ```
-Score vs HEAD (1 file changed)
+Score vs HEAD (baseline 0123456) (1 file changed)
 
   complexity_delta        3 → 6      ▲ +3
   fan_out_delta           1 → 2      ▲ +1
@@ -78,20 +78,20 @@ Notes:
   - fan_in approximated as same-file callers for baseline comparability
 ```
 
-### Score a Branch or PR
+### Score a branch or PR
 
 ```bash
 ctx score --against main
 ```
 
-### CI / Agent Quality Gate
+### CI or agent quality gate
 
 ```bash
 ctx score --against main --fail-on "check_violations>0,new_duplication>0"
 echo $?  # 0 = passed, 1 = a condition was met, 2 = error
 ```
 
-### JSON Output
+### JSON output
 
 ```bash
 ctx score --against main --json
@@ -99,7 +99,7 @@ ctx score --against main --json
 
 ```json
 {
-  "ctx_version": "0.3.0",
+  "ctx_version": "0.4.0",
   "command": "score",
   "generated_at": "2026-07-09T12:00:00Z",
   "data": {
@@ -135,18 +135,18 @@ ctx score --against main --json
 
 ## Gate logging
 
-Set the `CTX_GATE_LOG` environment variable to make every `ctx score` run append one record describing the gate evaluation to a local log. This is how you build a paper trail of gate outcomes over time (e.g. from the Claude Code Stop hook) without changing what the command does. Opt-in and local-only — ctx ships no telemetry.
+Set the `CTX_GATE_LOG` environment variable and every `ctx score` run appends one record of the gate evaluation to a local log. Use it to keep a history of gate outcomes, for example from the Claude Code Stop hook, without changing what the command does. Logging is opt-in and local. ctx ships no telemetry.
 
 | `CTX_GATE_LOG` value | Effect |
 |----------------------|--------|
 | unset, empty, or `0` | Logging disabled (the default) |
 | `1` or `true` | Append to `.ctx/gate-log.jsonl` under the repo root |
-| anything else | Treated as the log path (joined to the repo root when relative) |
+| anything else | The log path (relative paths are joined to the repo root) |
 
-The log is **JSON Lines**: one complete JSON object per line, one line appended per evaluation. It is **not** the standard `--json` envelope — no `command`/`data` wrapper — and it is written regardless of whether `--json` is passed:
+The log is JSON Lines: one JSON object per line, one line per evaluation. It is not the standard `--json` envelope (there is no `command` or `data` wrapper), and ctx writes it whether or not you pass `--json`:
 
 ```json
-{"schema_version":1,"ts":"2026-07-10T19:25:43.893434Z","ctx_version":"0.3.0","source":"score","against":"HEAD","fail_on":"new_duplication>0","metrics":{"check_violations":0,"complexity_delta":0,"fan_out_delta":0,"files_changed":0,"new_duplication":0,"symbols_added":0,"symbols_removed":0},"failed_conditions":[],"outcome":"pass","blocking":false,"session_id":null}
+{"schema_version":1,"ts":"2026-07-10T19:25:43.893434Z","ctx_version":"0.4.0","source":"score","against":"HEAD","fail_on":"new_duplication>0","metrics":{"check_violations":0,"complexity_delta":0,"fan_out_delta":0,"files_changed":0,"new_duplication":0,"symbols_added":0,"symbols_removed":0},"failed_conditions":[],"outcome":"pass","blocking":false,"session_id":null}
 ```
 
 | Field | Description |
@@ -163,7 +163,7 @@ The log is **JSON Lines**: one complete JSON object per line, one line appended 
 | `blocking` | Whether blocking mode was requested (`CTX_GATE_BLOCKING=1`; see [ctx harness](./harness.md)) |
 | `session_id` | Claude Code session id (`CLAUDE_SESSION_ID`), or `null` |
 
-Logging is best-effort: an IO failure prints a warning to stderr and **never changes the command's exit code**. Query the log with standard JSONL tooling:
+Logging is best-effort. An IO failure prints a warning to stderr and never changes the exit code. Query the log with standard JSONL tools:
 
 ```bash
 jq -r 'select(.outcome == "fail") | [.ts, .failed_conditions[]] | @tsv' .ctx/gate-log.jsonl
@@ -171,14 +171,14 @@ jq -r 'select(.outcome == "fail") | [.ts, .failed_conditions[]] | @tsv' .ctx/gat
 
 ## Caveats
 
-- **Fan-in approximation:** the baseline side is parsed in isolation, so cross-file callers are unknowable there. Fan-in is therefore counted as *same-file* callers on **both** sides, keeping the delta comparable. This is surfaced as a note in every run.
-- Symbols are matched across sides by `(file, parent, name)` - never by symbol id, since ids embed line numbers that shift. A renamed function counts as one removal plus one addition.
-- `new_duplication` inherits the [`ctx duplicates`](./duplicates.md) caveats: idiomatic boilerplate can look structurally similar.
-- Changed files that are excluded from the index (ignore patterns) are not scored.
+- Fan-in is approximated. ctx parses the baseline side in isolation, so it cannot see cross-file callers there. It therefore counts same-file callers as fan-in on both sides, which keeps the delta comparable, and every run prints a note about it.
+- ctx matches symbols across sides by `(file, parent, name)`, never by symbol id, because ids embed line numbers that shift. A renamed function counts as one removal plus one addition.
+- `new_duplication` inherits the [`ctx duplicates`](./duplicates.md) caveats: idiomatic boilerplate can look structurally similar. The generated harness Stop hook leaves it out of the blocking gate until you calibrate it.
+- ctx does not score changed files that ignore patterns exclude from the index.
 
-## See Also
+## See also
 
-- [Quality Gates](../integrations/quality-gates.md) - wiring `ctx score` into CI and Claude Code hooks
+- [Quality gates](../integrations/quality-gates.md): wiring `ctx score` into CI and Claude Code hooks
 - [ctx check](./check.md)
 - [ctx duplicates](./duplicates.md)
-- [JSON Output](../json-output.md)
+- [JSON output](../json-output.md)

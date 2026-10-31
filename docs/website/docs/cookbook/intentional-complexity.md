@@ -11,7 +11,7 @@ dispatchers must route commands, transaction boundaries must coordinate work, an
 helpers naturally acquire many incoming edges.
 
 This recipe determines what a high ctx score actually represents, tests whether the responsibility
-is coherent, and records the reasoning so the same code is not repeatedly “simplified” without
+is coherent, and records the reasoning so the same code is not repeatedly "simplified" without
 context.
 
 ## Quickest version
@@ -112,15 +112,15 @@ Strong reasons to keep complexity together include:
 - a compatibility boundary that must handle several versions or platforms;
 - a compact shared primitive with high fan-in.
 
-Weak reasons include “it has always lived here,” “splitting it is inconvenient,” or “the score is
-only a heuristic.” A heuristic is not a verdict, but it can still reveal incoherent responsibility.
+Weak reasons include "it has always lived here," "splitting it is inconvenient," or "the score is
+only a heuristic." A heuristic is not a verdict, but it can still reveal incoherent responsibility.
 
 ## 4. Look for change pressure
 
 Intentional complexity can become accidental over time. Combine the source review with churn:
 
 ```bash
-ctx hotspots --since "6 months ago" --by symbol --limit 30
+ctx hotspots --since "6 months ago" --signal complexity --by symbol --limit 30
 git log --date=short --format='%h %ad %s' -- <path>
 ```
 
@@ -175,9 +175,9 @@ When complexity is intentional, leave durable context close to the engineering d
 - an architecture decision for a cross-cutting boundary;
 - a reviewed `.ctx/rules.toml` exclusion only when a generic limit rule would otherwise misclassify
   a known case;
-- a follow-up trigger such as “revisit if another command family/state/adapter is added.”
+- a follow-up trigger such as "revisit if another command family/state/adapter is added."
 
-Avoid comments that merely repeat “this function is intentionally complex.” Explain why its parts
+Avoid comments that merely repeat "this function is intentionally complex." Explain why its parts
 belong together and what event would invalidate that reasoning.
 
 ## What worked, and what did not in ctx itself
@@ -195,7 +195,7 @@ expression families have stable invariants, but line count or score alone is not
 `run` in `src/main.rs` scores 109 with fan-out 54 and acts as the CLI composition and dispatch
 boundary. Most branches delegate to command modules, which is evidence of a coherent dispatcher.
 Its 90-day symbol hotspot rank is high because `src/main.rs` changed frequently. The right review is
-whether command-specific behavior is leaking into the dispatcher—not whether every match arm must
+whether command-specific behavior is leaking into the dispatcher, not whether every match arm must
 move to reduce the score.
 
 These three symbols occupy the same leaderboard for three different reasons: popularity, exhaustive
