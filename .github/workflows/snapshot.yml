@@ -34,18 +34,9 @@ jobs:
           toolchain: "1.91"
 
       - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          # ImageVersion is set by hosted runners; keying on it prevents a
-          # target/ dir cached under one runner image (Xcode/clang paths)
-          # from poisoning builds on a newer image
-          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-snapshot-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ env.ImageVersion }}
 
       - name: Build
         # default features include duckdb, which `ctx snapshot` requires

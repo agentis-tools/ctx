@@ -70,6 +70,20 @@ sets **1.5** because hosted runners are slower and noisier. The regression
 factor (1.20) is deliberately *not* scaled — baselines are captured on the
 same runner class that enforces them.
 
+## CI: same-runner A/B
+
+Hosted `ubuntu-latest` machines vary by ~1.4x, which is more than the 1.20
+regression factor. CI therefore does not compare against the committed
+baseline when it can avoid it: the `perf` job runs the suite with the **base**
+binary and then the **head** binary on the same runner, and gates on the
+difference (`.github/scripts/perf_ab_verdict.py`). The base is the pull
+request's base commit, the previous main commit for a push, and the latest
+release tag for nightly and manual runs. A budget or RSS overage that the base
+run shows too is reported as a warning, not a failure; a regression against
+the base always fails. The base baseline is written to runner temp and never
+committed. The committed `perf/baselines/ubuntu-latest.json` is used only if
+no base binary can be built, and then only as an advisory comparison.
+
 ## Baselines
 
 `perf/baselines/<runner-class>.json` — see `perf/baselines/README.md` for the

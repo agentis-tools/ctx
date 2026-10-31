@@ -21,9 +21,21 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Incremental artifacts are never reused across CI runs; they only bloat
+  # target/ and the cache. Line tables keep test backtraces readable while
+  # cutting debug info (and link time) for every dev/test build.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 permissions:
   contents: read
+
+# A new push to a pull request supersedes the running checks. main, nightly
+# and manual runs are never cancelled: each of them is a record.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Replaces the workflow-level paths-ignore: report whether the pull request
@@ -68,6 +80,10 @@ jobs:
             features: ""
           - os: windows-latest
             features: "--no-default-features"
+          # Intel macOS is a release target (built without DuckDB, see
+          # release.yml) that the rows above never compiled or tested.
+          - os: macos-15-intel
+            features: "--no-default-features"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,25 +95,24 @@ jobs:
         with:
           toolchain: "1.91"
 
+      # rust-cache keys on the toolchain, lockfiles and OS/arch, falls back to
+      # the newest partial match (so a lockfile change rebuilds
+      # only what changed instead of DuckDB from scratch), and prunes
+      # workspace artifacts before saving. Only main saves: pull requests
+      # restore main's cache instead of each writing gigabytes of their own
+      # and evicting it (the 10 GB repository limit).
       - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          # ImageVersion is set by hosted runners; keying on it prevents a
-          # target/ dir cached under one runner image (Xcode/clang paths)
-          # from poisoning builds on a newer image
-          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # ImageVersion keeps a target/ built under one runner image (Xcode or
+          # clang paths) from being restored onto a newer one.
+          key: ${{ matrix.features }}-${{ env.ImageVersion }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build
-        run: cargo build --locked --verbose ${{ matrix.features }}
-
+      # `cargo test` builds the binary and every test target; a separate
+      # `cargo build` step only rebuilt the same graph.
       - name: Run tests
-        run: cargo test --locked --verbose ${{ matrix.features }}
+        run: cargo test --locked ${{ matrix.features }}
 
   lint:
     needs: changes
@@ -117,11 +132,18 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Test PR report renderer
-        run: node --test .github/scripts/render-ctx-pr-comment.test.cjs
+      - name: Test CI scripts
+        run: |
+          node --test .github/scripts/render-ctx-pr-comment.test.cjs
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
   plugins:
     needs: changes
@@ -136,6 +158,11 @@ jobs:
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Verify generated and committed plugins match
         run: ./scripts/release-plugin-check.sh --check
@@ -171,6 +198,11 @@ jobs:
         with:
           toolchain: "1.91"
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Dry-run publish (with features)
         run: cargo publish --locked --dry-run
 
@@ -201,15 +233,31 @@ jobs:
           ruby -c packaging/homebrew/ctx.rb
           python3 -m json.tool packaging/scoop/ctx.json >/dev/null
 
+  # Same-runner A/B: time the base binary and the head binary back to back on
+  # one machine and gate on the difference. The committed baseline
+  # (perf/baselines/ubuntu-latest.json) is compared across machines, and
+  # hosted ubuntu-latest runners differ by ~1.4x: from 2026-10-21 every
+  # scenario on an unchanged main ran ~1.4x slower and the nightly failed
+  # every day with no code change. The committed file is now only the
+  # fallback when no base binary can be built.
+  #
+  # Base: the pull request's base commit; for a push to main, the previous
+  # main commit; for nightly and manual runs, the latest release tag (is main
+  # slower than what we shipped?). Each main/nightly run caches its perf
+  # binary by commit, so the base is usually a cache hit; on a miss it is
+  # built in a worktree against the same target/ (only the ctx crate and any
+  # changed dependencies recompile).
   perf:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    env:
+      CTX_PERF_BUDGET_SCALE: "1.5"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # ctx score/check diff against git history; the harness also
-          # records the commit SHA in its results.
+          # ctx score/check diff against git history, the base is resolved
+          # from history and tags, and the harness records the commit SHA.
           fetch-depth: 0
           persist-credentials: false
 
@@ -219,98 +267,156 @@ jobs:
           toolchain: "1.91"
 
       - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-            perf/target/
-          # ImageVersion is set by hosted runners; keying on it prevents a
-          # target/ dir cached under one runner image (Xcode/clang paths)
-          # from poisoning builds on a newer image
-          key: ${{ runner.os }}-${{ env.ImageVersion }}-cargo-perf-${{ hashFiles('**/Cargo.lock') }}
+          workspaces: |
+            . -> target
+            perf -> target
+          save-if: ${{ github.event_name != 'pull_request' }}
 
+      - name: Resolve comparison base
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              sha="$PR_BASE"; label="PR base ${PR_BASE:0:7}"; suite="pr" ;;
+            push)
+              if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+                sha="$BEFORE"
+              else
+                sha="$(git rev-parse HEAD^)"
+              fi
+              label="previous main ${sha:0:7}"; suite="full" ;;
+            *)
+              tag="$(git describe --tags --abbrev=0 --match 'v*' HEAD)"
+              sha="$(git rev-parse "$tag^{commit}")"; label="release $tag"; suite="full" ;;
+          esac
+          {
+            echo "sha=$sha"
+            echo "label=$label"
+            echo "suite=$suite"
+          } >> "$GITHUB_OUTPUT"
+          echo "Comparing against $label ($sha), suite $suite"
+
+      # perf-bin/ctx is the one path cached perf binaries are saved from and
+      # restored to; bins/head and bins/base hold the two binaries under test.
       - name: Build ctx (perf profile, all features)
-        run: cargo build --locked --profile perf --all-features
+        run: |
+          cargo build --locked --profile perf --all-features
+          mkdir -p perf-bin bins/head bins/base
+          cp target/perf/ctx perf-bin/ctx
+          cp target/perf/ctx bins/head/ctx
+
+      - name: Cache this commit's perf binary for later comparisons
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: perf-bin/ctx
+          key: perf-bin-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+
+      - name: Clear the cache path before restoring the base
+        run: rm -f perf-bin/ctx
+
+      - name: Restore the base perf binary from cache
+        id: base-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: perf-bin/ctx
+          key: perf-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.base.outputs.sha }}
+
+      - name: Build the base perf binary on a cache miss
+        id: bins
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          HIT: ${{ steps.base-restore.outputs.cache-hit }}
+        run: |
+          if [ "$HIT" = "true" ]; then
+            mv perf-bin/ctx bins/base/ctx
+            echo "ab=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Build in a worktree against the shared target/: only the ctx
+          # crate and changed dependencies recompile. The head binary is
+          # already safe in bins/head.
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          if (cd "$RUNNER_TEMP/base" && \
+              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
+              cargo build --locked --profile perf --all-features); then
+            cp target/perf/ctx bins/base/ctx
+            echo "ab=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::could not build the base ($BASE_SHA); comparing against the committed baseline instead"
+            echo "ab=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Harness unit tests
         run: cargo test --locked --manifest-path perf/Cargo.toml
 
       - name: Harness smoke run
         env:
-          CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
+          CTX_PERF_BIN: ${{ github.workspace }}/bins/head/ctx
         run: cargo run --locked --release --manifest-path perf/Cargo.toml -- --smoke
 
-      # The original advisory condition ("until the ubuntu-latest baseline
-      # lands in perf/baselines/ and run-to-run spread is confirmed <20%") has
-      # been met since 2026-07-10: the baseline is committed and spread is a
-      # few percent. It is no longer why this is advisory.
-      #
-      # Pull requests stay advisory so the pre-existing indexing regression
-      # (#96) does not block unrelated work. Scheduled, dispatched, and
-      # push-to-main runs fail hard, so a regression turns main red and
-      # notifies instead of hiding as a failed step inside a green job --
-      # which is exactly how #96 went unnoticed from 2026-07-11 to 07-31.
-      #
-      # Remove this expression entirely (making perf required everywhere)
-      # once #96 is fixed and the suite is green.
-      - name: Run perf harness
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+      - name: Run perf harness on the base
+        if: steps.bins.outputs.ab == 'true'
         env:
-          CTX_PERF_BIN: ${{ github.workspace }}/target/perf/ctx
-          CTX_PERF_BUDGET_SCALE: "1.5"
+          CTX_PERF_BIN: ${{ github.workspace }}/bins/base/ctx
+          SUITE: ${{ steps.base.outputs.suite }}
         run: |
-          SUITE=pr
-          if [ "${{ github.event_name }}" = "schedule" ] || \
-             [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
-             { [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; }; then
-            SUITE=full
-          fi
+          # Exit 1 only means a budget was exceeded on the base; the verdict
+          # step uses that to tell new overages from existing ones. The
+          # baseline written here is ephemeral (runner temp), never committed.
+          set +e
           cargo run --locked --release --manifest-path perf/Cargo.toml -- \
             --suite "$SUITE" \
-            --baseline perf/baselines/ubuntu-latest.json \
-            --json-out perf-results.json
+            --baseline "$RUNNER_TEMP/base-baseline.json" --write-baseline \
+            --json-out perf-base-results.json
+          rc=$?
+          [ "$rc" -le 1 ] || exit "$rc"
 
-      # Without this, a perf failure is only legible by downloading the
-      # artifact and reading JSON, so nobody reads it.
-      - name: Summarize perf results
-        if: always()
+      - name: Run perf harness on the head
+        env:
+          CTX_PERF_BIN: ${{ github.workspace }}/bins/head/ctx
+          SUITE: ${{ steps.base.outputs.suite }}
+          AB: ${{ steps.bins.outputs.ab }}
         run: |
-          test -f perf-results.json || exit 0
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
+          baseline="$RUNNER_TEMP/base-baseline.json"
+          [ "$AB" = "true" ] || baseline=perf/baselines/ubuntu-latest.json
+          set +e
+          cargo run --locked --release --manifest-path perf/Cargo.toml -- \
+            --suite "$SUITE" \
+            --baseline "$baseline" \
+            --json-out perf-results.json
+          rc=$?
+          # 1 = gate findings, judged by the verdict step; 2+ = harness error.
+          [ "$rc" -le 1 ] || exit "$rc"
+          echo "HARNESS_RC=$rc" >> "$GITHUB_ENV"
 
-          data = json.load(open("perf-results.json"))
-          scenarios = data.get("scenarios", {})
-          meta = data.get("meta", {})
-          suite = meta.get("suite", "?")
-          bad = {k: v for k, v in scenarios.items() if v.get("status") != "pass"}
-          print("### Perf (%s suite)\n" % suite)
-          if not bad:
-              print(f"All {len(scenarios)} scenarios within budget and baseline.")
-          else:
-              print(f"**{len(bad)} of {len(scenarios)} scenarios failed.**\n")
-              print("| scenario | median | budget | baseline | vs budget | vs baseline |")
-              print("| --- | ---: | ---: | ---: | ---: | ---: |")
-              for name, s in sorted(bad.items()):
-                  median = s.get("median_ms") or 0
-                  budget = s.get("budget_ms")
-                  base = s.get("baseline_median_ms")
-                  vs_budget = f"{median / budget:.1f}x" if budget else "-"
-                  vs_base = f"{median / base:.1f}x" if base else "-"
-                  print(
-                      f"| `{name}` | {median:.0f} ms | {budget or '-'} | {base or '-'} "
-                      f"| {vs_budget} | {vs_base} |"
-                  )
-          PY
+      - name: Perf verdict
+        env:
+          AB: ${{ steps.bins.outputs.ab }}
+          LABEL: ${{ steps.base.outputs.label }}
+        run: |
+          if [ "$AB" = "true" ]; then
+            python3 .github/scripts/perf_ab_verdict.py \
+              perf-base-results.json perf-results.json \
+              --base-label "$LABEL" --summary "$GITHUB_STEP_SUMMARY"
+          else
+            # Cross-machine comparison: report, don't fail on it.
+            echo "::warning::no base binary; compared against the committed baseline (advisory)"
+            [ "${HARNESS_RC:-0}" = "0" ] || echo "::warning::perf findings against the committed baseline; see the table above"
+          fi
 
       - name: Upload perf results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-results
-          path: perf-results.json
+          path: |
+            perf-results.json
+            perf-base-results.json
           if-no-files-found: ignore
