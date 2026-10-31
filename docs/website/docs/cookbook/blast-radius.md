@@ -29,7 +29,7 @@ external consumers that cannot appear as call edges.
 
 ## State the proposed semantic change
 
-Do not ask only “what calls this function?” Record what might change:
+Do not ask only "what calls this function?" Record what might change:
 
 ```text
 Target: src/harness/checksum.rs::content_checksum

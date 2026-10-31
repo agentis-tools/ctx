@@ -1,41 +1,39 @@
 ---
 id: quality-gates
-title: Quality Gates
+title: Quality gates
 sidebar_position: 4
 ---
 
-# Quality Gates
+# Quality gates
 
 Wire the ctx quality suite into CI pipelines and AI coding agents.
 
-## Philosophy: Exit Codes Are the API
+## Exit codes are the API
 
-Every ctx quality command follows the same three-way exit-code convention (like `grep` or most linters):
+Every ctx quality command uses the same three exit codes, like `grep` and most linters:
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success, nothing to report |
-| 1 | Command ran successfully but produced findings |
-| 2 | Operational error (bad arguments, missing index, git failure, ...) |
+| 1 | The command ran and produced findings |
+| 2 | Operational error (bad arguments, missing index, git failure) |
 
-That convention **is** the integration API. A shell `&&`, a CI step, or an agent hook needs no JSON parsing to enforce a gate - the process exit code carries the verdict, and `--json` is there when a tool wants the details. Crucially, code 2 never masquerades as a finding: a broken gate fails loudly instead of "passing".
+A shell `&&`, a CI step, or an agent hook can enforce a gate from the exit code alone. Use `--json` when a tool needs the details. An operational error exits 2, never 0 or 1, so a broken gate fails the build instead of passing it. See [Exit codes](../reference/exit-codes.md) for the full table.
 
-## The Suite
-
-The quality commands are designed to be composed:
+## The suite
 
 | Command | Question it answers | Gate |
 |---------|--------------------|------|
 | [`ctx check`](../commands/check.md) | Does this change violate our architecture rules? | exits 1 on violations |
-| [`ctx hotspots`](../commands/hotspots.md) | Where does refactoring pay off most (churn x complexity)? | informational |
+| [`ctx hotspots`](../commands/hotspots.md) | Where does refactoring pay off most (churn × size by default, or churn × complexity)? | informational |
 | [`ctx duplicates`](../commands/duplicates.md) | Which functions are structural near-copies? | `--fail-on-found` |
-| [`ctx similar`](../commands/similar.md) | Does the function I'm about to write already exist? | informational (pre-emptive) |
+| [`ctx similar`](../commands/similar.md) | Does the function I'm about to write already exist? | informational |
 | [`ctx score`](../commands/score.md) | Did this change make the code better or worse? | `--fail-on "metric OP value,..."` |
-| [`ctx map`](../commands/map.md) | What does this codebase look like, in N tokens? | informational (orientation) |
+| [`ctx map`](../commands/map.md) | What does this codebase look like, in N tokens? | informational |
 
-`ctx score` is the composite gate: it folds check violations, new duplication, complexity/fan-out deltas, and symbol churn into one scorecard with `--fail-on` conditions.
+`ctx score` is the composite gate. It combines check violations, new duplication, complexity and fan-out deltas, and symbol churn into one scorecard, and `--fail-on` turns any of them into a failing condition.
 
-## CI Example
+## CI example
 
 ```yaml
 # GitHub Actions
@@ -49,30 +47,44 @@ The quality commands are designed to be composed:
   run: ctx score --against origin/main --fail-on "check_violations>0,new_duplication>0,complexity_delta>=25"
 ```
 
-## Claude Code Integration (reference configuration)
+`--against origin/main` needs the base branch in the checkout. With `actions/checkout`, set `fetch-depth: 0`. [CI/CD integration](./ci-cd.md) shows how to install ctx in the job.
 
-This is the reference wiring for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) hooks in a project's `.claude/settings.json`. It gives the agent a codebase map at session start, checks architecture rules after every edit, and blocks it from finishing with rule violations or fresh copy-paste:
+## Claude Code integration
+
+Run `ctx harness init` in the repository. It writes three hook scripts under `.claude/hooks/ctx/`, a starter `.ctx/rules.toml`, and the hook entries in `.claude/settings.json`:
 
 ```json
 {
-  "permissions": { "allow": ["Bash(ctx *)"] },
+  "permissions": {
+    "allow": ["Bash(ctx *)"],
+    "deny": [
+      "Bash(ctx self-update*)",
+      "Edit(.ctx/rules.toml)",
+      "Edit(.claude/hooks/ctx/**)",
+      "Edit(.claude/settings.json)"
+    ]
+  },
   "hooks": {
-    "SessionStart": [ { "hooks": [{ "type": "command", "command": "ctx map --budget 2000" }] } ],
-    "PostToolUse": [ { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "ctx index && ctx check --against HEAD --json" }] } ],
-    "Stop": [ { "hooks": [{ "type": "command", "command": "ctx score --against main --fail-on \"check_violations>0,new_duplication>0\"" }] } ]
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ctx/session-start.sh" }] }],
+    "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ctx/post-tool-use.sh" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ctx/stop.sh" }] }]
   }
 }
 ```
 
-How the pieces work together:
+What each hook does:
 
-- **SessionStart** - `ctx map --budget 2000` injects a token-budgeted structural overview, so the agent starts oriented instead of exploring blind.
-- **PostToolUse** on `Edit|Write` - `ctx index && ctx check --against HEAD --json` reindexes incrementally (fast: only changed files are re-parsed) and reports any *new* architecture violation right at the edit that introduced it, as JSON the agent can act on.
-- **Stop** - `ctx score --against main --fail-on "check_violations>0,new_duplication>0"` is the final gate: exit 1 tells the agent its work is not done, with the failed conditions on stderr.
+- `session-start.sh` runs `ctx map --budget 2000`. Claude Code adds its output to the session context, so the agent starts with a structural overview.
+- `post-tool-use.sh` runs after each `Edit` or `Write`. It refreshes the index incrementally and runs `ctx check --against HEAD --json`. Claude Code shows this output in the transcript but does not pass it to the model, so the agent does not see post-edit violations unless it runs `ctx check` itself.
+- `stop.sh` runs `ctx score --against <default branch> --fail-on "check_violations>0"` and prints the scorecard. The `new_duplication` metric stays in the scorecard but does not fail the gate, because the duplication heuristic needs calibration for each repository. v0.4.0 hooks also gated on `new_duplication>0`; rerun `ctx harness init` after upgrading to regenerate them.
+
+By default the Stop hook only reports. Set `CTX_GATE_BLOCKING=1` in the environment Claude Code runs in to make a failed gate exit 2, which Claude Code treats as "keep working". If you add `new_duplication` to a blocking Stop hook, `ctx harness init` and `ctx harness doctor` print a warning. Every hook fails open: an operational error, or a ctx binary older than the templates, exits 0 with a note on stderr.
+
+See [ctx harness](../commands/harness.md) for plugin mode, Codex, and upgrades.
 
 ### Recommended CLAUDE.md guidance
 
-Pair the hooks with these instructions in the project's `CLAUDE.md`, so the agent avoids findings instead of just hitting the gates:
+`ctx harness init` prints a guidance block for `CLAUDE.md`. These extra instructions help the agent avoid findings instead of hitting the gates:
 
 ```markdown
 ## Code quality
@@ -81,24 +93,24 @@ Pair the hooks with these instructions in the project's `CLAUDE.md`, so the agen
   extend or reuse an existing implementation instead of adding a near-copy.
 - Before modifying an exported symbol, run `ctx query impact <symbol>` to
   see what depends on it.
-- Files flagged by `ctx hotspots` are already complex and frequently
-  changed: prefer extracting a new module over growing them further.
-- The Stop hook runs `ctx score --against main`; keep `check_violations`
-  and `new_duplication` at 0.
+- Files flagged by `ctx hotspots` change often and are already large:
+  prefer extracting a new module over growing them further.
+- Run `ctx check --against HEAD` after editing; the Stop hook runs
+  `ctx score --against main` and fails on architecture violations.
 ```
 
-## Pre-commit Hook
+## Pre-commit hook
 
 ```bash
 #!/bin/sh
 # .git/hooks/pre-commit
-ctx index && ctx score --fail-on "check_violations>0,new_duplication>0"
+ctx index > /dev/null && ctx score --fail-on "check_violations>0,new_duplication>0"
 ```
 
-With the default `--against HEAD`, this scores exactly what is about to be committed.
+With the default `--against HEAD`, `ctx score` scores the uncommitted changes, which includes what is about to be committed.
 
-## See Also
+## See also
 
 - [ctx score](../commands/score.md), [ctx check](../commands/check.md), [ctx duplicates](../commands/duplicates.md)
-- [JSON Output](../json-output.md) - payload contract for `--json` consumers
-- [CI/CD Integration](./ci-cd.md)
+- [JSON output](../json-output.md): the payload contract for `--json` consumers
+- [CI/CD integration](./ci-cd.md)
