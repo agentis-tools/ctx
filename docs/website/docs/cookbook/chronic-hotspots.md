@@ -6,8 +6,8 @@ sidebar_position: 5
 
 # Investigate chronic hotspots without chasing large files
 
-A hotspot is code that is both structurally complex and frequently changed. That intersection is
-more actionable than either dimension alone: a complex but stable parser may be safe, while a
+A hotspot is code that is both structurally large or complex and frequently changed. That
+intersection is more actionable than either dimension alone: a complex but stable parser may be safe, while a
 moderately complex coordinator edited every week may impose a continuing cost.
 
 This recipe distinguishes a current hotspot from a chronic one, identifies the symbols responsible,
@@ -17,8 +17,8 @@ and tests whether the pressure represents healthy feature growth or accidental r
 
 ```bash
 ctx index
-ctx hotspots --since "90 days ago" --json
-ctx hotspots --since "1 year ago" --json
+ctx hotspots --since "90 days ago" --signal complexity --json
+ctx hotspots --since "1 year ago" --signal complexity --json
 ctx source <responsible-symbol>
 ctx query impact <responsible-symbol> --depth 1
 ```
@@ -31,10 +31,14 @@ investigation; confirm persistence and ownership before recommending decompositi
 `ctx hotspots` computes:
 
 ```text
-normalized churn × normalized complexity
+normalized churn × normalized signal
 ```
 
-Both dimensions are min-max normalized over the analyzed candidate set. Consequently:
+The signal is size in lines by default (`--signal lines`): a symbol's line span, or the sum of a
+file's symbol spans. `--signal complexity` uses ctx's coupling-based complexity instead. This recipe
+investigates structural pressure, so its commands pass `--signal complexity`; drop the flag to rank by
+churn × size, which predicted later bug fixes better in ctx's backtests (see
+[ctx hotspots](../commands/hotspots)). Both dimensions are min-max normalized over the analyzed candidate set. Consequently:
 
 - the score is a ranking within one run, not an absolute health grade;
 - scores from different windows, filters, or repositories are not directly comparable;
@@ -50,13 +54,13 @@ For recent delivery pressure:
 
 ```bash
 ctx index
-ctx hotspots --since "90 days ago" --limit 20
+ctx hotspots --since "90 days ago" --signal complexity --limit 20
 ```
 
 For a longer maintenance pattern:
 
 ```bash
-ctx hotspots --since "12 months ago" --min-churn 4 --limit 20
+ctx hotspots --since "12 months ago" --signal complexity --min-churn 4 --limit 20
 ```
 
 The default window is six months and the default minimum is two commits. A very short window
@@ -71,21 +75,23 @@ known moves before interpreting a sudden drop.
 Start at file level, then ask which functions or methods carry the structural load:
 
 ```bash
-ctx hotspots --since "90 days ago" --by file --limit 20 --json > file-hotspots.json
-ctx hotspots --since "90 days ago" --by symbol --limit 30 --json > symbol-hotspots.json
+ctx hotspots --since "90 days ago" --signal complexity --by file --limit 20 --json > file-hotspots.json
+ctx hotspots --since "90 days ago" --signal complexity --by symbol --limit 30 --json > symbol-hotspots.json
 
 jq '.data.entries[] | {
-  file, commits, complexity, fan_out, score, symbols
+  file, commits, complexity, fan_out, lines, score, symbols
 }' file-hotspots.json
 ```
 
+The JSON reports both `complexity` and `lines` for every entry, whichever signal ranked it.
+
 Symbol-level churn is approximated by the containing file's commit count. A function can therefore
-rank highly even if neighboring functions—not that function—caused most edits. Confirm with git
+rank highly even if neighboring functions, not that function, caused most edits. Confirm with git
 history before assigning ownership or proposing a refactor.
 
 ## 3. Confirm that the pressure persists
 
-Current rankings answer “where is pressure now?” Snapshot history answers “has it persisted?”:
+Current rankings answer "where is pressure now?" Snapshot history answers "has it persisted?":
 
 ```bash
 ctx sql --snapshots=../ctx-snapshots/snapshots "
@@ -179,13 +185,17 @@ When acting, make one coherent change, then compare the branch against its base:
 
 ```bash
 ctx score --against <base>
-ctx hotspots --against <base> --since "90 days ago"
+ctx hotspots --against <base> --since "90 days ago" --signal complexity
 ```
 
 A successful refactor does not have to make every number fall. It should make the intended
 responsibility, dependency direction, or future change path clearer.
 
 ## What worked, and what did not in ctx itself
+
+These measurements predate the change of default signal: `ctx hotspots` ranked by churn ×
+complexity when they were taken (the default up to v0.4.0). Pass `--signal complexity` to
+reproduce them.
 
 In the 90-day current view, `src/db/schema.rs` ranked first with 11 commits, complexity 2,084,
 fan-out 900, and a relative hotspot score of 0.60. Its leading symbols included
@@ -200,7 +210,7 @@ and remained active, but its structural density did not rise monotonically with 
 
 That makes `src/db/schema.rs` a legitimate investigation target, not an automatic extraction task.
 The next question is whether database schema, migrations, query mapping, vector support, and test
-fixtures represent separable ownership boundaries—or whether splitting them would only fragment a
+fixtures represent separable ownership boundaries, or whether splitting them would only fragment a
 coherent persistence layer.
 
 ## Give the workflow to an agent
