@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ErrorCode, Implementation, InitializeRequestParams,
+    CallToolRequestParams, CallToolResponse, ErrorCode, Implementation, InitializeRequestParams,
     InitializeResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
-    ServerInfo,
+    ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::transport::io::stdio;
@@ -76,8 +76,8 @@ impl CtxServer {
 }
 
 impl ServerHandler for CtxServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::LATEST)
             .with_server_info(Implementation::new("ctx", env!("CARGO_PKG_VERSION")))
     }
@@ -95,22 +95,18 @@ impl ServerHandler for CtxServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, rmcp::ErrorData> {
-        Ok(ListToolsResult {
-            tools: tools::get_all_tools(),
-            next_cursor: None,
-            meta: None,
-        })
+        Ok(ListToolsResult::with_all_items(tools::get_all_tools()))
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
+    ) -> Result<CallToolResponse, rmcp::ErrorData> {
         let name = request.name.as_ref();
         let args = request.arguments.as_ref();
 
-        match name {
+        let result = match name {
             // Search tools
             "search_symbols" => tools::search::search_symbols(self, args).await,
             "get_definition" => tools::search::get_definition(self, args).await,
@@ -130,7 +126,8 @@ impl ServerHandler for CtxServer {
                 format!("Unknown tool: {}", name),
                 None,
             )),
-        }
+        };
+        result.map(CallToolResponse::from)
     }
 }
 

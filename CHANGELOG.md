@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   affected. Both lockfiles (root and `perf/`) are updated.
 
 ### Changed
+- The MCP server (`mcp` feature) is built on rmcp 3. The advertised MCP
+  protocol version (2025-11-25) and the eight tools are unchanged; library
+  users who implement against `ctx::mcp` see rmcp 3 types.
 - Cold `ctx index` no longer builds a new parser (and recompiles every
   language's queries) for each file in the parallel path; parsers are reused
   per worker. On the 2,000-file perf fixture a cold index drops from 38 s to
