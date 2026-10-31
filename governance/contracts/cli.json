@@ -378,7 +378,8 @@
         "--no-stream": "--no-stream Buffer all output before printing (instead of streaming)",
         "--no-tree": "--no-tree Disable project tree in output",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": [
         "edges"
@@ -403,7 +404,8 @@
         "--no-tree": "--no-tree Disable project tree in output",
         "--offline": "--offline Apply cached answers only; never call the model",
         "--show-sizes": "--show-sizes Show file sizes in project tree",
-        "--stats": "--stats Print stats (file count, total size, time taken)"
+        "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)"
       },
       "subcommands": []
     },
