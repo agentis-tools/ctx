@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository and filtering afterwards. `score_3_changed` on the perf fixture
   drops from 5.5 s to 1.2 s with identical output (#23).
 ### Added
+- `ctx grep <PATTERN> [PATHS]...`: ripgrep-style text search (built on
+  ripgrep's own `grep-searcher`/`grep-regex`/`ignore` crates) that tags every
+  match with what the index knows about it: `def`, `ref` (with the resolved
+  target and edge kind), `unresolved` (with the number of same-named
+  candidates), `unlinked`, `stale`, or `unindexed`, plus the trait/interface
+  `family` a target belongs to. No match is ever dropped: the set of matching
+  lines is identical to `rg -n`, and `--no-annotate` prints exactly that. A
+  summary line counts tags and lists the symbols the pattern resolved to.
+  `--json` emits the matches, tags, and counts (`command: "grep"`). Supports
+  `-F`, `-w`, `-S`, `--ignore-case`, `-g`, `-t`, `--hidden`, and
+  `--max-results`; `-i` remains ctx's global `--ignore` and excludes files.
+  Exits 0 with or without matches.
 - `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
   model (TypeSafe Jev). For each call whose name matches in-repo functions, the
   model picks the real callee among the same-named candidates or `external`
@@ -133,6 +145,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are listed separately as possible callers. `get_callers` honours `depth`
   (default 3, max 5) and `get_callees` shows the definition each call
   resolved to.
+- Hardened project path handling across discovery, context selection, MCP file
+  tools, and harness/config writers: symlinks, special files, parent escapes,
+  and absolute paths outside the project are rejected, while generated files
+  and persistent `.ctx` state are replaced through collision-resistant
+  project-local staging files.
+- Fixed `ctx audit` reporting zero indexed symbols by using a dedicated all-symbol
+  query with count consistency checks; recursive call and impact graphs now
+  deduplicate edge/state expansion and clamp traversal depth, and search limits
+  are bounded.
+- Bounded repository discovery, index/MCP file reads, graph results, and MCP
+  responses to prevent unbounded file and result allocations. MCP caller/callee
+  depth is now applied instead of ignored. Markdown output now chooses
+  content-safe fences and sanitizes repository-controlled path labels.
+- Reused Solidity newline indexes during symbol and call-edge extraction to
+  avoid rebuilding or rescanning the full source prefix for every location.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
@@ -152,6 +179,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check violations by default; duplication remains visible for calibration,
   and `ctx harness init`/`doctor` warn before a customized blocking hook uses
   `new_duplication` (#105).
+- Project embedding defaults are untrusted unless `--trust-project` is passed;
+  this prevents a committed `.ctx/config.toml` from silently selecting a
+  network-backed provider or routing `OLLAMA_API_KEY` to its host. Authenticated
+  non-loopback Ollama endpoints now require HTTPS, while strict loopback HTTP
+  remains supported.
+- Local FastEmbed artifacts now use an absolute per-user ctx cache outside the
+  checkout, so a tracked `.fastembed_cache` cannot substitute a model. Model
+  initialization fails rather than falling back to a project-relative cache
+  when no safe absolute cache directory is available.
 - `ctx check` no longer reports `forbidden` dependency violations between crates
   that have no dependency relationship, which made `[[rules.forbidden]]`
   unusable in a Cargo workspace (#92). Three independent resolution defects

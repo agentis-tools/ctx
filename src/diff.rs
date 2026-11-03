@@ -23,7 +23,7 @@ use crate::analytics::Analytics;
 use crate::db::Database;
 use crate::error::{CtxError, Result};
 use crate::tokens::{count_tokens_with_encoding, select_by_token_budget, Encoding, HasTokenCount};
-use crate::walker::FilePatternFilter;
+use crate::walker::{secure_file_path, FilePatternFilter};
 
 /// Configuration for diff-aware context generation.
 #[derive(Debug, Clone)]
@@ -524,10 +524,12 @@ pub fn diff_context_filtered(
     }
 
     // 5. Count tokens for each file
-    let root = std::env::current_dir().unwrap_or_default();
+    let root = filter.root();
     for ctx_file in context_files.values_mut() {
-        let path = root.join(&ctx_file.path);
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        let Ok(path) = secure_file_path(root, std::path::Path::new(&ctx_file.path)) else {
+            continue;
+        };
+        if let Ok(content) = std::fs::read_to_string(path) {
             ctx_file.token_count =
                 count_tokens_with_encoding(&content, config.encoding).unwrap_or(0);
         }

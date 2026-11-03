@@ -48,6 +48,7 @@ Before using `ctx smart`:
 | `--count-only` | Count the selected, budgeted files without preview or context output | false |
 | `--encoding <ENCODING>` | Tokenizer for selection and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
 | `--stats` | Print count timing to stderr with `--count-only` | false |
+| `--trust-project` | Trust provider, model, and Ollama host defaults from the committed `.ctx/config.toml` | false |
 | `-f, --format <FORMAT>` | Output format (xml, markdown, md, plain, json) | xml |
 | `--show-sizes` | Show file sizes in the project tree | false |
 | `--no-tree` | Disable the project tree in output | false |

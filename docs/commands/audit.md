@@ -27,6 +27,10 @@ ctx index
 
 The complexity and modularity categories use the DuckDB analytics backend, which is part of the default build. The index creates the analytics database on demand.
 
+The report's statistics are loaded directly from the indexed symbol table and
+checked against the database counts. If the index is inconsistent, `ctx audit`
+fails instead of presenting empty-data perfect scores.
+
 ## Options
 
 | Option | Description | Default |

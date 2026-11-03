@@ -73,7 +73,8 @@ pub fn run_index(config: IndexConfig) -> Result<()> {
     // Handle force reindex by removing existing database (including the
     // SQLite WAL/SHM sidecar files, which would otherwise be stale)
     if config.force {
-        let ctx_dir = root.join(index::CTX_DIR);
+        let ctx_dir =
+            ctx::walker::ensure_project_directory(&root, std::path::Path::new(index::CTX_DIR))?;
         let db_path = ctx_dir.join(index::DB_FILE);
         if db_path.exists() {
             eprintln!("Removing existing database for full reindex...");
