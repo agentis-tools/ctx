@@ -11,6 +11,7 @@ use ctx::analytics;
 use ctx::embeddings::{self, Provider};
 use ctx::error::Result;
 use ctx::index;
+use ctx::limits::{clamp_graph_depth, MAX_SEARCH_RESULTS};
 use ctx::output;
 use ctx::smart::{
     format_dry_run, format_explain, smart_context_filtered_with_options, SmartConfig,
@@ -35,6 +36,7 @@ pub fn run_smart(
     count_only: bool,
     encoding: &str,
     stats: bool,
+    trust_project: bool,
 ) -> Result<()> {
     if max_tokens == 0 {
         return Err(ctx::error::CtxError::Other(
@@ -73,8 +75,11 @@ pub fn run_smart(
     if provider == Provider::Local {
         eprintln!("Initializing local embedding model (first run downloads ~90MB)...");
     }
-    let provider =
-        embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+    let provider = embeddings::build_provider_with_project_trust(
+        provider,
+        &ctx::config::CtxConfig::load(&root).embedding,
+        trust_project,
+    )?;
 
     // Do not query an embedding corpus from another provider or dimension.
     embeddings::ensure_index_compatible(&db, provider.as_ref())?;
@@ -91,8 +96,8 @@ pub fn run_smart(
     };
     let config = SmartConfig {
         max_tokens: effective_max_tokens,
-        depth,
-        top,
+        depth: clamp_graph_depth(depth),
+        top: top.min(MAX_SEARCH_RESULTS as usize),
         encoding,
     };
 
@@ -137,17 +142,30 @@ pub fn run_smart(
     let entries: Vec<walker::FileEntry> = result
         .selected_files
         .iter()
-        .map(|f| {
-            let relative_path = std::path::PathBuf::from(&f.path);
-            let absolute_path = root.join(&relative_path);
+        .filter_map(|f| {
+            let requested = std::path::PathBuf::from(&f.path);
+            let absolute_path = match walker::secure_file_path(&root, &requested) {
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!(
+                        "Warning: refusing unsafe indexed path {}: {}",
+                        f.path, error
+                    );
+                    return None;
+                }
+            };
+            let relative_path = absolute_path
+                .strip_prefix(&root)
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or(requested);
             let size = std::fs::metadata(&absolute_path)
                 .map(|m| m.len())
                 .unwrap_or(0);
-            walker::FileEntry {
+            Some(walker::FileEntry {
                 absolute_path,
                 relative_path,
                 size,
-            }
+            })
         })
         .collect();
 
