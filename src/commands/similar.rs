@@ -36,7 +36,9 @@ pub fn run_similar(
     provider: Provider,
     json: bool,
     patterns: &[String],
+    trust_project: bool,
 ) -> Result<Outcome> {
+    let limit = limit.min(ctx::limits::MAX_SEARCH_RESULTS as usize);
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
     let filter = FilePatternFilter::new(&root, patterns)
@@ -46,8 +48,11 @@ pub fn run_similar(
         (keyword_hits(&db, query, limit, &filter)?, "keyword")
     } else {
         ensure_embeddings(&db)?;
-        let provider =
-            embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+        let provider = embeddings::build_provider_with_project_trust(
+            provider,
+            &ctx::config::CtxConfig::load(&root).embedding,
+            trust_project,
+        )?;
         embeddings::ensure_index_compatible(&db, provider.as_ref())?;
         let query_embedding = provider.embed(query)?;
         (

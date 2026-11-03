@@ -24,6 +24,7 @@ use ctx::error::Result;
 use ctx::gitutil;
 use ctx::index;
 use ctx::json::{self, SymbolRef};
+use ctx::limits::MAX_SEARCH_RESULTS;
 use ctx::utils::{truncate_path, truncate_str};
 
 /// What each ranked row represents.
@@ -301,6 +302,7 @@ pub fn run_hotspots(
     against: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    let limit = limit.min(MAX_SEARCH_RESULTS as usize);
     if !gitutil::is_git_repo() {
         return Err(ctx::error::CtxError::NotGitRepo);
     }
