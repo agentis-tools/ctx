@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository and filtering afterwards. `score_3_changed` on the perf fixture
   drops from 5.5 s to 1.2 s with identical output (#23).
 ### Added
+- `ctx grep <PATTERN> [PATHS]...`: ripgrep-style text search (built on
+  ripgrep's own `grep-searcher`/`grep-regex`/`ignore` crates) that tags every
+  match with what the index knows about it: `def`, `ref` (with the resolved
+  target and edge kind), `unresolved` (with the number of same-named
+  candidates), `unlinked`, `stale`, or `unindexed`, plus the trait/interface
+  `family` a target belongs to. No match is ever dropped: the set of matching
+  lines is identical to `rg -n`, and `--no-annotate` prints exactly that. A
+  summary line counts tags and lists the symbols the pattern resolved to.
+  `--json` emits the matches, tags, and counts (`command: "grep"`). Supports
+  `-F`, `-w`, `-S`, `--ignore-case`, `-g`, `-t`, `--hidden`, and
+  `--max-results`; `-i` remains ctx's global `--ignore` and excludes files.
+  Exits 0 with or without matches.
 - `ctx judge edges` (opt-in): re-resolves ambiguous call edges with a decision
   model (TypeSafe Jev). For each call whose name matches in-repo functions, the
   model picks the real callee among the same-named candidates or `external`
@@ -57,6 +69,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- Claude Code hooks now deliver their findings to the model. Claude Code
+  only writes a PostToolUse hook's plain stdout to its debug log, so the
+  `ctx check` report never reached the agent (measured in ctx-bench: 111
+  PostToolUse runs, 0 delivered). The `post-tool-use.sh` template now emits
+  violations as `hookSpecificOutput.additionalContext` JSON, which Claude
+  Code shows next to the tool result, and prints nothing for a clean check.
+  The report is `ctx check --format plain`, cut at whole lines below Claude
+  Code's 10,000-character context limit with a count of the lines left out.
+  In blocking mode (`CTX_GATE_BLOCKING=1`) `stop.sh` now puts the scorecard
+  on stderr with the failure line, since an exit-2 Stop hook shows the model
+  stderr only (before, it was told to fix "the scorecard above" without
+  seeing it). The Claude Code reference wiring in the quality-gates docs now
+  points at the generated hooks. Rerun `ctx harness init` to regenerate local
+  hooks; the committed Claude plugin is regenerated.
+- The Claude Code `stop.sh` hook no longer blocks a second time when the
+  Stop payload has `stop_hook_active: true`. In blocking mode a gate the model
+  could not clear made every Stop exit 2, so the session never ended; it now
+  reports the still-failing gate on stderr and lets the session stop.
+- Analytics engines opened in the same process (the MCP server, parallel
+  tests) no longer share one temporary DuckDB copy of the index when the
+  `sqlite` extension is not installed. The copy was named after the pid and the
+  clock, which collided within the clock's resolution (microseconds on macOS),
+  so DuckDB aborted with `FetchStringFromDict` or answered from another
+  index. Each copy now lives in its own private, randomly named directory.
 - `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
   DuckDB update the previous debug fallback would have printed the new
   decimal type's internals.
@@ -109,10 +145,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are listed separately as possible callers. `get_callers` honours `depth`
   (default 3, max 5) and `get_callees` shows the definition each call
   resolved to.
+- Hardened project path handling across discovery, context selection, MCP file
+  tools, and harness/config writers: symlinks, special files, parent escapes,
+  and absolute paths outside the project are rejected, while generated files
+  and persistent `.ctx` state are replaced through collision-resistant
+  project-local staging files.
+- Fixed `ctx audit` reporting zero indexed symbols by using a dedicated all-symbol
+  query with count consistency checks; recursive call and impact graphs now
+  deduplicate edge/state expansion and clamp traversal depth, and search limits
+  are bounded.
+- Bounded repository discovery, index/MCP file reads, graph results, and MCP
+  responses to prevent unbounded file and result allocations. MCP caller/callee
+  depth is now applied instead of ignored. Markdown output now chooses
+  content-safe fences and sanitizes repository-controlled path labels.
+- Reused Solidity newline indexes during symbol and call-edge extraction to
+  avoid rebuilding or rescanning the full source prefix for every location.
 - Indexing now skips unresolved-edge scans for no-op serial and parallel
   refreshes even when legacy unresolved edges remain, while still resolving
   after file changes or deletions. The resolver also has the qualified-name
   lookup index identified by profiling of its hot path (#96).
+- `ctx duplicates` now bounds candidate and result memory, adds `--limit`,
+  and reports truncation in both human and JSON output (#104).
 - Hardened self-update staging and writability probes with exclusive randomized
   temporary files, bounded release/archive/member reads, and bounded
   decompression. Snapshot backfill now uses a randomized private RAII tempdir
@@ -126,6 +179,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check violations by default; duplication remains visible for calibration,
   and `ctx harness init`/`doctor` warn before a customized blocking hook uses
   `new_duplication` (#105).
+- Project embedding defaults are untrusted unless `--trust-project` is passed;
+  this prevents a committed `.ctx/config.toml` from silently selecting a
+  network-backed provider or routing `OLLAMA_API_KEY` to its host. Authenticated
+  non-loopback Ollama endpoints now require HTTPS, while strict loopback HTTP
+  remains supported.
+- Local FastEmbed artifacts now use an absolute per-user ctx cache outside the
+  checkout, so a tracked `.fastembed_cache` cannot substitute a model. Model
+  initialization fails rather than falling back to a project-relative cache
+  when no safe absolute cache directory is available.
+- `ctx check` no longer reports `forbidden` dependency violations between crates
+  that have no dependency relationship, which made `[[rules.forbidden]]`
+  unusable in a Cargo workspace (#92). Three independent resolution defects
+  produced the false edges:
+  - `use crate::…` in a workspace member resolved against the repository root's
+    `src/`, so every member importing from its own crate root was recorded as
+    importing from the root package's `src/lib.rs`. `crate::` now resolves
+    against the importing file's own crate root.
+  - A candidate's `qualified_name` was matched as a bare substring of the call
+    context, so `BTreeMap::new()` and `serde_json::Map::new()` both bound to a
+    local `Map::new`. The match is now anchored at an identifier boundary.
+  - Global name uniqueness was accepted as evidence for calls that carry a
+    receiver or path qualifier (`out.push(v)`, `Type::from(x)`), and for bare
+    calls whose only candidate is an `impl` method. For Rust callers,
+    uniqueness now applies to bare calls resolving to a free function, to a
+    module path naming the function's file (`doctor::find(..)`), and to a
+    receiver call whose only same-named method is in the caller's own file.
+    Go, Python and other languages keep the previous behavior, where
+    `pkg.Func(..)` is the normal call to a free function.
+
+  A bare call shadowed by a local closure binding can still resolve to an
+  unrelated same-named free function; that case needs the Cargo dependency
+  graph or closure-scope awareness and is not addressed here.
+
+  Re-running `ctx index` on an existing index is not sufficient to clear
+  previously stored false edges, because resolution only fills targets that are
+  still unset. Delete `.ctx/codebase.sqlite` and reindex to pick up the fix.
 
 ### Documentation
 - Refreshed README measurements, token-budget wording, LSP guidance, and
