@@ -255,6 +255,7 @@
         "--show-sizes": "--show-sizes Show file sizes in project tree",
         "--smart-case": "-S, --smart-case Search case-insensitively unless the pattern has an uppercase letter",
         "--stats": "--stats Print stats (file count, total size, time taken)",
+        "--trust-project": "--trust-project Trust this checkout's project configuration for provider, model, and Ollama host defaults (network-capable; review `.ctx/config.toml` first)",
         "--type": "-t, --type <TYPES> Only search files of this ripgrep file type, e.g. rust, py, ts (repeatable)",
         "--word-regexp": "-w, --word-regexp Only show matches surrounded by word boundaries"
       },
