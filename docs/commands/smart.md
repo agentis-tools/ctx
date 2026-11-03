@@ -39,6 +39,7 @@ Before using `ctx smart`:
 | `--provider <local\|openai\|ollama>` | Embedding backend for the query. It must match the provider that built the embeddings. `--openai` is a deprecated alias for `--provider openai` | `local` |
 | `--explain` | Show why each file was selected | false |
 | `--dry-run` | Show selection without file contents | false |
+| `--trust-project` | Trust provider, model, and Ollama host defaults from the committed `.ctx/config.toml` | false |
 | `--count-only` | Count the selected, budgeted files without preview or context output | false |
 | `--encoding <ENCODING>` | Tokenizer for selection and counting (`cl100k_base`, `o200k_base`, or `p50k_base`) | cl100k_base |
 | `--stats` | Print count timing to stderr with `--count-only` | false |

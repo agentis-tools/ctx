@@ -24,13 +24,17 @@ pub fn run_embed(
     batch_size: usize,
     provider: Provider,
     serial: bool,
+    trust_project: bool,
 ) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
     local_model_hint(provider);
-    let provider =
-        embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+    let provider = embeddings::build_provider_with_project_trust(
+        provider,
+        &ctx::config::CtxConfig::load(&root).embedding,
+        trust_project,
+    )?;
 
     if verbose {
         println!(
@@ -112,6 +116,7 @@ pub fn run_embed_watch(
     batch_size: usize,
     provider: Provider,
     serial: bool,
+    trust_project: bool,
 ) -> Result<()> {
     use notify::RecursiveMode;
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
@@ -123,8 +128,11 @@ pub fn run_embed_watch(
     let _db_path = ctx_dir.join("codebase.sqlite");
 
     local_model_hint(provider);
-    let provider =
-        embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+    let provider = embeddings::build_provider_with_project_trust(
+        provider,
+        &ctx::config::CtxConfig::load(&root).embedding,
+        trust_project,
+    )?;
 
     println!(
         "Using embedding provider: {} (dim={})",
@@ -257,7 +265,13 @@ pub fn run_embed_watch(
 }
 
 /// Run semantic search using embeddings.
-pub fn run_semantic(query: &str, limit: usize, output: &str, provider: Provider) -> Result<()> {
+pub fn run_semantic(
+    query: &str,
+    limit: usize,
+    output: &str,
+    provider: Provider,
+    trust_project: bool,
+) -> Result<()> {
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
@@ -272,8 +286,11 @@ pub fn run_semantic(query: &str, limit: usize, output: &str, provider: Provider)
     }
 
     local_model_hint(provider);
-    let provider =
-        embeddings::build_provider(provider, &ctx::config::CtxConfig::load(&root).embedding)?;
+    let provider = embeddings::build_provider_with_project_trust(
+        provider,
+        &ctx::config::CtxConfig::load(&root).embedding,
+        trust_project,
+    )?;
 
     // Do not query an embedding corpus from another provider or dimension.
     embeddings::ensure_index_compatible(&db, provider.as_ref())?;
