@@ -28,7 +28,7 @@ pub fn run_shell(history: Option<PathBuf>, no_history: bool, vi: bool) -> Result
 
 /// Run the MCP server.
 #[cfg(feature = "mcp")]
-pub fn run_serve(mcp: bool) -> Result<()> {
+pub fn run_serve(mcp: bool, trust_project: bool) -> Result<()> {
     use ctx::error::CtxError;
     use ctx::mcp;
 
@@ -44,7 +44,7 @@ pub fn run_serve(mcp: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
 
     rt.block_on(async {
-        mcp::run_mcp_server(root)
+        mcp::run_mcp_server_with_project_trust(root, trust_project)
             .await
             .map_err(|e| CtxError::Other(e.to_string()))
     })
