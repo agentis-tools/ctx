@@ -25,6 +25,9 @@ use super::tools;
 pub struct CtxServer {
     /// Path to the project root
     root: PathBuf,
+    /// Whether project-controlled provider/network settings were explicitly
+    /// trusted by the caller that launched the server.
+    trust_project: bool,
     /// Database connection (wrapped for thread safety)
     pub(crate) db: Mutex<Database>,
     /// Analytics engine (optional, wrapped for thread safety)
@@ -34,6 +37,15 @@ pub struct CtxServer {
 impl CtxServer {
     /// Create a new CtxServer for the given project root.
     pub fn new(root: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_project_trust(root, false)
+    }
+
+    /// Create a server, optionally honoring provider/network settings from the
+    /// project's committed `.ctx/config.toml`.
+    pub fn new_with_project_trust(
+        root: PathBuf,
+        trust_project: bool,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Open the database
         let db = index::open_database(&root)
             .map_err(|e| format!("Failed to open database: {}. Run 'ctx index' first.", e))?;
@@ -43,6 +55,7 @@ impl CtxServer {
 
         Ok(Self {
             root,
+            trust_project,
             db: Mutex::new(db),
             analytics,
         })
@@ -51,6 +64,11 @@ impl CtxServer {
     /// Get the project root path.
     pub fn root(&self) -> &PathBuf {
         &self.root
+    }
+
+    /// Whether project-controlled provider/network settings were trusted.
+    pub fn trust_project(&self) -> bool {
+        self.trust_project
     }
 
     /// Execute a function with the database.
@@ -136,7 +154,16 @@ impl ServerHandler for CtxServer {
 
 /// Run the MCP server over stdio.
 pub async fn run_mcp_server(root: PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let server = CtxServer::new(root)?;
+    run_mcp_server_with_project_trust(root, false).await
+}
+
+/// Run the MCP server, optionally honoring project-controlled provider/network
+/// settings from `.ctx/config.toml`.
+pub async fn run_mcp_server_with_project_trust(
+    root: PathBuf,
+    trust_project: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let server = CtxServer::new_with_project_trust(root, trust_project)?;
 
     // Create stdio transport
     let transport = stdio();

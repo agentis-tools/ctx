@@ -64,9 +64,9 @@ ctx smart "add a new field to historical snapshot metadata" \
 Use the provider and model that match the stored embeddings. Since the release after v0.4.0, `smart`
 exits 2 when embeddings are missing, incomplete, or from another provider, model, or dimension, and
 asks you to run `ctx embed --force --provider <provider>`; earlier versions printed nothing and
-exited 0. The project-level
-`.ctx/config.toml` can supply the provider, so the explicit flag is optional when that configuration
-is correct.
+exited 0. The committed
+`.ctx/config.toml` can supply the provider, but only with the global `--trust-project` flag; review
+the file first. An explicit `--provider` works without it.
 
 The preview answers **why a file became a candidate**: a semantic match, a caller, or a dependency.
 It does not prove that every candidate belongs in the final bundle, and it does not prove that an
