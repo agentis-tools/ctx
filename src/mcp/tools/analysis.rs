@@ -1,14 +1,19 @@
 //! Analysis-related MCP tools.
 
+use std::collections::{HashSet, VecDeque};
+
 use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 use std::path::Path;
 
-use std::collections::{HashSet, VecDeque};
-
-use super::{parse_params, prefer_exact, schema_for, CallGraphParams, SmartContextParams};
+use super::{
+    bounded_mcp_depth, bounded_mcp_output, bounded_mcp_top, parse_params, prefer_exact, schema_for,
+    CallGraphParams, SmartContextParams,
+};
 use crate::db::{Database, EdgeKind, Symbol, SymbolKind};
+use crate::limits::MAX_MCP_RESPONSE_BYTES;
 use crate::mcp::server::CtxServer;
+use crate::output::read_file_content_with_limit;
 use crate::walker::secure_file_path;
 
 /// Helper to create an internal error.
@@ -213,7 +218,9 @@ fn call_graph_answer(
             Ok(out)
         })
         .map_err(|e| internal_error(e.to_string()))?;
-    Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(text),
+    )]))
 }
 
 /// Execute the get_callers tool.
@@ -279,8 +286,8 @@ pub async fn smart_context(
     // Configure smart context
     let config = SmartConfig {
         max_tokens: params.max_tokens.unwrap_or(8000),
-        depth: params.depth.unwrap_or(2),
-        top: params.top.unwrap_or(10),
+        depth: bounded_mcp_depth(params.depth),
+        top: bounded_mcp_top(params.top),
         encoding: Encoding::default(),
     };
 
@@ -485,10 +492,18 @@ fn format_smart_context_output(
         let Ok(path) = secure_file_path(root, Path::new(&file.path)) else {
             continue;
         };
-        if let Ok(content) = std::fs::read_to_string(path) {
+        let remaining = MAX_MCP_RESPONSE_BYTES.saturating_sub(output.len()) as u64;
+        if remaining == 0 {
+            break;
+        }
+        if let Ok(content) = read_file_content_with_limit(&path, remaining) {
             output.push_str(&format!("// === {} ===\n\n", file.path));
             output.push_str(&content);
             output.push_str("\n\n");
+        } else {
+            // The next file did not fit in the remaining response budget (or
+            // exceeded the per-file cap). Stop before attempting more reads.
+            break;
         }
     }
     output

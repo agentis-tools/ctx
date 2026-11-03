@@ -6,7 +6,6 @@
 //! - Store extracted data in SQLite
 //! - Support incremental updates
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -19,6 +18,7 @@ use sha2::{Digest, Sha256};
 
 use crate::db::{Database, FileRecord, ParseResult};
 use crate::lsp::{FileBackend, LspManager};
+use crate::output::read_file_content;
 use crate::parser::CodeParser;
 use crate::walker::{
     discover_files, ensure_project_directory, secure_file_path, validate_project_path, FileEntry,
@@ -298,7 +298,7 @@ impl Indexer {
             }
 
             // Read file content
-            let content = match fs::read_to_string(&entry.absolute_path) {
+            let content = match read_file_content(&entry.absolute_path) {
                 Ok(c) => c,
                 Err(e) => {
                     if self.verbose {
@@ -446,7 +446,7 @@ impl Indexer {
                 }
 
                 // Check if file needs updating (read content for hash)
-                let content = match fs::read_to_string(&entry.absolute_path) {
+                let content = match read_file_content(&entry.absolute_path) {
                     Ok(c) => c,
                     Err(_) => {
                         files_failed.fetch_add(1, Ordering::Relaxed);
@@ -669,7 +669,7 @@ impl Indexer {
         }
 
         // Read content
-        let content = fs::read_to_string(&abs_path)?;
+        let content = read_file_content(&abs_path)?;
         let hash = compute_hash(&content);
 
         // Check if needs update
