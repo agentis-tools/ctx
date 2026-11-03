@@ -39,6 +39,19 @@ fn ctx_command(bin: &Path, cwd: &Path) -> Command {
 }
 
 fn run(cmd: &mut Command) -> Output {
+    // Tests copy the ctx binary and execute the copy. While one test thread is
+    // still writing its copy, a child forked by another thread can inherit that
+    // write descriptor for a moment, and exec of the copy then fails with
+    // ETXTBSY ("Text file busy"). It clears as soon as the child execs, so retry
+    // briefly instead of failing the test.
+    for _ in 0..50 {
+        match cmd.output() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            result => return result.expect("failed to run ctx binary"),
+        }
+    }
     cmd.output().expect("failed to run ctx binary")
 }
 
