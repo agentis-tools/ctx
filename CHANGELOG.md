@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- Analytics engines opened in the same process (the MCP server, parallel
+  tests) no longer share one temporary DuckDB copy of the index when the
+  `sqlite` extension is not installed. The copy was named after the pid and the
+  clock, which collided within the clock's resolution (microseconds on macOS),
+  so DuckDB aborted with `FetchStringFromDict` or answered from another
+  index. Each copy now lives in its own private, randomly named directory.
 - `ctx sql` renders DECIMAL values as their exact text (`"0.5"`). With the
   DuckDB update the previous debug fallback would have printed the new
   decimal type's internals.
