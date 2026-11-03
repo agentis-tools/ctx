@@ -52,7 +52,7 @@ Sets up the current project's `.claude/` directory:
 | File | Purpose |
 |------|---------|
 | `.claude/hooks/ctx/session-start.sh` | `SessionStart` hook: prints `ctx map --budget 2000` for the model |
-| `.claude/hooks/ctx/post-tool-use.sh` | `PostToolUse` (Edit\|Write) hook: `ctx index`, then `ctx check --against HEAD --json` |
+| `.claude/hooks/ctx/post-tool-use.sh` | `PostToolUse` (Edit\|Write) hook: `ctx index`, then `ctx check --against HEAD`; new violations go to the model as `additionalContext` |
 | `.claude/hooks/ctx/stop.sh` | `Stop` hook: `ctx score --against <default branch>` scorecard (non-blocking by default, see [Blocking gates](#blocking-gates-ctx_gate_blocking)) |
 | `.ctx/rules.toml` | Commented starter rules file (only when absent) |
 | `.ctx/harness.lock` | Manifest of generated files and their checksums |
