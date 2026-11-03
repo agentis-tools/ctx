@@ -1335,7 +1335,10 @@ mod tests {
             [],
         )
         .unwrap();
-        let analytics = Analytics { conn };
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
 
         let callees = analytics.call_graph("main", i32::MAX).unwrap();
         assert_eq!(
