@@ -73,9 +73,13 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # No job-level `if` here: a skipped matrix job reports one check named
+  # `test`, never the per-row `test (...)` checks that branch protection
+  # requires, so a docs-only pull request would wait forever. The job runs
+  # for every pull request and its steps skip instead, which still reports
+  # each row as passed.
   test:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     env:
       CFLAGS: ${{ !startsWith(matrix.os, 'windows') && '-g0' || '' }}
@@ -97,11 +101,13 @@ jobs:
             features: "--no-default-features"
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup Rust
+        if: needs.changes.outputs.code == 'true'
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: "1.91"
@@ -113,6 +119,7 @@ jobs:
       # restore main's cache instead of each writing gigabytes of their own
       # and evicting it (the 10 GB repository limit).
       - name: Cache cargo
+        if: needs.changes.outputs.code == 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # ImageVersion keeps a target/ built under one runner image (Xcode or
@@ -123,6 +130,7 @@ jobs:
       # `cargo test` builds the binary and every test target; a separate
       # `cargo build` step only rebuilt the same graph.
       - name: Run tests
+        if: needs.changes.outputs.code == 'true'
         run: cargo test --locked ${{ matrix.features }}
 
   lint:
