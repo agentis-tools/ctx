@@ -136,6 +136,7 @@ pub mod embeddings;
 pub mod error;
 pub mod exit;
 pub mod fingerprint;
+pub mod grep;
 pub mod index;
 pub mod json;
 pub mod judge;

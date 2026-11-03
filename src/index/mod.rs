@@ -1009,7 +1009,7 @@ fn degraded_hash(hash: &str) -> String {
 }
 
 /// Compute SHA256 hash of content.
-fn compute_hash(content: &str) -> String {
+pub(crate) fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
@@ -1767,6 +1767,22 @@ pub fn render_table(headers: &[String], widths: &[usize]) -> String {
         let none = crate::fingerprint::find_near_duplicates(indexer.database(), 0.85, 10_000, None)
             .unwrap();
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn test_near_duplicates_limit_is_bounded_and_reported() {
+        let temp = TempDir::new().unwrap();
+        write_fixture(temp.path());
+        fs::copy(temp.path().join("src/a.rs"), temp.path().join("src/d.rs")).unwrap();
+
+        let mut indexer = Indexer::new_in_memory(temp.path()).unwrap();
+        indexer.index().unwrap();
+
+        let search =
+            crate::fingerprint::find_near_duplicates_limited(indexer.database(), 0.85, 50, None, 1)
+                .unwrap();
+        assert_eq!(search.pairs.len(), 1);
+        assert!(search.truncated);
     }
 
     #[test]

@@ -166,6 +166,8 @@ fn test_duplicates_json_output_and_exit_codes() {
     assert_eq!(doc["command"], "duplicates");
     assert_eq!(doc["data"]["threshold"], 0.85);
     assert_eq!(doc["data"]["min_tokens"], 50);
+    assert_eq!(doc["data"]["limit"], 1000);
+    assert_eq!(doc["data"]["truncated"], false);
     assert_eq!(doc["data"]["skipped_languages"], serde_json::json!([]));
 
     let pairs = doc["data"]["pairs"].as_array().unwrap();
@@ -182,6 +184,16 @@ fn test_duplicates_json_output_and_exit_codes() {
     // --fail-on-found turns findings into exit code 1.
     let out = ctx(root, &["duplicates", "--fail-on-found"]);
     assert_eq!(out.status.code(), Some(1));
+
+    // Zero and unreasonably large limits are rejected instead of silently
+    // turning a blocking gate into a clean result or restoring unbounded
+    // result memory.
+    let out = ctx(root, &["duplicates", "--limit", "0", "--fail-on-found"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("greater than zero"));
+    let out = ctx(root, &["duplicates", "--limit", "10001"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("maximum of 10000"));
 
     // Without the flag the same findings exit 0.
     let out = ctx(root, &["duplicates"]);
@@ -241,6 +253,7 @@ fn test_help_documents_new_semantics_and_old_flags_are_gone() {
     assert!(help.contains("--threshold"));
     assert!(help.contains("--min-tokens"));
     assert!(help.contains("--against"));
+    assert!(help.contains("1-10000"), "help: {}", help);
     assert!(help.contains("--fail-on-found"));
 
     // The old line-based flags are fully gone...
