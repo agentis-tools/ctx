@@ -182,6 +182,38 @@ fn run(args: Args) -> Result<Outcome> {
             let output = if json { "json".to_string() } else { output };
             commands::run_search(&query, limit, &output)
         }
+        Some(Command::Grep {
+            pattern,
+            fixed_strings,
+            ignore_case,
+            smart_case,
+            word_regexp,
+            globs,
+            types,
+            hidden,
+            max_results,
+            no_annotate,
+        }) => {
+            // `ctx grep` returns its Outcome directly: 0 with or without
+            // matches, 2 on a bad pattern/glob/type. The global `-i/--ignore`
+            // patterns keep their meaning here: they exclude files.
+            let mut globs = globs;
+            globs.extend(args.ignore_patterns.iter().map(|p| format!("!{p}")));
+            let options = ctx::grep::GrepOptions {
+                pattern,
+                fixed_strings,
+                ignore_case,
+                smart_case,
+                word: word_regexp,
+                globs,
+                types,
+                hidden,
+                use_gitignore: !args.no_gitignore,
+                max_results,
+                annotate: !no_annotate,
+            };
+            return commands::run_grep(options, &patterns, json);
+        }
         Some(Command::Source { symbol, file, kind }) => {
             commands::run_source(&symbol, file.as_deref(), kind.as_deref())
         }
@@ -251,6 +283,7 @@ fn run(args: Args) -> Result<Outcome> {
             threshold,
             min_tokens,
             against,
+            limit,
             fail_on_found,
         }) => {
             // Quality command: returns its own Outcome (Findings with
@@ -259,6 +292,7 @@ fn run(args: Args) -> Result<Outcome> {
                 threshold,
                 min_tokens,
                 against.as_deref(),
+                limit,
                 json,
                 fail_on_found,
             );

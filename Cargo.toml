@@ -33,6 +33,11 @@ path = "src/lib.rs"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 globset = "0.4"
+# ripgrep's search engine as libraries, for `ctx grep` (same author and
+# walker as `ignore`; MIT OR Unlicense)
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
 
 # Code Intelligence (SQLite Foundation + sqlite-vec)
 rusqlite = { version = "0.39", features = ["bundled"] }
