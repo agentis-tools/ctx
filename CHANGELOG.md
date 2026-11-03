@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Platform directories come from dirs 7 (was 6); cache and config locations are unchanged.
+
 ### Security
 - Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
   0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
