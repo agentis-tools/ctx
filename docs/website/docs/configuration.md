@@ -492,17 +492,36 @@ resolution, and registers language servers for LSP-backed indexing:
 [embedding]
 provider = "ollama"                 # local (default) | openai | ollama
 model = "qwen3-embedding:8b"        # Ollama/OpenAI model name
-# host = "http://localhost:11434"   # Ollama only
+# host = "http://localhost:11434"   # Ollama only; needs --trust-project
 ```
 
-Resolution order is CLI flag, then environment variable, then `.ctx/config.toml`, then the built-in
-default, so the file never overrides an explicit flag. ctx ignores a malformed config file with a
+Project defaults are untrusted by default. ctx uses the provider, model, and Ollama host from
+`.ctx/config.toml` only when you pass the global `--trust-project` flag. An explicit `--provider` or
+`--openai` still works without that flag, but the project's Ollama model and host are then ignored.
+This stops a committed config from sending your source text, or an API key in your environment, to
+an endpoint the repository chose.
+
+With `--trust-project`, the resolution order is CLI flag, then environment variable, then
+`.ctx/config.toml`, then the built-in default, so the file never overrides an explicit flag. ctx ignores a malformed config file with a
 warning. After changing the provider or model, rebuild the embeddings, because vectors from
 different models are not interchangeable:
 
 ```bash
 ctx embed --force
 ```
+
+Review `.ctx/config.toml` before you trust it. For MCP, pass the flag when you start the server
+(`ctx serve --mcp --trust-project`); otherwise the server ignores the project's provider and Ollama
+host. `OLLAMA_HOST` from the environment is your own choice and wins over the project file.
+
+When `OLLAMA_API_KEY` is set, ctx refuses to send it over plain HTTP to an Ollama host that is not
+loopback; use `https://` for a remote host that needs the key. `http://localhost:11434`,
+`http://127.0.0.1:11434`, and `http://[::1]:11434` still work for local development.
+
+The local FastEmbed model is cached in your per-user ctx cache (for example
+`~/.cache/ctx/fastembed/` on Linux or `~/Library/Caches/ctx/fastembed/` on macOS), never in the
+checkout's `.fastembed_cache`. If ctx cannot find an absolute per-user cache path, the local model
+fails to start instead of falling back to a cache inside the project.
 
 ### Model-assisted edge resolution (`[judge]`)
 
@@ -586,7 +605,8 @@ dependencies, allowed dependents, metric limits, and frozen paths.
 ### Embedding providers
 
 `ctx embed`, `ctx semantic`, `ctx smart`, and `ctx similar` accept
-`--provider <local|openai|ollama>` (or set a default in `.ctx/config.toml`):
+`--provider <local|openai|ollama>` (or set a project default in
+`.ctx/config.toml` and pass `--trust-project`):
 
 - `local` (default): [fastembed](https://github.com/Anush008/fastembed-rs) `all-MiniLM-L6-v2`,
   384 dimensions. Runs offline after downloading a model of about 90 MB on first use.
