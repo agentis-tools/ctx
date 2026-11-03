@@ -257,7 +257,7 @@ impl PythonParser {
             let mut def_node: Option<Node> = None;
             let mut parent_class: Option<&str> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let capture_str = capture_name;
                 let node = capture.node;
@@ -358,7 +358,7 @@ impl PythonParser {
             let mut base_names: Vec<&str> = Vec::new();
             let mut class_node: Option<Node> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");

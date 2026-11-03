@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
+  through the new accessor; extraction output is unchanged.
+
 ### Security
 - Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
   0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate

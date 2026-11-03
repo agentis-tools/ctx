@@ -261,7 +261,7 @@ impl RustParser {
             let mut signature_parts: Vec<&str> = Vec::new();
             let mut parent_type: Option<&str> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = self.symbols_query.capture_names()[capture.index as usize];
                 let capture_str = capture_name;
                 let node = capture.node;
@@ -378,7 +378,7 @@ impl RustParser {
         while let Some(query_match) = matches.next() {
             let mut name_node = None;
             let mut path_node = None;
-            for capture in query_match.captures {
+            for capture in query_match.captures() {
                 match self.function_references_query.capture_names()[capture.index as usize] {
                     "reference.name" => {
                         name_node = Some(capture.node);
@@ -440,7 +440,7 @@ impl RustParser {
             let mut type_name: Option<&str> = None;
             let mut def_node: Option<Node> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = self.impl_query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");
