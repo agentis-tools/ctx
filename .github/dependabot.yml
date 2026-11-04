@@ -25,6 +25,10 @@ updates:
       - dependency-name: fastembed
       - dependency-name: ort
       - dependency-name: ort-sys
+      # rustyline 19 uses `cfg_select!`, which does not compile on the 1.91
+      # MSRV. Lift this when the MSRV moves past the release that stabilized it.
+      - dependency-name: rustyline
+        versions: [">=19"]
     # The parser stack, the MCP SDK, SQLite, DuckDB and dirs change APIs across
     # releases (tree-sitter 0.27, rmcp 3, rusqlite 0.40, dirs 7) and need a
     # porting PR, not a lockfile refresh. They are excluded from the
