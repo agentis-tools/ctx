@@ -137,6 +137,7 @@ optional embeddings. The same index selects what the agent reads and checks what
 | [`ctx map`](https://docs.agentis.tools/docs/commands/map) | Architectural overview within a token budget (PageRank over the symbol graph) |
 | [`ctx diff`](https://docs.agentis.tools/docs/commands/diff) | Context for git changes, expanded to related symbols |
 | [`ctx similar "<description>"`](https://docs.agentis.tools/docs/commands/similar) | Find existing functions before writing new ones, with their fan-in |
+| [`ctx grep <pattern>`](https://docs.agentis.tools/docs/commands/grep) | Text search like ripgrep, with each match tagged from the index (`def`, `ref`, `unresolved`, `unlinked`, `stale`, `unindexed`) |
 | `ctx search` / `ctx semantic` | Keyword (FTS5) and embedding-based symbol search |
 | `ctx query impact / callers / deps / graph` | Walk the call graph: affected symbols, callers, dependencies |
 
@@ -250,6 +251,7 @@ The full flag reference for every command lives at
 | | `map` | Architectural overview within a token budget |
 | | `diff` / `review` | Context for git changes or for a GitHub pull request |
 | | `similar` | Find existing functions before writing new ones |
+| | `grep` | Text search with ripgrep's recall, annotated with what the index knows |
 | | `search` / `semantic` / `query` / `source` / `explain` | Search and navigate the index |
 | | `judge edges` | Opt-in: re-resolve ambiguous call edges with a decision model (`JEV_API_KEY`) |
 | | `lsp` | Add, list, update, and health-check language servers for LSP extraction |

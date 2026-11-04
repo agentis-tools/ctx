@@ -24,13 +24,34 @@ pub struct Analytics {
     _index_copy: Option<TempDbFile>,
 }
 
-/// A temporary database file removed on drop.
-pub(crate) struct TempDbFile(std::path::PathBuf);
+/// A private temporary DuckDB file, removed (with its WAL) on drop.
+///
+/// The file lives in its own randomly named, owner-only directory. A shared
+/// temp-dir name derived from the pid and the clock collided between engines
+/// opened in the same process within the clock's resolution (microseconds on
+/// macOS): two engines then copied into and read from one file, which aborted
+/// DuckDB (`FetchStringFromDict`) or returned another index's rows. A
+/// predictable name in a shared temp dir could also be pre-created by another
+/// local user.
+pub(crate) struct TempDbFile {
+    path: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
 
-impl Drop for TempDbFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-        let _ = std::fs::remove_file(self.0.with_extension("duckdb.wal"));
+impl TempDbFile {
+    fn new() -> Result<Self> {
+        let dir = tempfile::Builder::new()
+            .prefix("ctx-index-")
+            .tempdir()
+            .map_err(|e| duckdb::Error::ToSqlConversionFailure(Box::new(e)))?;
+        Ok(Self {
+            path: dir.path().join("index.duckdb"),
+            _dir: dir,
+        })
+    }
+
+    fn escaped_path(&self) -> String {
+        self.path.display().to_string().replace('\'', "''")
     }
 }
 
@@ -73,14 +94,8 @@ pub(crate) fn attach_index(conn: &Connection, sqlite_path: &Path) -> Result<Opti
     if attached {
         return Ok(None);
     }
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = TempDbFile(
-        std::env::temp_dir().join(format!("ctx-index-{}-{nanos}.duckdb", std::process::id())),
-    );
-    let escaped_tmp = tmp.0.display().to_string().replace('\'', "''");
+    let tmp = TempDbFile::new()?;
+    let escaped_tmp = tmp.escaped_path();
     conn.execute_batch(&format!("ATTACH '{escaped_tmp}' AS code_build;"))?;
     copy_index(conn, sqlite_path, "code_build")?;
     conn.execute_batch(&format!(
@@ -254,6 +269,11 @@ impl Analytics {
     /// - A qualified name like "LocalProvider::new"
     /// - A full ID like "src/embeddings/local.rs::LocalProvider::new@20"
     pub fn call_graph(&self, start_name: &str, max_depth: i32) -> Result<Vec<CallGraphNode>> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE start_symbol AS (
@@ -269,6 +289,14 @@ impl Analytics {
                 ORDER BY file_path, line_start
                 LIMIT 1
             ),
+            call_edges AS (
+                -- Traversal does not depend on edge metadata. Collapse duplicate
+                -- rows before recursion so parallel parser/index edges cannot
+                -- multiply the number of simple paths exponentially.
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             graph AS (
                 -- Base case: start from resolved symbol
                 SELECT 
@@ -280,9 +308,12 @@ impl Analytics {
                 FROM code.symbols s
                 JOIN start_symbol ss ON s.id = ss.id
                 
-                UNION ALL
+                UNION
                 
-                -- Recursive case: follow outgoing edges (only resolved edges)
+                -- Recursive case: follow outgoing edges (only resolved edges).
+                -- UNION collapses identical (node, depth) states reached through
+                -- different paths, avoiding exponential diamond expansion while
+                -- the depth bound keeps cycles finite.
                 SELECT 
                     t.name,
                     t.file_path,
@@ -290,15 +321,14 @@ impl Analytics {
                     g.depth + 1 as depth,
                     t.id as current_id
                 FROM graph g
-                JOIN code.edges e ON e.source_id = g.current_id
+                JOIN call_edges e ON e.source_id = g.current_id
                 JOIN code.symbols t ON e.target_id = t.id
                 WHERE g.depth < ?
-                  AND e.kind = 'calls'
-                  AND e.target_id IS NOT NULL
             )
             SELECT DISTINCT name, file_path, kind, MIN(depth) as depth
             FROM graph
             WHERE depth > 1  -- Exclude the starting symbol itself
+              AND current_id NOT IN (SELECT id FROM start_symbol)
             GROUP BY name, file_path, kind
             ORDER BY depth, name
             "#,
@@ -352,6 +382,11 @@ impl Analytics {
         target_name: &str,
         max_depth: i32,
     ) -> Result<Vec<LocatedImpactNode>> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE target_symbol AS (
@@ -367,6 +402,13 @@ impl Analytics {
                 ORDER BY file_path, line_start
                 LIMIT 1
             ),
+            call_edges AS (
+                -- Traverse each resolved source/target pair once even when the
+                -- index contains duplicate edge records.
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             impact AS (
                 -- Base case: find direct callers of the specific target symbol
                 SELECT 
@@ -379,16 +421,17 @@ impl Analytics {
                     s.line_end,
                     1 as distance,
                     s.id as current_id
-                FROM code.edges e
+                FROM call_edges e
                 JOIN code.symbols s ON e.source_id = s.id
                 JOIN target_symbol ts ON 
                     -- Only traverse resolved edges to avoid cross-file false positives
-                    e.target_id IS NOT NULL AND e.target_id = ts.id
-                WHERE e.kind = 'calls'
+                    e.target_id = ts.id
                 
-                UNION ALL
+                UNION
                 
-                -- Recursive case: find callers of callers (reverse traversal)
+                -- Recursive case: find callers of callers (reverse traversal).
+                -- UNION collapses duplicate (symbol, distance) states from
+                -- diamonds and duplicate routes through the call graph.
                 SELECT 
                     s.id,
                     s.name,
@@ -400,16 +443,16 @@ impl Analytics {
                     i.distance + 1 as distance,
                     s.id as current_id
                 FROM impact i
-                JOIN code.edges e ON 
+                JOIN call_edges e ON
                     -- Only traverse resolved edges to avoid cross-file false positives
-                    e.target_id IS NOT NULL AND e.target_id = i.current_id
+                    e.target_id = i.current_id
                 JOIN code.symbols s ON e.source_id = s.id
                 WHERE i.distance < ?
-                  AND e.kind = 'calls'
             )
             SELECT current_id, name, qualified_name, file_path, kind,
                    line_start, line_end, MIN(distance) as distance
             FROM impact
+            WHERE current_id NOT IN (SELECT id FROM target_symbol)
             GROUP BY current_id, name, qualified_name, file_path, kind, line_start, line_end
             ORDER BY distance, name, current_id
             "#,
@@ -485,6 +528,11 @@ impl Analytics {
     /// Both `from_name` and `to_name` can be symbol IDs, qualified names, or simple names.
     #[allow(dead_code)]
     pub fn has_path(&self, from_name: &str, to_name: &str, max_depth: i32) -> Result<bool> {
+        let max_depth = crate::limits::clamp_graph_depth(max_depth);
+        if max_depth == 0 {
+            return Ok(false);
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             WITH RECURSIVE source_symbol AS (
@@ -499,6 +547,11 @@ impl Analytics {
                 ORDER BY file_path
                 LIMIT 1
             ),
+            call_edges AS (
+                SELECT DISTINCT source_id, target_id
+                FROM code.edges
+                WHERE kind = 'calls' AND target_id IS NOT NULL
+            ),
             reachable AS (
                 -- Base case: start from source
                 SELECT 
@@ -510,17 +563,16 @@ impl Analytics {
                 
                 UNION
                 
-                -- Follow edges using only resolved target_id to avoid cross-file false positives
+                -- Follow edges using only resolved target_id to avoid cross-file
+                -- false positives. UNION deduplicates each node/depth state.
                 SELECT 
                     t.name,
                     t.id,
                     r.depth + 1
                 FROM reachable r
-                JOIN code.edges e ON e.source_id = r.current_id
+                JOIN call_edges e ON e.source_id = r.current_id
                 JOIN code.symbols t ON e.target_id = t.id
                 WHERE r.depth < ?
-                  AND e.kind = 'calls'
-                  AND e.target_id IS NOT NULL
             )
             SELECT COUNT(*) > 0
             FROM reachable r
@@ -540,6 +592,7 @@ impl Analytics {
     /// This correctly counts incoming edges per symbol ID, not by name,
     /// avoiding over-counting for common names like "new".
     pub fn most_connected(&self, limit: i32) -> Result<Vec<(String, String, i64, i64)>> {
+        let limit = crate::limits::clamp_search_limit(limit);
         let mut stmt = self.conn.prepare(
             r#"
             WITH outgoing AS (
@@ -1105,10 +1158,8 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
 mod tests {
     /// Force the copy path (as when the sqlite extension is not installed).
     fn attach_index_copy_only(conn: &Connection, sqlite_path: &Path) -> TempDbFile {
-        let tmp = TempDbFile(
-            std::env::temp_dir().join(format!("ctx-index-test-{}.duckdb", std::process::id())),
-        );
-        let p = tmp.0.display().to_string();
+        let tmp = TempDbFile::new().unwrap();
+        let p = tmp.escaped_path();
         conn.execute_batch(&format!("ATTACH '{p}' AS code_build;"))
             .unwrap();
         copy_index(conn, sqlite_path, "code_build").unwrap();
@@ -1117,6 +1168,16 @@ mod tests {
         ))
         .unwrap();
         tmp
+    }
+
+    #[test]
+    fn index_copies_never_share_a_file() {
+        let copies: Vec<TempDbFile> = (0..64).map(|_| TempDbFile::new().unwrap()).collect();
+        let unique: std::collections::HashSet<_> = copies.iter().map(|c| c.path.clone()).collect();
+        assert_eq!(unique.len(), copies.len());
+        let dir = copies[0].path.parent().unwrap().to_path_buf();
+        drop(copies);
+        assert!(!dir.exists(), "the private directory is removed on drop");
     }
 
     #[test]
@@ -1272,6 +1333,42 @@ mod tests {
         // main calls run which calls helper (distance 2)
         assert!(nodes.iter().any(|n| n.name == "run" && n.distance == 1));
         assert!(nodes.iter().any(|n| n.name == "main" && n.distance == 2));
+    }
+
+    #[test]
+    fn recursive_graphs_deduplicate_cycles_and_bound_depth() {
+        let conn = setup_test_db().expect("Failed to setup test db");
+        conn.execute(
+            "INSERT INTO code.edges VALUES
+                ('helper@21', 'main@1', 'main', 'calls', NULL),
+                ('helper@21', 'main@1', 'main', 'calls', NULL)",
+            [],
+        )
+        .unwrap();
+        let analytics = Analytics {
+            conn,
+            _index_copy: None,
+        };
+
+        let callees = analytics.call_graph("main", i32::MAX).unwrap();
+        assert_eq!(
+            callees
+                .iter()
+                .map(|node| node.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run", "helper"]
+        );
+
+        let callers = analytics
+            .impact_analysis_located("helper", i32::MAX)
+            .unwrap();
+        assert_eq!(callers.len(), 2);
+        assert!(callers
+            .iter()
+            .any(|node| node.name == "run" && node.distance == 1));
+        assert!(callers
+            .iter()
+            .any(|node| node.name == "main" && node.distance == 2));
     }
 
     #[test]

@@ -14,6 +14,8 @@ ctx duplicates [OPTIONS]
 
 ctx normalizes tokens before comparison. Identifiers become `ID`, string and number literals become `LIT`, and comments are dropped, so renamed variables and changed literals still match. LSH banding over 128-permutation MinHash signatures finds candidate pairs, and ctx then verifies each with the exact Jaccard similarity.
 
+`--limit` caps how many pairs are kept and printed. It accepts 1-10,000 and defaults to 1,000. The candidate set and the retained source snippets are capped too, so one very large LSH bucket cannot grow memory without bound. When a cap is hit, human output says so and JSON reports `truncated: true`; with `--fail-on-found`, a truncated search fails, because it may have missed pairs.
+
 All fully indexed languages participate, including C, C++, Zig, and Solidity. Solidity uses the solang-parser lexer; the Tree-sitter languages use their own grammars.
 
 > Upgrading from the old line-based detector: `--threshold` is a 0.0-1.0 Jaccard similarity over normalized 5-token shingles, not a percentage of matching lines, and the old `--similarity <PERCENT>` and `--min-lines <N>` flags are gone. Indexes built before the change lack fingerprints, so rebuild once with `ctx index --force`.
@@ -33,6 +35,7 @@ ctx index
 | `--threshold <F>` | Jaccard similarity threshold (0.0-1.0) over normalized token shingles. Values below 0.5 are clamped to 0.5, because LSH candidate detection is unreliable below that | 0.85 |
 | `--min-tokens <N>` | Ignore functions with fewer than N normalized tokens | 50 |
 | `--against <REF>` | Only report pairs where at least one function is in a file changed relative to REF | none |
+| `--limit <N>` | Maximum number of pairs to retain and print (1-10000); output is marked truncated when the bound is reached | 1000 |
 | `--fail-on-found` | Exit 1 when any near-duplicate pair is reported | false |
 | `--json` | Machine-readable output (global flag) | false |
 
@@ -42,7 +45,7 @@ ctx index
 |------|---------|
 | 0 | Success. The default mode is informational, even when it finds pairs |
 | 1 | `--fail-on-found` was given and at least one pair was reported |
-| 2 | Operational error (missing index, bad git ref, invalid threshold) |
+| 2 | Operational error (missing index, bad git ref, invalid threshold, or invalid limit) |
 
 ## Examples
 
@@ -54,7 +57,7 @@ ctx duplicates
 
 Output:
 ```
-Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens)
+Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 tokens, limit 1000)
 ====================================================================================================
 
 1. similarity 0.952
@@ -63,6 +66,12 @@ Near-duplicate functions (Jaccard similarity of 5-token shingles >= 0.85, >= 50 
 
 ----------------------------------------------------------------------------------------------------
 Found 1 near-duplicate pair(s).
+```
+
+For a large repository, a smaller report is easier to read:
+
+```bash
+ctx duplicates --limit 25
 ```
 
 ### Only pairs touching changed files
@@ -92,6 +101,8 @@ ctx duplicates --json
     "threshold": 0.85,
     "min_tokens": 50,
     "against": null,
+    "limit": 1000,
+    "truncated": false,
     "skipped_languages": [],
     "pairs": [
       {

@@ -4,8 +4,10 @@ use rmcp::model::{CallToolResult, ContentBlock, ErrorCode, Tool};
 use serde_json::Value;
 
 use super::{
-    parse_params, prefer_exact, schema_for, DefinitionParams, ReferencesParams, SearchParams,
+    bounded_mcp_limit, bounded_mcp_output, parse_params, prefer_exact, schema_for,
+    DefinitionParams, ReferencesParams, SearchParams,
 };
+use crate::limits::{MAX_MCP_RESPONSE_BYTES, MAX_MCP_SEARCH_RESULTS};
 use crate::mcp::server::CtxServer;
 
 /// Helper to create an internal error.
@@ -50,7 +52,7 @@ pub async fn search_symbols(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: SearchParams = parse_params(args)?;
 
-    let limit = params.limit.unwrap_or(20);
+    let limit = bounded_mcp_limit(params.limit);
 
     let symbols = server
         .with_db(|db| {
@@ -77,6 +79,9 @@ pub async fn search_symbols(
         params.query
     );
     for symbol in &symbols {
+        if output.len() >= MAX_MCP_RESPONSE_BYTES {
+            break;
+        }
         output.push_str(&format!(
             "- {} ({}) in {}:{}\n",
             symbol.name,
@@ -93,7 +98,9 @@ pub async fn search_symbols(
         output.push('\n');
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 /// Execute the get_definition tool.
@@ -131,6 +138,9 @@ pub async fn get_definition(
             params.symbol
         );
         for s in symbols.iter().take(10) {
+            if output.len() >= MAX_MCP_RESPONSE_BYTES {
+                break;
+            }
             output.push_str(&format!(
                 "- {} ({}) in {}:{}\n",
                 s.name,
@@ -142,7 +152,9 @@ pub async fn get_definition(
         if symbols.len() > 10 {
             output.push_str(&format!("... and {} more\n", symbols.len() - 10));
         }
-        return Ok(CallToolResult::success(vec![ContentBlock::text(output)]));
+        return Ok(CallToolResult::success(vec![ContentBlock::text(
+            bounded_mcp_output(output),
+        )]));
     }
 
     // Get the source for the first matching symbol
@@ -166,7 +178,9 @@ pub async fn get_definition(
             }
             output.push('\n');
             output.push_str(&src);
-            Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                bounded_mcp_output(output),
+            )]))
         }
         None => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Source code not available for '{}'",
@@ -202,10 +216,11 @@ pub async fn find_references(
     let others = symbols.len() - 1;
     let edges = server
         .with_db(|db| {
-            db.get_incoming_edges(&sym.id).and_then(|mut by_id| {
-                by_id.extend(db.get_incoming_edges(&sym.name)?);
-                Ok(by_id)
-            })
+            db.get_incoming_edges_limited(&sym.id, MAX_MCP_SEARCH_RESULTS)
+                .and_then(|mut by_id| {
+                    by_id.extend(db.get_incoming_edges_limited(&sym.name, MAX_MCP_SEARCH_RESULTS)?);
+                    Ok(by_id)
+                })
         })
         .map_err(|e| internal_error(e.to_string()))?;
     let mut seen = std::collections::HashSet::new();
@@ -245,6 +260,9 @@ pub async fn find_references(
         }
         output.push_str(&format!("{title} ({}):\n", list.len()));
         for edge in list.iter().take(50) {
+            if output.len() >= MAX_MCP_RESPONSE_BYTES {
+                break;
+            }
             let source_id = edge.source_id.clone();
             if let Ok(Some(source_sym)) = server.with_db(|db| db.get_symbol(&source_id)) {
                 output.push_str(&format!(
@@ -260,7 +278,9 @@ pub async fn find_references(
         }
     }
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        bounded_mcp_output(output),
+    )]))
 }
 
 #[cfg(test)]
