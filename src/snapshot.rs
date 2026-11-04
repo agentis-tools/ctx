@@ -110,10 +110,10 @@ pub fn partition_dir_name(sha: &str) -> String {
     format!("sha={}", sha)
 }
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 pub use engine::{backfill, capture};
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 mod engine {
     use std::collections::HashMap;
     use std::fs;

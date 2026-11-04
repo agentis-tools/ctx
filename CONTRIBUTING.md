@@ -26,6 +26,28 @@ Thank you for your interest in contributing to ctx! This document outlines how t
    cargo build --features mcp
    ```
 
+5. **Skip compiling DuckDB (optional)**
+
+   The default build compiles DuckDB from C++ source, which takes 20 minutes or more on a
+   small machine. For development you can link the official prebuilt `libduckdb` instead:
+
+   ```bash
+   DUCKDB_DOWNLOAD_LIB=1 cargo build --no-default-features --features duckdb-prebuilt,mcp
+   DUCKDB_DOWNLOAD_LIB=1 cargo test  --no-default-features --features duckdb-prebuilt,mcp
+   ```
+
+   The build script downloads the library matching the pinned DuckDB version from DuckDB's
+   GitHub releases (Linux x86-64/arm64, macOS, Windows) and links it dynamically. To use a
+   library you already have, set `DUCKDB_LIB_DIR` (and `DUCKDB_INCLUDE_DIR`) to its directory
+   instead; its version must match the `duckdb` crate in `Cargo.lock`. Put that directory on
+   `LD_LIBRARY_PATH` (`DYLD_LIBRARY_PATH` on macOS) when running the binary or tests. A binary built this way
+   needs that library at run time, so don't distribute it. Release builds and `--all-features`
+   always compile DuckDB from source.
+
+   If you do compile DuckDB, `CFLAGS=-g0 CXXFLAGS=-g0` (not on Windows) roughly halves the
+   compile time and shrinks the build directory several times over by leaving out C/C++ debug
+   info.
+
 ## Making Changes
 
 1. Create a feature branch (`git checkout -b feature/my-feature`)

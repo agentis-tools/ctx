@@ -19,7 +19,7 @@
 //! Requires the `duckdb` feature: call-graph expansion goes through the real
 //! DuckDB-backed `Analytics`. In `--no-default-features` builds the analytics
 //! stub returns no edges, so this file compiles to nothing there.
-#![cfg(feature = "duckdb")]
+#![cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 
 use std::path::Path;
 
