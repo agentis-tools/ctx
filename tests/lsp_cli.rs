@@ -137,7 +137,7 @@ fn dynamic_language_indexes_via_mock_server() {
 
     // The stored file record carries the dynamic language name (files.language
     // is free-form TEXT, so kotlin flows through `ctx sql` unchanged).
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     {
         let out = ctx(
             root,
@@ -227,7 +227,7 @@ fn hybrid_backend_resolves_cross_file_call_via_definition() {
     );
 
     // Same result through the public SQL surface.
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     {
         let out = ctx(
             root,

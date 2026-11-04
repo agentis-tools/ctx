@@ -80,17 +80,17 @@ pub struct FileStats {
 // Platform-specific Analytics engine
 // ============================================================================
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 mod duckdb_impl;
 
-#[cfg(not(feature = "duckdb"))]
+#[cfg(not(any(feature = "duckdb", feature = "duckdb-prebuilt")))]
 mod stub;
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 pub use duckdb_impl::Analytics;
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 pub use duckdb_impl::{SqlColumn, SqlResult};
 
-#[cfg(not(feature = "duckdb"))]
+#[cfg(not(any(feature = "duckdb", feature = "duckdb-prebuilt")))]
 pub use stub::Analytics;

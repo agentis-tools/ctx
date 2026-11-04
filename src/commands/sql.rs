@@ -20,7 +20,10 @@ pub const SQL_SCHEMA_REFERENCE: &str = include_str!("sql_schema.md");
 
 /// Arguments for `ctx sql`, mirrored from the CLI variant.
 // Several fields are only read on the `duckdb` execution path.
-#[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "duckdb", feature = "duckdb-prebuilt")),
+    allow(dead_code)
+)]
 pub struct SqlArgs {
     pub query: Option<String>,
     pub file: Option<PathBuf>,
@@ -68,7 +71,7 @@ pub fn run_sql(args: SqlArgs) -> Result<Outcome> {
         ));
     }
 
-    #[cfg(not(feature = "duckdb"))]
+    #[cfg(not(any(feature = "duckdb", feature = "duckdb-prebuilt")))]
     {
         let _ = format;
         Err(CtxError::Other(
@@ -76,7 +79,7 @@ pub fn run_sql(args: SqlArgs) -> Result<Outcome> {
         ))
     }
 
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     {
         run_sql_duckdb(&args, format, &sql_text)
     }
@@ -108,7 +111,10 @@ fn resolve_query_text(args: &SqlArgs) -> Result<String> {
 /// respecting single-quoted strings, double-quoted identifiers, line comments
 /// (`--`), and block comments (`/* */`). This governs execution semantics
 /// (the one-result-set rule) only — it is never a safety filter.
-#[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "duckdb", feature = "duckdb-prebuilt")),
+    allow(dead_code)
+)]
 fn split_sql_statements(sql: &str) -> Vec<String> {
     #[derive(PartialEq)]
     enum State {
@@ -197,7 +203,7 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 mod engine {
     use super::*;
     use ctx::analytics::{Analytics, SqlResult};
@@ -488,7 +494,7 @@ mod engine {
     }
 }
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 use engine::run_sql_duckdb;
 
 #[cfg(test)]

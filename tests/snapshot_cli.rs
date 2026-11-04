@@ -9,7 +9,7 @@
 // The whole suite drives snapshot capture, which requires the duckdb feature
 // (Windows CI runs --no-default-features, where `ctx snapshot` exits 2 —
 // covered by tests/snapshot_stub.rs).
-#![cfg(feature = "duckdb")]
+#![cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 
 use std::path::Path;
 
