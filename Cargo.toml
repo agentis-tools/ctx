@@ -115,8 +115,10 @@ rustyline = { version = "18", features = ["with-file-history"] }
 # Dependabot is configured to leave this crate alone (.github/dependabot.yml).
 fastembed = "=5.4.0"
 
-# Phase 2: DuckDB for analytical queries (optional, not available on Windows)
-duckdb = { version = "1.0", features = ["bundled", "parquet"], optional = true }
+# Phase 2: DuckDB for analytical queries (optional, not available on Windows).
+# The `duckdb` feature below compiles it from source (`bundled`); the
+# `duckdb-prebuilt` feature links a prebuilt libduckdb instead.
+duckdb = { version = "1.0", optional = true }
 
 # Phase 4: File watching for incremental updates
 notify = "8.2"
@@ -149,7 +151,16 @@ pkg-fmt = "zip"
 
 [features]
 default = ["duckdb"]
-duckdb = ["dep:duckdb"]
+# DuckDB analytics, compiled from source and linked statically. Release
+# binaries use this.
+duckdb = ["dep:duckdb", "duckdb/bundled", "duckdb/parquet"]
+# The same analytics against a prebuilt, dynamically linked libduckdb, for
+# development builds: set DUCKDB_DOWNLOAD_LIB=1 to fetch the official library
+# for the pinned DuckDB version, or DUCKDB_LIB_DIR to use one you have. Skips
+# compiling DuckDB (20+ minutes on two cores). The resulting binary needs that
+# library at run time, so do not distribute it. If `duckdb` is also enabled
+# (as with --all-features), the bundled build wins.
+duckdb-prebuilt = ["dep:duckdb"]
 mcp = ["rmcp", "schemars", "async-trait"]
 
 [dev-dependencies]

@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 use ctx::db::Database;
 use ctx::testutil::GitRepo;
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 use ctx::testutil::MockServer;
 
 fn ctx(dir: &Path, args: &[&str]) -> Output {
@@ -160,7 +160,7 @@ fn smart_rejects_zero_budget_and_honors_global_budget_position() {
         .contains("--max-tokens is only supported for context, smart, diff, and review commands"));
 }
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 #[test]
 fn smart_count_only_suppresses_dry_run_and_explain_output() {
     let temp = tempfile::tempdir().unwrap();

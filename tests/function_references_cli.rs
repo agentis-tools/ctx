@@ -165,7 +165,7 @@ fn main() {
     }));
 }
 
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 #[test]
 fn references_are_queryable_but_do_not_change_call_metrics_or_call_graph() {
     let temp = index_fixture(&[(
