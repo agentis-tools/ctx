@@ -6,6 +6,7 @@ const sidebars: SidebarsConfig = {
     'why-ctx',
     'comparison',
     'getting-started',
+    'offline',
     {
       type: 'category',
       label: 'Guides',
