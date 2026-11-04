@@ -147,7 +147,7 @@ fn has_cpp_marker(root: Node<'_>) -> bool {
         if CPP_MARKER_KINDS.contains(&node.kind()) {
             return true;
         }
-        for index in 0..node.child_count() as u32 {
+        for index in 0..node.child_count() {
             if let Some(child) = node.child(index) {
                 stack.push(child);
             }
@@ -163,7 +163,7 @@ fn syntax_error_count(root: Node<'_>) -> usize {
         if node.is_error() || node.is_missing() {
             count += 1;
         }
-        for index in 0..node.child_count() as u32 {
+        for index in 0..node.child_count() {
             if let Some(child) = node.child(index) {
                 stack.push(child);
             }

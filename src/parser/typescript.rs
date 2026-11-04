@@ -386,7 +386,7 @@ impl TypeScriptParser {
             let mut is_export = false;
             let mut import_source: Option<&str> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let capture_str = capture_name;
                 let node = capture.node;
@@ -467,7 +467,7 @@ impl TypeScriptParser {
             let mut interface_extends_names: Vec<&str> = Vec::new();
             let mut def_node: Option<Node> = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = node.utf8_text(source.as_bytes()).unwrap_or("");

@@ -241,7 +241,7 @@ impl GoParser {
 
         while let Some(m) = matches.next() {
             // Find the definition capture
-            let def_capture = m.captures.iter().find(|c| {
+            let def_capture = m.captures().iter().find(|c| {
                 let name = &self.symbols_query.capture_names()[c.index as usize];
                 is_def_capture(name)
             });
@@ -285,7 +285,7 @@ fn push_go_import_edges(
     file_path: &str,
     edges: &mut Vec<Edge>,
 ) {
-    for capture in m.captures {
+    for capture in m.captures() {
         let capture_name = query.capture_names()[capture.index as usize];
         if capture_name == "import.path" {
             let import_path = capture
@@ -319,7 +319,7 @@ fn build_go_symbol(
     file_path: &str,
 ) -> Option<Symbol> {
     // Find name capture first to determine symbol kind
-    let name_capture = m.captures.iter().find(|c| {
+    let name_capture = m.captures().iter().find(|c| {
         let name = &query.capture_names()[c.index as usize];
         name.ends_with(".name")
     })?;
@@ -359,7 +359,7 @@ fn build_go_symbol(
 
     // Handle method receivers
     let receiver = if kind == SymbolKind::Method {
-        m.captures.iter().find_map(|c| {
+        m.captures().iter().find_map(|c| {
             (query.capture_names()[c.index as usize] == "method.receiver_type")
                 .then(|| c.node.utf8_text(source.as_bytes()).ok())
                 .flatten()
@@ -379,7 +379,7 @@ fn build_go_symbol(
 
     let parent_id = if kind == SymbolKind::Method {
         // Extract receiver type for parent reference
-        m.captures.iter().find_map(|c| {
+        m.captures().iter().find_map(|c| {
             let capture_name = query.capture_names()[c.index as usize];
             if capture_name == "method.receiver_type" {
                 let receiver_text = c.node.utf8_text(source.as_bytes()).ok()?;
@@ -428,7 +428,7 @@ fn build_go_signature(
             let mut name = "";
             let mut receiver = None;
 
-            for capture in m.captures {
+            for capture in m.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let text = capture.node.utf8_text(source.as_bytes()).ok()?;
 
@@ -460,7 +460,7 @@ fn build_go_signature(
             Some(sig)
         }
         SymbolKind::Struct => {
-            let name = m.captures.iter().find_map(|c| {
+            let name = m.captures().iter().find_map(|c| {
                 let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "struct.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
@@ -471,7 +471,7 @@ fn build_go_signature(
             Some(format!("type {} struct", name))
         }
         SymbolKind::Interface => {
-            let name = m.captures.iter().find_map(|c| {
+            let name = m.captures().iter().find_map(|c| {
                 let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "interface.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
@@ -482,7 +482,7 @@ fn build_go_signature(
             Some(format!("type {} interface", name))
         }
         SymbolKind::Type => {
-            let name = m.captures.iter().find_map(|c| {
+            let name = m.captures().iter().find_map(|c| {
                 let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "type.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
@@ -493,7 +493,7 @@ fn build_go_signature(
             Some(format!("type {}", name))
         }
         SymbolKind::Const => {
-            let name = m.captures.iter().find_map(|c| {
+            let name = m.captures().iter().find_map(|c| {
                 let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "const.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
@@ -504,7 +504,7 @@ fn build_go_signature(
             Some(format!("const {}", name))
         }
         SymbolKind::Variable => {
-            let name = m.captures.iter().find_map(|c| {
+            let name = m.captures().iter().find_map(|c| {
                 let capture_name = query.capture_names()[c.index as usize];
                 if capture_name == "var.name" {
                     c.node.utf8_text(source.as_bytes()).ok()
