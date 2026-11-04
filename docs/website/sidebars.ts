@@ -58,6 +58,7 @@ const sidebars: SidebarsConfig = {
       label: 'Commands',
       items: [
         'commands/map',
+        'commands/grep',
         'commands/similar',
         'commands/smart',
         'commands/diff',

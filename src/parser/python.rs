@@ -471,12 +471,17 @@ fn clean_docstring(raw: &str) -> String {
         return trimmed.trim().to_string();
     }
 
+    // Indentation is counted in whitespace characters, not bytes: a non-ASCII space (e.g.
+    // U+00A0) is several bytes, and a byte offset taken from one line can fall inside a
+    // character on another, which panicked and failed the whole index.
+    let indent = |l: &str| l.chars().take_while(|c| c.is_whitespace()).count();
+
     // Find minimum indentation (excluding first line)
     let min_indent = lines
         .iter()
         .skip(1)
         .filter(|l| !l.trim().is_empty())
-        .map(|l| l.len() - l.trim_start().len())
+        .map(|l| indent(l))
         .min()
         .unwrap_or(0);
 
@@ -484,8 +489,13 @@ fn clean_docstring(raw: &str) -> String {
     for (i, line) in lines.iter().enumerate() {
         if i == 0 {
             result.push(line.trim());
-        } else if line.len() >= min_indent {
-            result.push(&line[min_indent..]);
+        } else if indent(line) >= min_indent {
+            // Byte offset just past the first `min_indent` characters (all whitespace here).
+            let cut = line
+                .char_indices()
+                .nth(min_indent)
+                .map_or(line.len(), |(at, _)| at);
+            result.push(&line[cut..]);
         } else {
             result.push(line.trim());
         }
@@ -970,6 +980,34 @@ def baz():
             clean_docstring("'''Multi-line\n    docstring.'''"),
             "Multi-line\ndocstring."
         );
+    }
+
+    #[test]
+    fn test_clean_docstring_non_ascii_indentation() {
+        // A non-breaking space (2 bytes) in the indentation used to make the byte-based dedent
+        // slice inside a character and panic, failing the whole index.
+        assert_eq!(
+            clean_docstring("\"\"\"Summary.\n  plain\n \u{a0}nbsp\n\"\"\""),
+            "Summary.\nplain\nnbsp"
+        );
+        assert_eq!(
+            clean_docstring("\"\"\"Summary.\n\u{a0}\u{a0}first\n    second\n\"\"\""),
+            "Summary.\nfirst\n  second"
+        );
+        // Lines indented less than the minimum (whitespace-only) are trimmed, as before.
+        assert_eq!(
+            clean_docstring("\"\"\"Summary.\n    a\n \n    b\"\"\""),
+            "Summary.\na\n\nb"
+        );
+    }
+
+    #[test]
+    fn test_parse_docstring_with_non_breaking_space_does_not_panic() {
+        let mut parser = PythonParser::new();
+        // Indents: 6 bytes on the first body line, 5 spaces + a 2-byte NBSP on the second.
+        let source = "def f():\n    \"\"\"Summary.\n\n      plain\n     \u{a0}non-breaking space\n    \"\"\"\n    return 1\n";
+        let result = parser.parse("test.py", source).expect("parse");
+        assert!(result.symbols.iter().any(|s| s.name == "f"));
     }
 
     #[test]

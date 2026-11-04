@@ -38,6 +38,7 @@ ctx serve --mcp
 | Option | Description |
 |--------|-------------|
 | `--mcp` | Run as MCP server over stdio |
+| `--trust-project` | Trust provider, model, and Ollama host defaults from the committed `.ctx/config.toml` |
 
 `ctx serve` takes no path argument. It serves the directory it starts in.
 
@@ -195,6 +196,12 @@ Check that:
 - The server reads the index and files under the project root. `get_file` refuses paths outside the root.
 - It has no tool that runs code or modifies files.
 - Consider read-only filesystem permissions in production.
+
+Project configuration is untrusted by default. The MCP server ignores a committed
+`[embedding] provider`, `model`, or `host` unless you start it with
+`ctx serve --mcp --trust-project`; review `.ctx/config.toml` before you do. Environment settings
+such as `OLLAMA_HOST` are your own choice and still apply, but when `OLLAMA_API_KEY` is set a
+remote Ollama host must use HTTPS (loopback HTTP still works for local development).
 
 ## See also
 

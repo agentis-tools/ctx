@@ -9,7 +9,9 @@ use std::env;
 
 use ctx::error::Result;
 use ctx::exit::Outcome;
-use ctx::fingerprint::{find_near_duplicates, DuplicatePair, MIN_THRESHOLD, SHINGLE_K};
+use ctx::fingerprint::{
+    find_near_duplicates_limited, DuplicatePair, MAX_RESULT_LIMIT, MIN_THRESHOLD, SHINGLE_K,
+};
 use ctx::gitutil;
 use ctx::index;
 use ctx::json::{emit, SymbolRef};
@@ -19,6 +21,7 @@ pub fn run_duplicates(
     threshold: f64,
     min_tokens: i64,
     against: Option<&str>,
+    limit: usize,
     json: bool,
     fail_on_found: bool,
 ) -> Result<Outcome> {
@@ -26,6 +29,16 @@ pub fn run_duplicates(
         return Err(format!(
             "--threshold must be a Jaccard similarity between 0.0 and 1.0 (got {})",
             threshold
+        )
+        .into());
+    }
+    if limit == 0 {
+        return Err("--limit must be greater than zero".into());
+    }
+    if limit > MAX_RESULT_LIMIT {
+        return Err(format!(
+            "--limit {} exceeds the maximum of {}",
+            limit, MAX_RESULT_LIMIT
         )
         .into());
     }
@@ -49,7 +62,9 @@ pub fn run_duplicates(
     let root = env::current_dir()?;
     let db = index::open_database(&root)?;
 
-    let pairs = find_near_duplicates(&db, threshold, min_tokens, changed.as_ref())?;
+    let search = find_near_duplicates_limited(&db, threshold, min_tokens, changed.as_ref(), limit)?;
+    let pairs = search.pairs;
+    let truncated = search.truncated;
 
     if json {
         let json_pairs: Vec<_> = pairs
@@ -70,6 +85,8 @@ pub fn run_duplicates(
                 "threshold": threshold,
                 "min_tokens": min_tokens,
                 "against": against,
+                "limit": limit,
+                "truncated": truncated,
                 // Every supported language is fingerprinted (Solidity via the
                 // solang-parser lexer), so nothing is skipped.
                 "skipped_languages": [],
@@ -77,23 +94,31 @@ pub fn run_duplicates(
             }),
         )?;
     } else {
-        print_human(&pairs, threshold, min_tokens, against);
+        print_human(&pairs, threshold, min_tokens, against, limit, truncated);
     }
 
-    Ok(outcome(fail_on_found, pairs.len()))
+    Ok(outcome(fail_on_found, pairs.len(), truncated))
 }
 
-/// Map the pair count to the exit outcome: `--fail-on-found` turns any
-/// reported pair into exit code 1; otherwise the command is informational.
-fn outcome(fail_on_found: bool, pair_count: usize) -> Outcome {
-    if fail_on_found && pair_count > 0 {
+/// Map the search result to the exit outcome. A blocking gate fails closed
+/// when the bounded search is incomplete, even if the retained subset is
+/// empty.
+fn outcome(fail_on_found: bool, pair_count: usize, truncated: bool) -> Outcome {
+    if fail_on_found && (pair_count > 0 || truncated) {
         Outcome::Findings
     } else {
         Outcome::Clean
     }
 }
 
-fn print_human(pairs: &[DuplicatePair], threshold: f64, min_tokens: i64, against: Option<&str>) {
+fn print_human(
+    pairs: &[DuplicatePair],
+    threshold: f64,
+    min_tokens: i64,
+    against: Option<&str>,
+    limit: usize,
+    truncated: bool,
+) {
     let scope = match against {
         Some(reference) => format!(", changed vs {}", reference),
         None => String::new(),
@@ -101,15 +126,18 @@ fn print_human(pairs: &[DuplicatePair], threshold: f64, min_tokens: i64, against
 
     if pairs.is_empty() {
         println!(
-            "No near-duplicate functions found (Jaccard >= {:.2}, >= {} tokens{}).",
-            threshold, min_tokens, scope
+            "No near-duplicate functions found (Jaccard >= {:.2}, >= {} tokens{}, limit {}).",
+            threshold, min_tokens, scope, limit
         );
+        if truncated {
+            println!("Search truncated at the requested limit of {}.", limit);
+        }
         return;
     }
 
     println!(
-        "Near-duplicate functions (Jaccard similarity of {}-token shingles >= {:.2}, >= {} tokens{})",
-        SHINGLE_K, threshold, min_tokens, scope
+        "Near-duplicate functions (Jaccard similarity of {}-token shingles >= {:.2}, >= {} tokens{}, limit {})",
+        SHINGLE_K, threshold, min_tokens, scope, limit
     );
     println!("{}", "=".repeat(100));
 
@@ -127,6 +155,9 @@ fn print_human(pairs: &[DuplicatePair], threshold: f64, min_tokens: i64, against
 
     println!("\n{}", "-".repeat(100));
     println!("Found {} near-duplicate pair(s).", pairs.len());
+    if truncated {
+        println!("Results truncated at the requested limit of {}.", limit);
+    }
     println!(
         "Note: idiomatic boilerplate can look structurally similar; raise --min-tokens to filter short functions."
     );
@@ -139,10 +170,12 @@ mod tests {
     #[test]
     fn test_fail_on_found_outcome_mapping() {
         // --fail-on-found: Findings only when pairs exist.
-        assert_eq!(outcome(true, 3), Outcome::Findings);
-        assert_eq!(outcome(true, 0), Outcome::Clean);
+        assert_eq!(outcome(true, 3, false), Outcome::Findings);
+        assert_eq!(outcome(true, 0, false), Outcome::Clean);
+        // An incomplete bounded search must also fail closed.
+        assert_eq!(outcome(true, 0, true), Outcome::Findings);
         // Default mode is informational regardless of pairs.
-        assert_eq!(outcome(false, 3), Outcome::Clean);
-        assert_eq!(outcome(false, 0), Outcome::Clean);
+        assert_eq!(outcome(false, 3, false), Outcome::Clean);
+        assert_eq!(outcome(false, 0, true), Outcome::Clean);
     }
 }
