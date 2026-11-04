@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Platform directories come from dirs 7 (was 6); cache and config locations are unchanged.
+- SQLite bindings: rusqlite 0.40 (bundled SQLite updated with it). No index format change.
 
 ### Security
 - Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
