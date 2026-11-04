@@ -47,8 +47,8 @@ binaries are built without it. If it does not compile on your machine, install w
 cargo install agentis-ctx --no-default-features
 ```
 
-In that build, call graphs, impact analysis, and complexity return empty results, and `ctx sql`
-and `ctx snapshot` exit with code 2.
+In that build, the commands that need DuckDB (impact analysis, complexity, `ctx sql`,
+`ctx snapshot`) exit with code 2 and an error that says DuckDB analytics are unavailable.
 
 ### From source
 
@@ -240,6 +240,9 @@ ctx semantic "error handling and recovery"
 ctx semantic "functions that validate user input"
 ctx semantic "database connection management"
 ```
+
+For air-gapped machines, stage the local model cache and optional DuckDB
+extension before disconnecting; see [Offline operation](./offline.md).
 
 ### Explore relationships
 
