@@ -362,7 +362,7 @@ pub fn extract_call_edges(
         let mut call_name: Option<&str> = None;
         let mut call_node: Option<Node> = None;
 
-        for capture in m.captures {
+        for capture in m.captures() {
             let capture_name = query.capture_names()[capture.index as usize];
             let node = capture.node;
             let text = node.utf8_text(source.as_bytes()).unwrap_or("");

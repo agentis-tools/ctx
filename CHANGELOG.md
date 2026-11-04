@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiling DuckDB from source, for development builds. The `duckdb` feature
   (the default) is unchanged and still bundles DuckDB.
 ### Changed
+- Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
+  through the new accessor; extraction output is unchanged.
 - Platform directories come from dirs 7 (was 6); cache and config locations are unchanged.
 - SQLite bindings: rusqlite 0.40 (bundled SQLite updated with it). No index format change.
 
