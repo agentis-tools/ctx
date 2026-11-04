@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
   through the new accessor; extraction output is unchanged.
+- SQLite bindings: rusqlite 0.40 (bundled SQLite updated with it). No index format change.
 
 ### Security
 - Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
