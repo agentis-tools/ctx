@@ -1,86 +1,93 @@
 //! Stub analytics implementation used when the `duckdb` feature is disabled.
 //!
 //! This avoids pulling in the DuckDB C++ dependency on platforms where it
-//! cannot compile (e.g. Windows MSVC). All methods return empty results so
-//! analytics-dependent commands degrade gracefully.
+//! cannot compile (e.g. Windows MSVC). The public method set remains available
+//! so callers can compile against either build, while runtime callers receive
+//! an actionable error instead of mistaking unavailable analytics for no data.
 
 use std::path::Path;
 
 use super::{CallGraphNode, ComplexityResult, FileStats, ImpactNode, LocatedImpactNode};
-use crate::error::Result;
+use crate::error::{CtxError, Result};
 
-/// Stub analytics engine that returns empty results.
+const UNAVAILABLE: &str = "DuckDB analytics are unavailable in this build; reinstall ctx with default features or build with --features duckdb";
+
+fn unavailable<T>() -> Result<T> {
+    Err(CtxError::Other(UNAVAILABLE.to_string()))
+}
+
+/// Stub analytics engine retained only to keep the no-DuckDB API compilable.
 pub struct Analytics;
 
 impl Analytics {
-    /// Create a stub (always succeeds).
+    /// Reject analytics operations with an actionable build-feature error.
     pub fn open(_root: &Path) -> Result<Self> {
-        Ok(Analytics)
+        unavailable()
     }
 
-    /// Call graph: returns empty list.
+    /// Call graph is unavailable without DuckDB.
     pub fn call_graph(&self, _start_name: &str, _max_depth: i32) -> Result<Vec<CallGraphNode>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Impact analysis: returns empty list.
+    /// Impact analysis is unavailable without DuckDB.
     pub fn impact_analysis(&self, _target_name: &str, _max_depth: i32) -> Result<Vec<ImpactNode>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Located impact analysis: returns empty list.
+    /// Located impact analysis is unavailable without DuckDB.
     pub fn impact_analysis_located(
         &self,
         _target_name: &str,
         _max_depth: i32,
     ) -> Result<Vec<LocatedImpactNode>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// File statistics: returns empty list.
+    /// File statistics are unavailable without DuckDB.
     pub fn file_statistics(&self) -> Result<Vec<FileStats>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Symbol summary: returns empty list.
+    /// Symbol summaries are unavailable without DuckDB.
     #[allow(dead_code)]
     pub fn symbol_summary(&self) -> Result<Vec<(String, i64, i64)>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Path existence check: always returns false.
+    /// Path queries are unavailable without DuckDB.
     #[allow(dead_code)]
     pub fn has_path(&self, _from_name: &str, _to_name: &str, _max_depth: i32) -> Result<bool> {
-        Ok(false)
+        unavailable()
     }
 
-    /// Most connected symbols: returns empty list.
+    /// Connectivity queries are unavailable without DuckDB.
     pub fn most_connected(&self, _limit: i32) -> Result<Vec<(String, String, i64, i64)>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Recursive functions: returns empty list.
+    /// Recursive-function queries are unavailable without DuckDB.
     #[allow(dead_code)]
     pub fn find_recursive_functions(&self) -> Result<Vec<(String, String)>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// File dependencies: returns empty list.
+    /// File-dependency queries are unavailable without DuckDB.
     pub fn file_dependencies(&self) -> Result<Vec<(String, String, i64)>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Complexity analysis: returns empty list.
+    /// Complexity analysis is unavailable without DuckDB.
     pub fn complexity_analysis(&self, _threshold: i64) -> Result<Vec<ComplexityResult>> {
-        Ok(Vec::new())
+        unavailable()
     }
 
-    /// Full call graph: returns empty list.
+    /// Full call graphs are unavailable without DuckDB.
     pub fn full_call_graph(
         &self,
         _max_depth: i32,
     ) -> Result<Vec<(String, String, String, String)>> {
-        Ok(Vec::new())
+        unavailable()
     }
 }
 
@@ -89,11 +96,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn located_impact_analysis_returns_empty_data() {
-        let analytics = Analytics::open(Path::new(".")).unwrap();
-        assert!(analytics
-            .impact_analysis_located("anything", 5)
-            .unwrap()
-            .is_empty());
+    fn analytics_unavailable_is_actionable() {
+        let err = Analytics::open(Path::new("."))
+            .err()
+            .expect("stub analytics must be unavailable");
+        assert!(err.to_string().contains("DuckDB analytics are unavailable"));
+        assert!(err.to_string().contains("default features"));
     }
 }

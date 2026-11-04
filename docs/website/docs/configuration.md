@@ -479,6 +479,9 @@ ctx --stats src/           # Print statistics
 | `CTX_GATE_BLOCKING` | `1` makes the generated Stop hooks block on failed gates | No |
 | `CTX_GATE_LOG` | Appends one JSONL record per `ctx score` gate evaluation (`1` or `true` writes `.ctx/gate-log.jsonl`; another value is a path) | No |
 | `CTX_SQL_MEMORY_LIMIT` | DuckDB memory limit for `ctx sql` (default `512MB`) | No |
+| `FASTEMBED_CACHE_DIR` | Staged fastembed model cache for the local provider | No |
+| `CTX_DUCKDB_EXTENSION_DIRECTORY` | Optional staged `sqlite_scanner` extension directory (zero-copy index attach) | No |
+| `CTX_OFFLINE` | `1` turns off the passive update check for air-gapped runs | No |
 | `CTX_NO_UPDATE_CHECK` | Any non-empty value turns off the passive update notice | No |
 | `CTX_LSP_REGISTRY_BASE_URL` | Alternate base URL for the `ctx lsp` community registry (mirrors, testing) | No |
 
