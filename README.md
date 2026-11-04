@@ -61,8 +61,9 @@ sudo dnf install ./ctx-VERSION-1.x86_64.rpm
 The Homebrew tap, Scoop bucket, and AUR package are published from separate package-index
 repositories. Prebuilt release binaries support Linux GNU x86-64, macOS Intel and Apple Silicon,
 and Windows x86-64. Linux ARM64 and musl binaries are not currently published. The Windows and
-Intel macOS binaries are built without DuckDB, so graph analytics return empty results there and
-`ctx sql` and `ctx snapshot` exit 2 (`ctx sql --schema` still works).
+Intel macOS binaries are built without DuckDB, so the commands that need it (impact analysis,
+complexity, `ctx sql`, `ctx snapshot`) exit 2 there with an error saying so (`ctx sql --schema`
+still works).
 
 ### Upgrading
 
@@ -376,6 +377,8 @@ schema.
 
 Commit `config.toml` and `rules.toml` so the team and CI share the same defaults and policy. Ignore
 generated data such as `codebase.sqlite`; ctx can rebuild it with `ctx index`.
+See [Offline operation](docs/offline.md) when model files or DuckDB extensions
+must be staged before disconnecting a machine.
 
 - Tree-sitter parses every supported language into symbols and relationship edges.
 - SQLite, with FTS5 and `sqlite-vec`, stores everything in one file.
@@ -397,6 +400,9 @@ Indexing respects `.gitignore`, an optional `.contextignore`, and 164 built-in i
 | `JEV_API_KEY` | API key for `ctx judge edges` (read only from the environment) |
 | `CTX_GATE_BLOCKING` | Set to `1` to make the generated Stop hook block until the gate passes |
 | `CTX_GATE_LOG` | Append one JSONL record per `ctx score` gate evaluation (`1` = `.ctx/gate-log.jsonl`, or a path) |
+| `FASTEMBED_CACHE_DIR` | Directory for staged fastembed model files used by the local provider |
+| `CTX_DUCKDB_EXTENSION_DIRECTORY` | Optional staged DuckDB extension directory; lets analytics attach the index without copying it |
+| `CTX_OFFLINE` | Set to `1` to suppress passive update checks during air-gapped operation |
 | `GITHUB_TOKEN` | Optional for `review` (uses `gh` CLI auth by default) |
 | `CTX_NO_UPDATE_CHECK` | Silence the passive "new release available" notice |
 
