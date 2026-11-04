@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
+use crate::limits::{cap_mcp_response, clamp_graph_depth, clamp_search_limit};
+
 /// Helper to create an invalid params error.
 pub fn invalid_params(msg: impl Into<String>) -> rmcp::ErrorData {
     rmcp::ErrorData::new(ErrorCode::INVALID_PARAMS, msg.into(), None)
@@ -22,6 +24,27 @@ pub fn parse_params<T: serde::de::DeserializeOwned>(
     let args = args.ok_or_else(|| invalid_params("Missing required parameters"))?;
 
     serde_json::from_value(Value::Object(args.clone())).map_err(|e| invalid_params(e.to_string()))
+}
+
+/// Apply the smaller MCP result cap after parsing untrusted tool arguments.
+pub fn bounded_mcp_limit(limit: Option<i32>) -> i32 {
+    clamp_search_limit(limit.unwrap_or(20)).min(crate::limits::MAX_MCP_SEARCH_RESULTS)
+}
+
+/// Clamp MCP graph traversal depth while preserving zero as no expansion.
+pub fn bounded_mcp_depth(depth: Option<i32>) -> i32 {
+    clamp_graph_depth(depth.unwrap_or(3))
+}
+
+/// Bound the number of initial semantic matches used by smart context.
+pub fn bounded_mcp_top(top: Option<usize>) -> usize {
+    top.unwrap_or(10)
+        .min(crate::limits::MAX_MCP_SEARCH_RESULTS as usize)
+}
+
+/// Bound text returned through an MCP tool response.
+pub fn bounded_mcp_output(output: String) -> String {
+    cap_mcp_response(output)
 }
 
 /// Helper to create a JSON schema object from a type.
