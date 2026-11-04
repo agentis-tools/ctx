@@ -1,7 +1,7 @@
 //! `ctx snapshot` on a build without the duckdb feature: the CLI surface
 //! still parses (help output stays stable on Windows), but running it is an
 //! operational error (exit 2) pointing at the missing feature.
-#![cfg(not(feature = "duckdb"))]
+#![cfg(not(any(feature = "duckdb", feature = "duckdb-prebuilt")))]
 
 use assert_cmd::Command;
 use predicates::prelude::*;

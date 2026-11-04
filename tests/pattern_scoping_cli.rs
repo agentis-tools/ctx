@@ -129,7 +129,7 @@ fn diff_scopes_changes_deletions_and_both_sides_of_renames() {
     assert!(stderr.contains("docs/renamed.rs"), "{stderr}");
     assert!(!stderr.contains("docs/outside.md"), "{stderr}");
 
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     {
         let output = ctx(&repo.root, &["diff", "HEAD", "--summary", "--no-tree", "."]);
         assert_success(&output);

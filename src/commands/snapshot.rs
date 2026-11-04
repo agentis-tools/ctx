@@ -9,28 +9,31 @@
 
 use ctx::error::Result;
 use ctx::exit::Outcome;
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 use ctx::snapshot::{BackfillOptions, CaptureMode, CaptureOptions, SnapshotReport, SNAPSHOTS_DIR};
 
 use crate::cli::SnapshotCommand;
 
 /// Run `ctx snapshot [backfill]` in the current directory.
 // The flag arguments are only read on the `duckdb` execution path.
-#[cfg_attr(not(feature = "duckdb"), allow(unused_variables))]
+#[cfg_attr(
+    not(any(feature = "duckdb", feature = "duckdb-prebuilt")),
+    allow(unused_variables)
+)]
 pub fn run_snapshot(
     cmd: Option<SnapshotCommand>,
     force: bool,
     churn_window: &str,
     json: bool,
 ) -> Result<Outcome> {
-    #[cfg(not(feature = "duckdb"))]
+    #[cfg(not(any(feature = "duckdb", feature = "duckdb-prebuilt")))]
     {
         Err(ctx::error::CtxError::Other(
             "ctx snapshot requires the duckdb feature; reinstall with default features".into(),
         ))
     }
 
-    #[cfg(feature = "duckdb")]
+    #[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
     {
         let root = std::env::current_dir()?;
         let out_dir = root.join(SNAPSHOTS_DIR);
@@ -103,7 +106,7 @@ pub fn run_snapshot(
 }
 
 /// One concise human line per partition.
-#[cfg(feature = "duckdb")]
+#[cfg(any(feature = "duckdb", feature = "duckdb-prebuilt"))]
 fn print_report(report: &SnapshotReport) {
     let short = &report.commit_sha[..12.min(report.commit_sha.len())];
     if report.skipped_existing {

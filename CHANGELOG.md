@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `duckdb-prebuilt` Cargo feature: DuckDB analytics linked against a prebuilt
+  `libduckdb` (`DUCKDB_DOWNLOAD_LIB=1` or `DUCKDB_LIB_DIR`) instead of
+  compiling DuckDB from source, for development builds. The `duckdb` feature
+  (the default) is unchanged and still bundles DuckDB.
 ### Changed
 - Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
   through the new accessor; extraction output is unchanged.
