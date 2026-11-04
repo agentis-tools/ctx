@@ -11,6 +11,7 @@ use ctx::db;
 use ctx::error::Result;
 use ctx::index;
 use ctx::json::SymbolRef;
+use ctx::limits::{clamp_graph_depth, clamp_search_limit};
 use ctx::utils::{truncate_path, truncate_str};
 
 /// Handle 'query find' subcommand.
@@ -22,6 +23,7 @@ fn query_find(
     file: Option<String>,
     json: bool,
 ) -> Result<()> {
+    let limit = clamp_search_limit(limit);
     let symbols = db.find_symbols_filtered(pattern, limit, file.as_deref(), kind.as_deref())?;
 
     if json {
@@ -172,7 +174,7 @@ fn collect_callers(
     let mut callers = Vec::new();
     let mut visited = HashSet::from([sym.id.clone()]);
     let mut queue = VecDeque::from([(sym.id.clone(), 0_u32)]);
-    let max_depth = u32::try_from(depth).unwrap_or(0);
+    let max_depth = clamp_graph_depth(depth) as u32;
 
     while let Some((target_id, parent_distance)) = queue.pop_front() {
         if parent_distance >= max_depth {
@@ -468,7 +470,7 @@ fn collect_deps(
 
     let sym = symbols.into_iter().next().expect("checked non-empty");
     let mut deps = Vec::new();
-    let max_depth = u32::try_from(depth).unwrap_or(0);
+    let max_depth = clamp_graph_depth(depth) as u32;
     let mut visited = HashSet::from([sym.id.clone()]);
     let mut queue = VecDeque::from([(sym.clone(), 0_u32)]);
 
@@ -750,18 +752,32 @@ pub fn run_query(query: QueryCommand, json: bool) -> Result<()> {
             function,
             depth,
             file,
-        } => query_callers(&db, &function, file.as_deref(), depth, json),
+        } => query_callers(
+            &db,
+            &function,
+            file.as_deref(),
+            clamp_graph_depth(depth),
+            json,
+        ),
         QueryCommand::Deps {
             symbol,
             depth,
             file,
             kind,
-        } => query_deps(&db, &symbol, file.as_deref(), kind.as_deref(), depth, json),
+        } => query_deps(
+            &db,
+            &symbol,
+            file.as_deref(),
+            kind.as_deref(),
+            clamp_graph_depth(depth),
+            json,
+        ),
         QueryCommand::Graph {
             start,
             depth,
             output,
         } => {
+            let depth = clamp_graph_depth(depth);
             // Use DuckDB analytics for recursive graph traversal
             let analytics = analytics::Analytics::open(&root)?;
 
@@ -817,6 +833,7 @@ pub fn run_query(query: QueryCommand, json: bool) -> Result<()> {
         }
 
         QueryCommand::Impact { symbol, depth } => {
+            let depth = clamp_graph_depth(depth);
             // Use DuckDB analytics for recursive impact analysis
             let analytics = analytics::Analytics::open(&root)?;
 

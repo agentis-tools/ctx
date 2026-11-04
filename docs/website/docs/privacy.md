@@ -53,10 +53,14 @@ explicitly configure:
   relevant source-code or query text, to OpenAI's API. OpenAI handles that data
   under its own terms and privacy policy.
 - **Ollama or another configured endpoint.** ctx sends embedding inputs to the
-  endpoint you configure. A local Ollama endpoint keeps that traffic local;
-  a remote endpoint is governed by its operator.
+  endpoint you configure. A committed `.ctx/config.toml` cannot choose an
+  Ollama provider, model, or host unless you pass `--trust-project`, so review
+  it first. `OLLAMA_HOST` from your environment is your own choice, but when a
+  bearer token is set the host must use HTTPS. A local Ollama endpoint keeps
+  that traffic local; a remote endpoint is governed by its operator.
 - **Local embedding model download.** The local embedding provider may download
-  model files from its model host on first use. This downloads model data; it
+  model files from its model host on first use, into your per-user ctx cache.
+  This downloads model data; it
   does not upload your repository for embedding.
 - **Model-assisted judgments (`ctx judge`, opt-in).** When you run
   `ctx judge edges` with `JEV_API_KEY` set, or enable `[judge] edges = true`

@@ -20,6 +20,10 @@
 //! ```bash
 //! ctx serve --mcp
 //! ```
+//! Project-controlled embedding settings require an explicit opt-in:
+//! ```bash
+//! ctx serve --mcp --trust-project
+//! ```
 //!
 //! Configure Claude Desktop by adding to `claude_desktop_config.json`:
 //! ```json
@@ -37,7 +41,7 @@
 pub mod server;
 pub mod tools;
 
-pub use server::{run_mcp_server, CtxServer};
+pub use server::{run_mcp_server, run_mcp_server_with_project_trust, CtxServer};
 
 #[cfg(test)]
 mod tests {

@@ -259,7 +259,7 @@ Each provider and model produces vectors in a different space. Semantic commands
 | OpenAI | text-embedding-3-small | 1536 | `OPENAI_API_KEY` env var |
 | Ollama | `nomic-embed-text` (default) | probed from model | local/remote Ollama server (`OLLAMA_HOST`, default `http://localhost:11434`) |
 
-Select one with `--provider <local|openai|ollama>`. See [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults.
+Select one with `--provider <local|openai|ollama>`. See [Configuration](./configuration.md#embedding-providers) for models, hosts, and `.ctx/config.toml` defaults. ctx uses a provider from the committed project config only with the global `--trust-project` flag.
 
 ### Embedding options
 
