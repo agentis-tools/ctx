@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not take a token budget instead of being ignored (#102).
 
 ### Fixed
+- `ctx index` no longer panics on a Python docstring whose indentation contains
+  a non-ASCII space such as U+00A0. The docstring dedent counted indentation in
+  bytes and could slice inside a character, which aborted the whole index (for
+  example on astral-sh/ruff). Indentation is now counted in characters; ASCII
+  docstrings clean up exactly as before.
 - Claude Code hooks now deliver their findings to the model. Claude Code
   only writes a PostToolUse hook's plain stdout to its debug log, so the
   `ctx check` report never reached the agent (measured in ctx-bench: 111
