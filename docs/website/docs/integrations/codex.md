@@ -38,7 +38,7 @@ ctx harness init --target codex --mode plugin
 codex plugin marketplace add ./
 ```
 
-Or install the canonical v0.4.0 plugin from GitHub:
+Or install the canonical v0.5.0 plugin from GitHub:
 
 ```bash
 codex plugin marketplace add agentis-tools/ctx --ref main --sparse plugins/codex/ctx

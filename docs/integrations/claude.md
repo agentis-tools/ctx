@@ -30,10 +30,10 @@ To package the same integration as a distributable Claude Code plugin (hooks, sk
 ctx harness init --mode plugin
 ```
 
-To use the published v0.4.0 plugin, load its release ZIP for a session:
+To use the published v0.5.0 plugin, load its release ZIP for a session:
 
 ```bash
-claude --plugin-url https://github.com/agentis-tools/ctx/releases/download/v0.4.0/ctx-claude-plugin-0.4.0.zip
+claude --plugin-url https://github.com/agentis-tools/ctx/releases/download/v0.5.0/ctx-claude-plugin-0.5.0.zip
 ```
 
 For development, clone the repository and run `claude --plugin-dir ./plugins/claude/ctx`. The plugin source is [`plugins/claude/ctx`](../../plugins/claude/ctx). It runs locally and calls the `ctx` binary on `PATH`. The published plugin does not configure MCP, because ctx adds MCP wiring only when the generating binary was built with `--features mcp`.
