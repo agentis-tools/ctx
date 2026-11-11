@@ -12,52 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `libduckdb` (`DUCKDB_DOWNLOAD_LIB=1` or `DUCKDB_LIB_DIR`) instead of
   compiling DuckDB from source, for development builds. The `duckdb` feature
   (the default) is unchanged and still bundles DuckDB.
-### Changed
-- Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
-  through the new accessor; extraction output is unchanged.
-- Platform directories come from dirs 7 (was 6); cache and config locations are unchanged.
-- SQLite bindings: rusqlite 0.40 (bundled SQLite updated with it). No index format change.
-
-### Security
-- Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
-  0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
-  decompression, ServerHello downgrade, distrusted intermediates),
-  webpki-roots / webpki-root-certs 1.0.11 (distrusted emSign roots), tokio
-  1.54.1 (`AsyncFd` I/O safety), zip 9 (symlink and SUID extraction
-  advisories; ctx never calls `ZipArchive::extract`) for the Windows
-  self-updater and for DuckDB's build, which moves to 1.10506.1 (engine
-  v1.5.4 -> v1.5.6), and the yanked clipboard-win 5.4.1. The ring and rmcp
-  advisory exceptions are removed: the locked versions are no longer
-  affected. Both lockfiles (root and `perf/`) are updated.
-- Dependency security updates (RustSec): rusqlite 0.41 with libsqlite3-sys
-  0.39.1 (RUSTSEC-2026-0459, CVE-2026-119375 in the bundled SQLite, reachable
-  by opening a database whose `-wal` file a less trusted party wrote; ctx's
-  index lives in the repository's `.ctx/` directory) and rmcp 3.9.0 (RUSTSEC-2026-0462,
-  unbounded response buffering in the Streamable HTTP clients; ctx uses only
-  the stdio server transport, so it was not affected). Both lockfiles are
-  updated.
-- Dependency security update (RustSec): url 2.5.9 (RUSTSEC-2026-0592,
-  unbounded recursion in `Url::origin()` on nested `blob:` URLs; ctx does not
-  call `Url::origin()`, it is reached only through reqwest). Both lockfiles are
-  updated.
-- Dependency policy: a dated `cargo deny` exception for RUSTSEC-2026-0543
-  (chrono unmaintained; no vulnerability, no patched version). chrono reaches
-  ctx only through DuckDB's Arrow dependency and cannot be replaced from
-  here; the exception is reassessed no later than 2027-03-31.
-
-### Changed
-- The MCP server (`mcp` feature) is built on rmcp 3. The advertised MCP
-  protocol version (2025-11-25) and the eight tools are unchanged; library
-  users who implement against `ctx::mcp` see rmcp 3 types.
-- Cold `ctx index` no longer builds a new parser (and recompiles every
-  language's queries) for each file in the parallel path; parsers are reused
-  per worker. On the 2,000-file perf fixture a cold index drops from 38 s to
-  11 s on a 2-core machine with identical symbols and edges (#96).
-- `ctx score --against` enumerates duplicate candidates only for pairs with an
-  endpoint in a changed file instead of building every candidate pair in the
-  repository and filtering afterwards. `score_3_changed` on the perf fixture
-  drops from 5.5 s to 1.2 s with identical output (#23).
-### Added
 - `ctx grep <PATTERN> [PATHS]...`: ripgrep-style text search (built on
   ripgrep's own `grep-searcher`/`grep-regex`/`ignore` crates) that tags every
   match with what the index knows about it: `def`, `ref` (with the resolved
@@ -96,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous behavior. The MCP `smart_context` tool applies the same limit,
   and the global `--max-tokens` flag is now rejected with an error on commands that do
   not take a token budget instead of being ignored (#102).
+- BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
+- Parsing uses tree-sitter 0.27 (was 0.26). Query-match captures are read
+  through the new accessor; extraction output is unchanged.
+- Platform directories come from dirs 7 (was 6); cache and config locations are unchanged.
+- SQLite bindings: rusqlite 0.40 (bundled SQLite updated with it). No index format change.
+- The MCP server (`mcp` feature) is built on rmcp 3. The advertised MCP
+  protocol version (2025-11-25) and the eight tools are unchanged; library
+  users who implement against `ctx::mcp` see rmcp 3 types.
+- Cold `ctx index` no longer builds a new parser (and recompiles every
+  language's queries) for each file in the parallel path; parsers are reused
+  per worker. On the 2,000-file perf fixture a cold index drops from 38 s to
+  11 s on a 2-core machine with identical symbols and edges (#96).
+- `ctx score --against` enumerates duplicate candidates only for pairs with an
+  endpoint in a changed file instead of building every candidate pair in the
+  repository and filtering afterwards. `score_3_changed` on the perf fixture
+  drops from 5.5 s to 1.2 s with identical output (#23).
 
 ### Fixed
 - `ctx index` no longer panics on a Python docstring whose indentation contains
@@ -250,6 +220,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously stored false edges, because resolution only fills targets that are
   still unset. Delete `.ctx/codebase.sqlite` and reindex to pick up the fix.
 
+### Security
+- Dependency security updates (RustSec): rustls 0.23.46 and rustls-webpki
+  0.103.16 (TLS secret exposure in `Debug`, ECH buffering, Brotli certificate
+  decompression, ServerHello downgrade, distrusted intermediates),
+  webpki-roots / webpki-root-certs 1.0.11 (distrusted emSign roots), tokio
+  1.54.1 (`AsyncFd` I/O safety), zip 9 (symlink and SUID extraction
+  advisories; ctx never calls `ZipArchive::extract`) for the Windows
+  self-updater and for DuckDB's build, which moves to 1.10506.1 (engine
+  v1.5.4 -> v1.5.6), and the yanked clipboard-win 5.4.1. The ring and rmcp
+  advisory exceptions are removed: the locked versions are no longer
+  affected. Both lockfiles (root and `perf/`) are updated.
+- Dependency security updates (RustSec): rusqlite 0.41 with libsqlite3-sys
+  0.39.1 (RUSTSEC-2026-0459, CVE-2026-119375 in the bundled SQLite, reachable
+  by opening a database whose `-wal` file a less trusted party wrote; ctx's
+  index lives in the repository's `.ctx/` directory) and rmcp 3.9.0 (RUSTSEC-2026-0462,
+  unbounded response buffering in the Streamable HTTP clients; ctx uses only
+  the stdio server transport, so it was not affected). Both lockfiles are
+  updated.
+- Dependency security update (RustSec): url 2.5.9 (RUSTSEC-2026-0592,
+  unbounded recursion in `Url::origin()` on nested `blob:` URLs; ctx does not
+  call `Url::origin()`, it is reached only through reqwest). Both lockfiles are
+  updated.
+- Dependency policy: a dated `cargo deny` exception for RUSTSEC-2026-0543
+  (chrono unmaintained; no vulnerability, no patched version). chrono reaches
+  ctx only through DuckDB's Arrow dependency and cannot be replaced from
+  here; the exception is reassessed no later than 2027-03-31.
+
 ### Documentation
 - Refreshed README measurements, token-budget wording, LSP guidance, and
   library version examples; governance now checks README version references
@@ -264,9 +261,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrote the `docs/README.md` command reference to link per-command pages
   instead of copying outdated `--help` text, and edited prose for plain,
   direct wording.
-- BREAKING: `ctx smart` now exits with operational-error code 2 (was 0 with empty output) when embeddings are missing, including a structured JSON error, and semantic commands reject mismatched provider/model/dimension corpora instead of ranking against incompatible vectors. `ctx embed --force` clears the complete stored corpus and stale vector cache before rebuilding for the requested provider; it also applies to watch-mode startup (#98, #106).
-
-### Documentation
 - Added an offline operation guide: staging the fastembed model cache, and an
   optional staged `sqlite_scanner` extension (`CTX_DUCKDB_EXTENSION_DIRECTORY`)
   for a zero-copy index attach. `CTX_OFFLINE=1` suppresses the passive update
