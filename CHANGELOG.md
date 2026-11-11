@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v1.5.4 -> v1.5.6), and the yanked clipboard-win 5.4.1. The ring and rmcp
   advisory exceptions are removed: the locked versions are no longer
   affected. Both lockfiles (root and `perf/`) are updated.
+- Dependency security updates (RustSec): rusqlite 0.41 with libsqlite3-sys
+  0.39.1 (RUSTSEC-2026-0459, CVE-2026-119375 in the bundled SQLite, reachable
+  by opening a database whose `-wal` file a less trusted party wrote; ctx's
+  index lives in the repository's `.ctx/` directory) and rmcp 3.9.0 (RUSTSEC-2026-0462,
+  unbounded response buffering in the Streamable HTTP clients; ctx uses only
+  the stdio server transport, so it was not affected). Both lockfiles are
+  updated.
 
 ### Changed
 - The MCP server (`mcp` feature) is built on rmcp 3. The advertised MCP
