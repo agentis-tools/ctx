@@ -1,6 +1,6 @@
 [package]
 name = "agentis-ctx"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.91"
 description = "Fast CLI tool that generates AI-ready context from your codebase, with built-in code intelligence"
