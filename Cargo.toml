@@ -40,7 +40,7 @@ grep-regex = "0.1"
 grep-searcher = "0.1"
 
 # Code Intelligence (SQLite Foundation + sqlite-vec)
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 sqlite-vec = "0.1.6"
 zerocopy = { version = "0.8", features = ["derive"] }
 sha2 = "0.11"
