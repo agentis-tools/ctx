@@ -87,7 +87,7 @@ cargo install agentis-ctx --features mcp
 
 ```bash
 ctx --version
-# ctx 0.4.0
+# ctx 0.5.0
 ```
 
 ## Part 1: Context generation
