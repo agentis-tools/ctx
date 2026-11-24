@@ -121,8 +121,8 @@ fastembed = "=5.4.0"
 duckdb = { version = "1.0", optional = true }
 
 # Phase 4: File watching for incremental updates
-notify = "8.2"
-notify-debouncer-mini = "0.7"
+notify = "9.0"
+notify-debouncer-mini = "0.8"
 dirs = "7.0.0"
 
 # Secure randomized, exclusive temporary files for self-update staging and
