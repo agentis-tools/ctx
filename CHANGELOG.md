@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unbounded response buffering in the Streamable HTTP clients; ctx uses only
   the stdio server transport, so it was not affected). Both lockfiles are
   updated.
+- Dependency security update (RustSec): url 2.5.9 (RUSTSEC-2026-0592,
+  unbounded recursion in `Url::origin()` on nested `blob:` URLs; ctx does not
+  call `Url::origin()`, it is reached only through reqwest). Both lockfiles are
+  updated.
+- Dependency policy: a dated `cargo deny` exception for RUSTSEC-2026-0543
+  (chrono unmaintained; no vulnerability, no patched version). chrono reaches
+  ctx only through DuckDB's Arrow dependency and cannot be replaced from
+  here; the exception is reassessed no later than 2027-03-31.
 
 ### Changed
 - The MCP server (`mcp` feature) is built on rmcp 3. The advertised MCP
